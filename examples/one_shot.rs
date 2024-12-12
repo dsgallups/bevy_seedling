@@ -14,9 +14,7 @@ fn main() {
             |server: Res<AssetServer>, mut commands: Commands| {
                 info!("Starting up");
 
-                commands
-                    .spawn(SamplePlayer::new(server.load("snd_wobbler.wav")))
-                    .connect_to(MainBus);
+                commands.spawn(SamplePlayer::new(server.load("snd_wobbler.wav")));
             },
         )
         .run();
