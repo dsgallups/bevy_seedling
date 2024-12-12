@@ -1,5 +1,5 @@
 use bevy::{log::LogPlugin, prelude::*};
-use bevy_seedling::{sample::SamplePlayer, ConnectNode, MainBus, SeedlingPlugin};
+use bevy_seedling::{sample::SamplePlayer, SeedlingPlugin};
 
 fn main() {
     App::new()

@@ -1,4 +1,4 @@
-use crate::{AudioContext, InternedNodeLabel, MainBus, NodeLabel};
+use crate::{label::InternedNodeLabel, AudioContext, MainBus, NodeLabel};
 use bevy_ecs::prelude::*;
 use bevy_log::{error, warn};
 use bevy_utils::HashMap;

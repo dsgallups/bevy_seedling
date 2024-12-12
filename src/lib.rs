@@ -2,14 +2,16 @@
 
 use bevy_app::{Last, Plugin};
 use bevy_asset::AssetApp;
-use bevy_ecs::{intern::Interned, prelude::*};
+use bevy_ecs::prelude::*;
 use firewheel::FirewheelConfig;
 
 pub mod context;
+pub mod label;
 pub mod node;
 pub mod sample;
 
 pub use context::AudioContext;
+pub use label::{MainBus, NodeLabel};
 pub use node::{ConnectNode, ConnectTarget, Node};
 
 /// Sets for all `bevy_seedling` systems.
@@ -29,43 +31,6 @@ pub enum SeedlingSystems {
     Queue,
     /// The audio context is updated and flushed.
     Flush,
-}
-
-bevy_ecs::define_label!(
-    /// A label for addressing Firewheel audio nodes.
-    NodeLabel,
-    NODE_LABEL_INTERNER
-);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct MainBus;
-
-impl NodeLabel for MainBus {
-    fn dyn_clone(&self) -> Box<dyn NodeLabel> {
-        Box::new(::core::clone::Clone::clone(self))
-    }
-
-    fn as_dyn_eq(&self) -> &dyn bevy_ecs::schedule::DynEq {
-        self
-    }
-
-    fn dyn_hash(&self, mut state: &mut dyn ::core::hash::Hasher) {
-        let ty_id = ::core::any::TypeId::of::<Self>();
-        ::core::hash::Hash::hash(&ty_id, &mut state);
-        ::core::hash::Hash::hash(self, &mut state);
-    }
-}
-
-pub type InternedNodeLabel = Interned<dyn NodeLabel>;
-
-#[derive(Component)]
-pub struct InternedLabel(InternedNodeLabel);
-
-impl InternedLabel {
-    #[inline(always)]
-    pub fn new(label: impl NodeLabel) -> Self {
-        Self(label.intern())
-    }
 }
 
 #[derive(Default)]
