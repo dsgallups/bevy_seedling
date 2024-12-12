@@ -1,7 +1,10 @@
-use bevy_asset::{Asset, AssetLoader, Handle};
+use crate::{AudioContext, Node};
+use bevy_asset::{Asset, AssetLoader, Assets, Handle};
 use bevy_ecs::prelude::*;
+use bevy_log::{error, info};
 use bevy_reflect::TypePath;
 use firewheel::sample_resource::SampleResource;
+use firewheel::{clock::EventDelay, node::NodeEvent, sampler::one_shot::OneShotSamplerNode};
 use std::sync::Arc;
 
 #[derive(Asset, TypePath, Clone)]
@@ -88,4 +91,75 @@ impl AssetLoader for SampleLoader {
     fn extensions(&self) -> &[&str] {
         &["wav"]
     }
+}
+
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+pub struct LoadingSample;
+
+pub(crate) fn on_add_sample(
+    q: Query<(Entity, &SamplePlayer), Without<Node>>,
+    mut context: ResMut<AudioContext>,
+    mut commands: Commands,
+    assets: Res<Assets<Sample>>,
+) {
+    context.with(|context| {
+        for (entity, player) in q.iter() {
+            if let Some(graph) = context.graph_mut() {
+                let node = match graph
+                    .add_node(OneShotSamplerNode::new(Default::default()).into(), None)
+                {
+                    Ok(node) => node,
+                    Err(e) => {
+                        error!("failed to insert sample node: {e}");
+                        continue;
+                    }
+                };
+
+                if let Some(asset) = assets.get(&player.0) {
+                    info!("queuing event");
+                    graph.queue_event(NodeEvent {
+                        node_id: node,
+                        delay: EventDelay::Immediate,
+                        event: firewheel::node::NodeEventType::PlaySample {
+                            sample: asset.get(),
+                            normalized_volume: 1.0,
+                            stop_other_voices: false,
+                        },
+                    });
+
+                    commands.entity(entity).insert(Node(node));
+                } else {
+                    commands.entity(entity).insert((LoadingSample, Node(node)));
+                }
+            }
+        }
+    });
+}
+
+pub(crate) fn trigger_pending_samples(
+    q: Query<(Entity, &SamplePlayer, &Node), With<LoadingSample>>,
+    mut context: ResMut<AudioContext>,
+    mut commands: Commands,
+    assets: Res<Assets<Sample>>,
+) {
+    context.with(|context| {
+        for (entity, player, node) in q.iter() {
+            if let Some(asset) = assets.get(&player.0) {
+                if let Some(graph) = context.graph_mut() {
+                    graph.queue_event(NodeEvent {
+                        node_id: node.0,
+                        delay: EventDelay::Immediate,
+                        event: firewheel::node::NodeEventType::PlaySample {
+                            sample: asset.get(),
+                            normalized_volume: 1.0,
+                            stop_other_voices: false,
+                        },
+                    });
+                }
+
+                commands.entity(entity).remove::<LoadingSample>();
+            }
+        }
+    });
 }

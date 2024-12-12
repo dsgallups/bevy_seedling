@@ -1,5 +1,5 @@
 use bevy::{log::LogPlugin, prelude::*};
-use bevy_seedling::{sample::SamplePlayer, SeedlingPlugin};
+use bevy_seedling::{sample::SamplePlayer, ConnectNode, MainBus, SeedlingPlugin};
 
 fn main() {
     App::new()
@@ -14,7 +14,9 @@ fn main() {
             |server: Res<AssetServer>, mut commands: Commands| {
                 info!("Starting up");
 
-                commands.spawn(SamplePlayer::new(server.load("snd_wobbler.wav")));
+                commands
+                    .spawn(SamplePlayer::new(server.load("snd_wobbler.wav")))
+                    .connect_to(MainBus);
             },
         )
         .run();
