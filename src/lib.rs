@@ -1,5 +1,7 @@
 #![allow(clippy::type_complexity)]
 
+extern crate self as bevy_seedling;
+
 use bevy_app::{Last, Plugin};
 use bevy_asset::AssetApp;
 use bevy_ecs::prelude::*;
@@ -8,11 +10,14 @@ use firewheel::FirewheelConfig;
 pub mod context;
 pub mod label;
 pub mod node;
+pub mod param;
 pub mod sample;
 
 pub use context::AudioContext;
 pub use label::{MainBus, NodeLabel};
 pub use node::{ConnectNode, ConnectTarget, Node};
+
+pub use seedling_macros::{AudioParam, NodeLabel};
 
 /// Sets for all `bevy_seedling` systems.
 ///
