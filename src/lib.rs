@@ -10,11 +10,12 @@ use firewheel::FirewheelConfig;
 pub mod context;
 pub mod label;
 pub mod node;
-pub mod param;
+// pub mod param;
 pub mod sample;
 
 pub use context::AudioContext;
 pub use label::{MainBus, NodeLabel};
+use node::RegisterNode;
 pub use node::{ConnectNode, ConnectTarget, Node};
 
 pub use seedling_macros::{AudioParam, NodeLabel};
@@ -56,6 +57,7 @@ impl Plugin for SeedlingPlugin {
         let node_map = node::NodeMap::new(out_id);
 
         app.insert_resource(context)
+            .init_resource::<node::ParamSystems>()
             .configure_sets(
                 Last,
                 (
@@ -70,16 +72,21 @@ impl Plugin for SeedlingPlugin {
             .init_resource::<node::PendingRemovals>()
             .register_asset_loader(sample::SampleLoader { sample_rate })
             .init_asset::<sample::Sample>()
+            .register_node::<sample::SamplePlayer>()
             .add_systems(
                 Last,
                 (
-                    sample::on_add_sample.in_set(SeedlingSystems::Acquire),
+                    sample::on_add.in_set(SeedlingSystems::Acquire),
                     node::auto_connect
                         .before(SeedlingSystems::Connect)
                         .after(SeedlingSystems::Acquire),
                     node::process_connections.in_set(SeedlingSystems::Connect),
                     sample::trigger_pending_samples.in_set(SeedlingSystems::Queue),
-                    (node::process_removals, context::update_context)
+                    (
+                        node::process_removals,
+                        node::flush_events,
+                        context::update_context,
+                    )
                         .chain()
                         .in_set(SeedlingSystems::Flush),
                 ),

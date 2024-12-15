@@ -1,8 +1,114 @@
-use crate::{label::InternedNodeLabel, AudioContext, MainBus, NodeLabel};
-use bevy_ecs::prelude::*;
+use crate::{label::InternedNodeLabel, AudioContext, MainBus, NodeLabel, SeedlingSystems};
+use bevy_app::Last;
+use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
 use bevy_log::{error, warn};
-use bevy_utils::HashMap;
-use firewheel::node::NodeID;
+use bevy_utils::{HashMap, HashSet};
+use core::any::TypeId;
+use firewheel::node::{AudioNode, AudioParam, EventData, NodeEvent, NodeID, ParamEvent};
+
+pub trait EcsNode: Component {
+    fn node(&self) -> Box<dyn AudioNode>;
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct ParamSystems(HashSet<TypeId>);
+
+#[derive(Component)]
+#[component(on_insert = insert_params::<T>)]
+#[require(Events)]
+pub struct Params<T: AudioParam + Send + Sync + Clone + 'static>(pub T);
+
+fn insert_params<T: AudioParam + Send + Sync + Clone + 'static>(
+    mut world: DeferredWorld,
+    entity: Entity,
+    id: ComponentId,
+) {
+    let params = world.get::<Params<T>>(entity).unwrap();
+    let diff = ParamsDiff(params.0.clone());
+
+    let mut commands = world.commands();
+    commands.entity(entity).insert(diff);
+
+    commands.queue(|world: &mut World| {
+        let id = TypeId::of::<T>();
+        let mut systems = world.get_resource_or_init::<ParamSystems>();
+        let added = systems.0.insert(id);
+
+        if added {
+            world.schedule_scope(Last, |world, schedule| {
+                schedule.add_systems(generate_param_events::<T>);
+            });
+        }
+    });
+}
+
+#[derive(Component)]
+pub struct ParamsDiff<T>(T);
+
+#[derive(Component, Default)]
+pub struct Events(Vec<EventData>);
+
+impl Events {
+    pub fn push(&mut self, event: EventData) {
+        self.0.push(event);
+    }
+
+    pub fn push_custom<T: Send + Sync + 'static>(&mut self, value: T) {
+        self.0.push(EventData::Custom(Box::new(value)));
+    }
+}
+
+fn generate_param_events<T: AudioParam + Clone + Send + Sync + 'static>(
+    mut nodes: Query<(&mut Params<T>, &mut ParamsDiff<T>, &mut Events)>,
+) {
+    for (mut params, mut diff, mut events) in nodes.iter_mut() {
+        params.0.to_messages(
+            &diff.0,
+            |event| events.push(EventData::Parameter(event)),
+            Default::default(),
+        );
+
+        diff.0 = params.0.clone();
+    }
+}
+
+fn acquire_id<T: EcsNode>(
+    q: Query<(Entity, &T), Without<Node>>,
+    mut context: ResMut<AudioContext>,
+    mut commands: Commands,
+) {
+    context.with(|context| {
+        if let Some(graph) = context.graph_mut() {
+            for (entity, container) in q.iter() {
+                let node = match graph.add_node(container.node(), None) {
+                    Ok(node) => node,
+                    Err(e) => {
+                        error!("failed to insert node: {e}");
+                        continue;
+                    }
+                };
+
+                commands.entity(entity).insert(Node(node));
+            }
+        }
+    });
+}
+
+pub trait RegisterNode {
+    fn register_node<T: EcsNode>(&mut self) -> &mut Self;
+}
+
+impl RegisterNode for bevy_app::App {
+    fn register_node<T: EcsNode>(&mut self) -> &mut Self {
+        self.add_systems(
+            Last,
+            (
+                acquire_id::<T>.in_set(SeedlingSystems::Acquire),
+                // generate_param_events::<T::Params>.in_set(SeedlingSystems::Queue),
+            ),
+        )
+    }
+}
 
 /// A newtype wrapper aound [firewheel::node::NodeID].
 ///
@@ -201,6 +307,24 @@ pub(crate) fn process_connections(
                         }
                     }
                 });
+            }
+        }
+    });
+}
+
+pub(crate) fn flush_events(
+    mut nodes: Query<(&Node, &mut Events)>,
+    mut context: ResMut<AudioContext>,
+) {
+    context.with(|context| {
+        if let Some(graph) = context.graph_mut() {
+            for (node, mut events) in nodes.iter_mut() {
+                for event in events.0.drain(..) {
+                    graph.queue_event(NodeEvent {
+                        node_id: node.0,
+                        event,
+                    });
+                }
             }
         }
     });

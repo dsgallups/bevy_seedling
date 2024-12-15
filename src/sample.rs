@@ -1,8 +1,10 @@
+use crate::node::{EcsNode, Events};
 use crate::{AudioContext, Node};
 use bevy_asset::{Asset, AssetLoader, Assets, Handle};
 use bevy_ecs::prelude::*;
 use bevy_log::{error, info};
 use bevy_reflect::TypePath;
+use firewheel::node::AudioNode;
 use firewheel::sample_resource::SampleResource;
 use firewheel::{clock::EventDelay, node::NodeEvent, sampler::one_shot::OneShotSamplerNode};
 use std::sync::Arc;
@@ -17,7 +19,14 @@ impl Sample {
 }
 
 #[derive(Component)]
+#[require(Events)]
 pub struct SamplePlayer(pub(crate) Handle<Sample>);
+
+impl EcsNode for SamplePlayer {
+    fn node(&self) -> Box<dyn AudioNode> {
+        OneShotSamplerNode::new(Default::default()).into()
+    }
+}
 
 impl SamplePlayer {
     pub fn new(handle: Handle<Sample>) -> Self {
@@ -97,69 +106,29 @@ impl AssetLoader for SampleLoader {
 #[component(storage = "SparseSet")]
 pub struct LoadingSample;
 
-pub(crate) fn on_add_sample(
-    q: Query<(Entity, &SamplePlayer), Without<Node>>,
-    mut context: ResMut<AudioContext>,
+pub(crate) fn on_add(
+    q: Query<Entity, (Added<SamplePlayer>, Without<LoadingSample>)>,
     mut commands: Commands,
-    assets: Res<Assets<Sample>>,
 ) {
-    context.with(|context| {
-        for (entity, player) in q.iter() {
-            if let Some(graph) = context.graph_mut() {
-                let node = match graph
-                    .add_node(OneShotSamplerNode::new(Default::default()).into(), None)
-                {
-                    Ok(node) => node,
-                    Err(e) => {
-                        error!("failed to insert sample node: {e}");
-                        continue;
-                    }
-                };
-
-                if let Some(asset) = assets.get(&player.0) {
-                    info!("queuing event");
-                    graph.queue_event(NodeEvent {
-                        node_id: node,
-                        delay: EventDelay::Immediate,
-                        event: firewheel::node::NodeEventType::PlaySample {
-                            sample: asset.get(),
-                            normalized_volume: 1.0,
-                            stop_other_voices: false,
-                        },
-                    });
-
-                    commands.entity(entity).insert(Node(node));
-                } else {
-                    commands.entity(entity).insert((LoadingSample, Node(node)));
-                }
-            }
-        }
-    });
+    for player in q.iter() {
+        commands.entity(player).insert(LoadingSample);
+    }
 }
 
 pub(crate) fn trigger_pending_samples(
-    q: Query<(Entity, &SamplePlayer, &Node), With<LoadingSample>>,
-    mut context: ResMut<AudioContext>,
+    mut q: Query<(Entity, &SamplePlayer, &mut Events), With<LoadingSample>>,
     mut commands: Commands,
     assets: Res<Assets<Sample>>,
 ) {
-    context.with(|context| {
-        for (entity, player, node) in q.iter() {
-            if let Some(asset) = assets.get(&player.0) {
-                if let Some(graph) = context.graph_mut() {
-                    graph.queue_event(NodeEvent {
-                        node_id: node.0,
-                        delay: EventDelay::Immediate,
-                        event: firewheel::node::NodeEventType::PlaySample {
-                            sample: asset.get(),
-                            normalized_volume: 1.0,
-                            stop_other_voices: false,
-                        },
-                    });
-                }
+    for (entity, player, mut events) in q.iter_mut() {
+        if let Some(asset) = assets.get(&player.0) {
+            events.push_custom(firewheel::sampler::one_shot::Sample {
+                sample: asset.get(),
+                normalized_volume: 1.0,
+                stop_other_voices: false,
+            });
 
-                commands.entity(entity).remove::<LoadingSample>();
-            }
+            commands.entity(entity).remove::<LoadingSample>();
         }
-    });
+    }
 }
