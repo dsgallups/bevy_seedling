@@ -83,6 +83,6 @@ pub(crate) fn insert_main_bus(mut commands: Commands, mut context: ResMut<AudioC
     let terminal_node = context.with(|context| context.graph().graph_out_node());
 
     commands
-        .spawn((Volume::new(1.), InternedLabel::new(MainBus)))
+        .spawn((Volume::new(1.), InternedLabel::new(MainBus), MainBus))
         .connect(terminal_node);
 }
