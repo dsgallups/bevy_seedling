@@ -1,12 +1,10 @@
 use crate::node::{EcsNode, Events};
-use crate::{AudioContext, Node};
 use bevy_asset::{Asset, AssetLoader, Assets, Handle};
 use bevy_ecs::prelude::*;
-use bevy_log::{error, info};
 use bevy_reflect::TypePath;
 use firewheel::node::AudioNode;
 use firewheel::sample_resource::SampleResource;
-use firewheel::{clock::EventDelay, node::NodeEvent, sampler::one_shot::OneShotSamplerNode};
+use firewheel::sampler::one_shot::OneShotSamplerNode;
 use std::sync::Arc;
 
 #[derive(Asset, TypePath, Clone)]

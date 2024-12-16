@@ -1,8 +1,10 @@
+//! A sprouting implementation of the [Firewheel](https://github.com/BillyDM/firewheel) audio engine for Bevy.
+
 #![allow(clippy::type_complexity)]
 
 extern crate self as bevy_seedling;
 
-use bevy_app::{Last, Plugin};
+use bevy_app::{Last, Plugin, Startup};
 use bevy_asset::AssetApp;
 use bevy_ecs::prelude::*;
 use firewheel::FirewheelConfig;
@@ -10,8 +12,8 @@ use firewheel::FirewheelConfig;
 pub mod context;
 pub mod label;
 pub mod node;
-// pub mod param;
 pub mod sample;
+pub mod volume;
 
 pub use context::AudioContext;
 pub use label::{MainBus, NodeLabel};
@@ -47,14 +49,7 @@ pub struct SeedlingPlugin {
 impl Plugin for SeedlingPlugin {
     fn build(&self, app: &mut bevy_app::App) {
         let mut context = AudioContext::new(self.settings);
-        let (sample_rate, out_id) = context.with(|ctx| {
-            (
-                ctx.stream_info().unwrap().sample_rate,
-                ctx.graph().graph_out_node(),
-            )
-        });
-
-        let node_map = node::NodeMap::new(out_id);
+        let sample_rate = context.with(|ctx| ctx.stream_info().unwrap().sample_rate);
 
         app.insert_resource(context)
             .init_resource::<node::ParamSystems>()
@@ -68,11 +63,13 @@ impl Plugin for SeedlingPlugin {
                         .after(SeedlingSystems::Queue),
                 ),
             )
-            .insert_resource(node_map)
+            .init_resource::<node::NodeMap>()
             .init_resource::<node::PendingRemovals>()
             .register_asset_loader(sample::SampleLoader { sample_rate })
             .init_asset::<sample::Sample>()
             .register_node::<sample::SamplePlayer>()
+            .register_node::<volume::Volume>()
+            .add_systems(Startup, label::insert_main_bus)
             .add_systems(
                 Last,
                 (

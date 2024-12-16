@@ -1,10 +1,13 @@
-use crate::{label::InternedNodeLabel, AudioContext, MainBus, NodeLabel, SeedlingSystems};
+use crate::{
+    label::{InternedLabel, InternedNodeLabel},
+    AudioContext, MainBus, NodeLabel, SeedlingSystems,
+};
 use bevy_app::Last;
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
-use bevy_log::{error, warn};
+use bevy_log::{error, warn, warn_once};
 use bevy_utils::{HashMap, HashSet};
 use core::any::TypeId;
-use firewheel::node::{AudioNode, AudioParam, EventData, NodeEvent, NodeID, ParamEvent};
+use firewheel::node::{AudioNode, AudioParam, EventData, NodeEvent, NodeID};
 
 pub trait EcsNode: Component {
     fn node(&self) -> Box<dyn AudioNode>;
@@ -16,12 +19,32 @@ pub(crate) struct ParamSystems(HashSet<TypeId>);
 #[derive(Component)]
 #[component(on_insert = insert_params::<T>)]
 #[require(Events)]
-pub struct Params<T: AudioParam + Send + Sync + Clone + 'static>(pub T);
+pub struct Params<T: AudioParam + Send + Sync + Clone + 'static>(T);
+
+impl<T: AudioParam + Send + Sync + Clone + 'static> Params<T> {
+    pub fn new(params: T) -> Self {
+        Self(params)
+    }
+}
+
+impl<T: AudioParam + Send + Sync + Clone + 'static> core::ops::Deref for Params<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T: AudioParam + Send + Sync + Clone + 'static> core::ops::DerefMut for Params<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 fn insert_params<T: AudioParam + Send + Sync + Clone + 'static>(
     mut world: DeferredWorld,
     entity: Entity,
-    id: ComponentId,
+    _: ComponentId,
 ) {
     let params = world.get::<Params<T>>(entity).unwrap();
     let diff = ParamsDiff(params.0.clone());
@@ -35,7 +58,7 @@ fn insert_params<T: AudioParam + Send + Sync + Clone + 'static>(
         let added = systems.0.insert(id);
 
         if added {
-            world.schedule_scope(Last, |world, schedule| {
+            world.schedule_scope(Last, |_, schedule| {
                 schedule.add_systems(generate_param_events::<T>);
             });
         }
@@ -73,13 +96,14 @@ fn generate_param_events<T: AudioParam + Clone + Send + Sync + 'static>(
 }
 
 fn acquire_id<T: EcsNode>(
-    q: Query<(Entity, &T), Without<Node>>,
+    q: Query<(Entity, &T, Option<&InternedLabel>), Without<Node>>,
     mut context: ResMut<AudioContext>,
     mut commands: Commands,
+    mut node_map: ResMut<NodeMap>,
 ) {
     context.with(|context| {
         if let Some(graph) = context.graph_mut() {
-            for (entity, container) in q.iter() {
+            for (entity, container, label) in q.iter() {
                 let node = match graph.add_node(container.node(), None) {
                     Ok(node) => node,
                     Err(e) => {
@@ -88,6 +112,9 @@ fn acquire_id<T: EcsNode>(
                     }
                 };
 
+                if let Some(label) = label {
+                    node_map.0.insert(label.0, node);
+                }
                 commands.entity(entity).insert(Node(node));
             }
         }
@@ -139,12 +166,19 @@ pub struct PendingRemovals(Vec<NodeID>);
 pub enum ConnectTarget {
     Label(InternedNodeLabel),
     Entity(Entity),
+    Node(NodeID),
 }
 
 #[derive(Debug)]
 pub struct PendingConnection {
     target: ConnectTarget,
     ports: Option<Vec<(u32, u32)>>,
+}
+
+impl From<NodeID> for ConnectTarget {
+    fn from(value: NodeID) -> Self {
+        Self::Node(value)
+    }
 }
 
 impl<T> From<T> for ConnectTarget
@@ -221,12 +255,6 @@ impl ConnectNode for EntityCommands<'_> {
 #[derive(Default, Debug, Resource)]
 pub struct NodeMap(HashMap<InternedNodeLabel, NodeID>);
 
-impl NodeMap {
-    pub fn new(main_bus: NodeID) -> Self {
-        Self(HashMap::from([(MainBus.intern(), main_bus)]))
-    }
-}
-
 impl core::ops::Deref for NodeMap {
     type Target = HashMap<InternedNodeLabel, NodeID>;
 
@@ -279,7 +307,7 @@ pub(crate) fn process_connections(
                     let dest_node = match connection.target {
                         ConnectTarget::Entity(entity) => {
                             let Ok(dest_node) = targets.get(entity) else {
-                                warn!("no target {entity:?} found for audio node connection");
+                                warn_once!("no target {entity:?} found for audio node connection");
                                 return true;
                             };
 
@@ -287,13 +315,14 @@ pub(crate) fn process_connections(
                         }
                         ConnectTarget::Label(label) => {
                             let Some(dest_node) = node_map.get(&label) else {
-                                warn!("no active label found for audio node connection");
+                                warn_once!("no active label found for audio node connection");
 
                                 return true;
                             };
 
                             *dest_node
                         }
+                        ConnectTarget::Node(node) => node,
                     };
 
                     let ports = connection.ports.as_deref().unwrap_or(&[(0, 0), (1, 1)]);
