@@ -9,8 +9,12 @@ use std::sync::mpsc;
 ///
 /// When the seedling plugin is initialized, this can be accessed as a resource.
 /// ```
-/// fn system(context: Res<AudioContext>) {
-///     context.with(|c| /* */);
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::AudioContext;
+/// fn system(mut context: ResMut<AudioContext>) {
+///     context.with(|c| {
+///         // ...
+///     });
 /// }
 /// ```
 #[derive(Debug, Resource)]
@@ -42,11 +46,14 @@ impl AudioContext {
     ///
     /// This can be used to generate precisely-timed events.
     /// ```
-    /// fn mute_all(mut q: Query<&mut Params<VolumeParams>>, mut context: ResMut<AudioContext>) {
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::{AudioContext, VolumeNode};
+    /// # use firewheel::clock::ClockSeconds;
+    /// fn mute_all(mut q: Query<&mut VolumeNode>, mut context: ResMut<AudioContext>) {
     ///     let now = context.now();
     ///     for mut volume in q.iter_mut() {
     ///         volume
-    ///             .gain
+    ///             .0
     ///             .push_curve(
     ///                 0.,
     ///                 now,
@@ -55,7 +62,7 @@ impl AudioContext {
     ///             )
     ///             .unwrap();
     ///     }
-    /// },
+    /// }
     /// ```
     pub fn now(&mut self) -> ClockSeconds {
         self.with(|c| c.graph().clock_now())
@@ -66,11 +73,11 @@ impl AudioContext {
     /// This call will block until `f` returns.
     ///
     /// ```
-    /// fn system(mut context: ResMut<AudioContext>){
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::AudioContext;
+    /// fn system(mut context: ResMut<AudioContext>) {
     ///     context.with(|context| {
-    ///         if let Some(graph) = context.graph_mut() {
-    ///             graph.pause();
-    ///         }
+    ///         context.deactivate();
     ///     });
     /// }
     /// ```

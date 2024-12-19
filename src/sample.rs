@@ -1,6 +1,6 @@
 //! Audio sample node.
 
-use crate::node::{EcsNode, Events};
+use crate::node::Events;
 use bevy_asset::{Asset, AssetLoader, Assets, Handle};
 use bevy_ecs::prelude::*;
 use bevy_reflect::TypePath;
@@ -20,12 +20,17 @@ impl Sample {
     }
 }
 
-#[derive(Component)]
-#[require(Events)]
+impl core::fmt::Debug for Sample {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Sample").finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Component, Clone)]
 pub struct SamplePlayer(pub(crate) Handle<Sample>);
 
-impl EcsNode for SamplePlayer {
-    fn node(&self) -> Box<dyn AudioNode> {
+impl From<SamplePlayer> for Box<dyn AudioNode> {
+    fn from(_: SamplePlayer) -> Self {
         OneShotSamplerNode::new(Default::default()).into()
     }
 }
@@ -37,6 +42,7 @@ impl SamplePlayer {
 }
 
 /// A simple loader for audio samples.
+#[derive(Debug)]
 pub struct SampleLoader {
     /// The sampling rate of the audio engine.
     ///
@@ -112,7 +118,7 @@ impl AssetLoader for SampleLoader {
 
 /// A marker struct for entities that are waiting
 /// for a sample to load.
-#[derive(Component)]
+#[derive(Debug, Component)]
 #[component(storage = "SparseSet")]
 pub struct LoadingSample;
 

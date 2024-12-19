@@ -1,6 +1,6 @@
 use bevy::{log::LogPlugin, prelude::*};
-use bevy_seedling::{node::Params, sample::SamplePlayer, AudioContext, MainBus, SeedlingPlugin};
-use firewheel::{basic_nodes::VolumeParams, clock::ClockSeconds};
+use bevy_seedling::{sample::SamplePlayer, AudioContext, MainBus, SeedlingPlugin};
+use firewheel::{basic_nodes::VolumeNode, clock::ClockSeconds};
 
 fn main() {
     App::new()
@@ -18,17 +18,16 @@ fn main() {
         )
         .add_systems(
             PostStartup,
-            |q: Single<&mut Params<VolumeParams>, With<MainBus>>,
-             mut context: ResMut<AudioContext>| {
+            |q: Single<&mut VolumeNode, With<MainBus>>, mut context: ResMut<AudioContext>| {
                 let now = context.now();
                 let mut volume = q.into_inner();
 
                 volume
-                    .gain
+                    .0
                     .push_curve(
                         0.,
                         now,
-                        now + ClockSeconds(1.),
+                        now + ClockSeconds(1.5),
                         EaseFunction::ExponentialOut,
                     )
                     .unwrap();

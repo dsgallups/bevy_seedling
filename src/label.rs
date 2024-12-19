@@ -6,7 +6,7 @@
 //!
 //! Any node that doesn't provide an explicit connection when spawned
 //! will be automatically connected to [MainBus].
-use crate::volume::Volume;
+use crate::VolumeNode;
 use bevy_ecs::{intern::Interned, prelude::*};
 
 use crate::{AudioContext, ConnectNode};
@@ -17,12 +17,14 @@ bevy_ecs::define_label!(
     /// Types that implement [NodeLabel] can be used in place of entity IDs
     /// for audio node connections.
     /// ```
-    /// # use crate::NodeLabel;
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::{NodeLabel, VolumeNode, sample::SamplePlayer, ConnectNode,
+    /// # label::InternedLabel};
     /// #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
     /// struct EffectsChain;
     ///
     /// fn system(server: Res<AssetServer>, mut commands: Commands) {
-    ///     commands.spawn((Volume::new(0.25), InternedLabel::new(EffectsChain)));
+    ///     commands.spawn((VolumeNode::new(0.25), InternedLabel::new(EffectsChain)));
     ///
     ///     commands
     ///         .spawn(SamplePlayer::new(server.load("sound.wav")))
@@ -46,9 +48,11 @@ bevy_ecs::define_label!(
 /// global volume, you can query for a volume node's parameters
 /// filtered on this label.
 /// ```
-/// fn mute(mut q: Single<&mut Params<VolumeParams>, With<MainBus>>) {
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::{MainBus, VolumeNode};
+/// fn mute(mut q: Single<&mut VolumeNode, With<MainBus>>) {
 ///     let mut params = q.into_inner();
-///     params.gain.set(0.);
+///     params.0.set(0.);
 /// }
 /// ```
 #[derive(crate::NodeLabel, Component, Debug, Clone, PartialEq, Eq, Hash)]
@@ -61,15 +65,16 @@ pub(crate) type InternedNodeLabel = Interned<dyn NodeLabel>;
 /// To associate a label with an audio node,
 /// the node entity should be spawned with the label.
 /// ```
-/// # use crate::NodeLabel;
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::{NodeLabel, VolumeNode, label::InternedLabel};
 /// #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
 /// struct MyLabel;
 /// # fn system(mut commands: Commands) {
 ///
-/// commands.spawn((Volume::new(0.25), InternedLabel::new(MyLabel)));
+/// commands.spawn((VolumeNode::new(0.25), InternedLabel::new(MyLabel)));
 /// # }
 /// ```
-#[derive(Component)]
+#[derive(Debug, Component)]
 pub struct InternedLabel(pub(crate) InternedNodeLabel);
 
 impl InternedLabel {
@@ -83,6 +88,6 @@ pub(crate) fn insert_main_bus(mut commands: Commands, mut context: ResMut<AudioC
     let terminal_node = context.with(|context| context.graph().graph_out_node());
 
     commands
-        .spawn((Volume::new(1.), InternedLabel::new(MainBus), MainBus))
+        .spawn((VolumeNode::new(1.), InternedLabel::new(MainBus), MainBus))
         .connect(terminal_node);
 }

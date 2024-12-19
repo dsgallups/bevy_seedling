@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 #![allow(clippy::type_complexity)]
+#![warn(missing_debug_implementations)]
 
 extern crate self as bevy_seedling;
 
@@ -12,12 +13,19 @@ pub mod context;
 pub mod label;
 pub mod node;
 pub mod sample;
-pub mod volume;
 
 pub use context::AudioContext;
 pub use label::{MainBus, NodeLabel};
-use node::RegisterNode;
 pub use node::{ConnectNode, ConnectTarget, Node};
+pub use node::{RegisterNode, RegisterParamsNode};
+
+// Re-export firewheel.
+//
+// This will be convenient during development since
+// the version of firewheel tracked by this crate
+// may just be an arbitrary commit in a fork.
+pub use firewheel;
+pub use firewheel::basic_nodes::VolumeNode;
 
 /// Node label derive macro.
 ///
@@ -25,12 +33,14 @@ pub use node::{ConnectNode, ConnectTarget, Node};
 /// connections with frequently used nodes.
 ///
 /// ```
-/// # use crate::NodeLabel;
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::{NodeLabel, VolumeNode, label::InternedLabel, ConnectNode,
+/// # sample::SamplePlayer};
 /// #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
 /// struct EffectsChain;
 ///
 /// fn system(server: Res<AssetServer>, mut commands: Commands) {
-///     commands.spawn((Volume::new(0.25), InternedLabel::new(EffectsChain)));
+///     commands.spawn((VolumeNode::new(0.25), InternedLabel::new(EffectsChain)));
 ///
 ///     // Now, any node can simply use `EffectsChain`
 ///     // as a connection target.
@@ -67,7 +77,7 @@ pub enum SeedlingSystems {
 /// This spawns the audio task in addition
 /// to inserting `bevy_seedling`'s systems
 /// and resources.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct SeedlingPlugin {
     /// [`firewheel`]'s config, forwarded directly to
     /// the engine.
@@ -82,13 +92,12 @@ impl Plugin for SeedlingPlugin {
         let sample_rate = context.with(|ctx| ctx.stream_info().unwrap().sample_rate);
 
         app.insert_resource(context)
-            .init_resource::<node::ParamSystems>()
             .init_resource::<node::NodeMap>()
             .init_resource::<node::PendingRemovals>()
             .init_asset::<sample::Sample>()
             .register_asset_loader(sample::SampleLoader { sample_rate })
             .register_node::<sample::SamplePlayer>()
-            .register_node::<volume::Volume>()
+            .register_params_node::<VolumeNode>()
             .configure_sets(
                 Last,
                 (

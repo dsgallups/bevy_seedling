@@ -1,4 +1,4 @@
-A sprouting implementation of the [Firewheel](https://github.com/BillyDM/firewheel)
+A sprouting integration of the [Firewheel](https://github.com/BillyDM/firewheel)
 audio engine for [Bevy](https://bevyengine.org/).
 
 **NOTE**: this crate is very much a work-in-progress.
@@ -20,7 +20,7 @@ bevy_seedling = { git = "https://github.com/corvusprudens/bevy_seedling" }
 
 Then, you'll need to add the [`SeedlingPlugin`] to your app.
 
-```
+```no_test
 use bevy::prelude::*;
 use bevy_seedling::SeedlingPlugin;
 
@@ -38,8 +38,8 @@ should help you get up to speed on common usage patterns.
 
 `bevy_seedling` provides a thin ECS wrapper over `Firewheel`.
 
-A `Firewheel` audio node is represented in the ECS as
-an entity with a [`Node`] and parameters that can generate
-`Firewheel` events such as [`Volume`][volume::Volume].
+A `Firewheel` audio node is typically represented in the ECS as
+an entity with a [`Node`] and a component that can generate
+`Firewheel` events such as [`VolumeNode`].
 
 Most interactions with the audio engine are buffered.

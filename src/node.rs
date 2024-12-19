@@ -5,77 +5,21 @@ use crate::{
     AudioContext, MainBus, NodeLabel, SeedlingSystems,
 };
 use bevy_app::Last;
-use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
+use bevy_ecs::{prelude::*, world::DeferredWorld};
 use bevy_log::{error, warn_once};
-use bevy_utils::{HashMap, HashSet};
-use core::any::TypeId;
-use firewheel::node::{AudioNode, AudioParam, EventData, NodeEvent, NodeID};
-
-pub trait EcsNode: Component {
-    fn node(&self) -> Box<dyn AudioNode>;
-}
-
-#[derive(Resource, Default)]
-pub(crate) struct ParamSystems(HashSet<TypeId>);
+use bevy_utils::HashMap;
+use firewheel::node::{AudioNode, EventData, NodeEvent, NodeID};
+use firewheel::param::AudioParam;
 
 #[derive(Component)]
-#[component(on_insert = insert_params::<T>)]
-#[require(Events)]
-pub struct Params<T: AudioParam + Send + Sync + Clone + 'static>(T);
-
-impl<T: AudioParam + Send + Sync + Clone + 'static> Params<T> {
-    pub fn new(params: T) -> Self {
-        Self(params)
-    }
-}
-
-impl<T: AudioParam + Send + Sync + Clone + 'static> core::ops::Deref for Params<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<T: AudioParam + Send + Sync + Clone + 'static> core::ops::DerefMut for Params<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-fn insert_params<T: AudioParam + Send + Sync + Clone + 'static>(
-    mut world: DeferredWorld,
-    entity: Entity,
-    _: ComponentId,
-) {
-    let params = world.get::<Params<T>>(entity).unwrap();
-    let diff = ParamsDiff(params.0.clone());
-
-    let mut commands = world.commands();
-    commands.entity(entity).insert(diff);
-
-    commands.queue(|world: &mut World| {
-        let id = TypeId::of::<T>();
-        let mut systems = world.get_resource_or_init::<ParamSystems>();
-        let added = systems.0.insert(id);
-
-        if added {
-            world.schedule_scope(Last, |_, schedule| {
-                schedule.add_systems(generate_param_events::<T>);
-            });
-        }
-    });
-}
-
-#[derive(Component)]
-struct ParamsDiff<T>(T);
+struct ParamsDiff<T>(pub(crate) T);
 
 /// An event queue.
 ///
 /// When inserted into an entity that contains a [Node],
 /// these events will automatically be drained and sent
 /// to the audio context in the [SeedlingSystems::Flush] set.
-#[derive(Component, Default)]
+#[derive(Debug, Component, Default)]
 pub struct Events(Vec<EventData>);
 
 impl Events {
@@ -92,21 +36,21 @@ impl Events {
     }
 }
 
-fn generate_param_events<T: AudioParam + Clone + Send + Sync + 'static>(
-    mut nodes: Query<(&mut Params<T>, &mut ParamsDiff<T>, &mut Events)>,
+fn generate_param_events<T: AudioParam + Component + Clone + Send + Sync + 'static>(
+    mut nodes: Query<(&mut T, &mut ParamsDiff<T>, &mut Events)>,
 ) {
     for (params, mut diff, mut events) in nodes.iter_mut() {
-        params.0.to_messages(
+        params.diff(
             &diff.0,
             |event| events.push(EventData::Parameter(event)),
             Default::default(),
         );
 
-        diff.0 = params.0.clone();
+        diff.0 = params.clone();
     }
 }
 
-fn acquire_id<T: EcsNode>(
+fn acquire_id<T: Into<Box<dyn AudioNode>> + Component + Clone>(
     q: Query<(Entity, &T, Option<&InternedLabel>), Without<Node>>,
     mut context: ResMut<AudioContext>,
     mut commands: Commands,
@@ -115,7 +59,7 @@ fn acquire_id<T: EcsNode>(
     context.with(|context| {
         if let Some(graph) = context.graph_mut() {
             for (entity, container, label) in q.iter() {
-                let node = match graph.add_node(container.node(), None) {
+                let node = match graph.add_node(container.clone().into(), None) {
                     Ok(node) => node,
                     Err(e) => {
                         error!("failed to insert node: {e}");
@@ -132,23 +76,55 @@ fn acquire_id<T: EcsNode>(
     });
 }
 
+/// Register an audio node with parameters.
+///
+/// This will allow audio entities to automatically
+/// acquire IDs from the audio graph and perform
+/// parameter diffing.
+pub trait RegisterParamsNode {
+    fn register_params_node<T: Into<Box<dyn AudioNode>> + AudioParam + Component + Clone>(
+        &mut self,
+    ) -> &mut Self;
+}
+
+impl RegisterParamsNode for bevy_app::App {
+    fn register_params_node<T: Into<Box<dyn AudioNode>> + AudioParam + Component + Clone>(
+        &mut self,
+    ) -> &mut Self {
+        let world = self.world_mut();
+
+        world.register_component_hooks::<T>().on_insert(
+            |mut world: DeferredWorld, entity: Entity, _| {
+                let value = world.get::<T>(entity).unwrap().clone();
+                world.commands().entity(entity).insert(ParamsDiff(value));
+            },
+        );
+        world.register_required_components::<T, Events>();
+
+        self.add_systems(
+            Last,
+            (
+                acquire_id::<T>.in_set(SeedlingSystems::Acquire),
+                generate_param_events::<T>.in_set(SeedlingSystems::Queue),
+            ),
+        )
+    }
+}
+
 /// Register an audio node.
 ///
 /// This will allow audio entities to automatically
 /// acquire IDs from the audio graph.
 pub trait RegisterNode {
-    fn register_node<T: EcsNode>(&mut self) -> &mut Self;
+    fn register_node<T: Into<Box<dyn AudioNode>> + Component + Clone>(&mut self) -> &mut Self;
 }
 
 impl RegisterNode for bevy_app::App {
-    fn register_node<T: EcsNode>(&mut self) -> &mut Self {
-        self.add_systems(
-            Last,
-            (
-                acquire_id::<T>.in_set(SeedlingSystems::Acquire),
-                // generate_param_events::<T::Params>.in_set(SeedlingSystems::Queue),
-            ),
-        )
+    fn register_node<T: Into<Box<dyn AudioNode>> + Component + Clone>(&mut self) -> &mut Self {
+        let world = self.world_mut();
+        world.register_required_components::<T, Events>();
+
+        self.add_systems(Last, acquire_id::<T>.in_set(SeedlingSystems::Acquire))
     }
 }
 
@@ -191,7 +167,6 @@ pub(crate) struct PendingRemovals(Vec<NodeID>);
 ///
 /// [`ConnectTarget`] can be constructed manually or
 /// used as a part of the [`ConnectNode`] API.
-/// ```
 #[derive(Debug)]
 pub enum ConnectTarget {
     /// A global label such as [`MainBus`].
@@ -261,13 +236,14 @@ pub trait ConnectNode {
     /// Queue a connection from this entity to the target.
     ///
     /// ```
-    /// # use crate::label::MainBus;
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::{label::MainBus, VolumeNode, ConnectNode};
     /// # fn system(mut commands: Commands) {
     /// // Connect a node to the MainBus.
-    /// let node = commands.spawn(Volume::new(0.5)).connect(MainBus).id();
+    /// let node = commands.spawn(VolumeNode::new(0.5)).connect(MainBus).id();
     ///
     /// // Connect another node to the one we just spawned.
-    /// commands.spawn(Volume::new(0.25)).connect(node);
+    /// commands.spawn(VolumeNode::new(0.25)).connect(node);
     /// # }
     /// ```
     ///

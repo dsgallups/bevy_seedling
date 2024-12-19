@@ -2,6 +2,16 @@
 name = "bevy_seedling"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.83.0"
+license = "MIT OR Apache-2.0"
+authors = ["Corvus Prudens <corvusprudens@gmail.com>"]
+description = "A sprouting integration of the Firewheel audio engine"
+readme = "README.md"
+repository = "https://github.com/corvusprudens/bevy_seedling"
+documentation = "https://docs.rs/bevy_seedling"
+keywords = ["gamedev", "audio", "bevy", "firewheel"]
+categories = ["game-development", "multimedia::audio"]
+exclude = ["/assets"]
 
 
 [dependencies]
