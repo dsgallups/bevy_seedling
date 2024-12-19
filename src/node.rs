@@ -4,7 +4,7 @@ use crate::{
 };
 use bevy_app::Last;
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
-use bevy_log::{error, warn, warn_once};
+use bevy_log::{error, warn_once};
 use bevy_utils::{HashMap, HashSet};
 use core::any::TypeId;
 use firewheel::node::{AudioNode, AudioParam, EventData, NodeEvent, NodeID};
@@ -66,7 +66,7 @@ fn insert_params<T: AudioParam + Send + Sync + Clone + 'static>(
 }
 
 #[derive(Component)]
-pub struct ParamsDiff<T>(T);
+struct ParamsDiff<T>(T);
 
 #[derive(Component, Default)]
 pub struct Events(Vec<EventData>);
@@ -84,7 +84,7 @@ impl Events {
 fn generate_param_events<T: AudioParam + Clone + Send + Sync + 'static>(
     mut nodes: Query<(&mut Params<T>, &mut ParamsDiff<T>, &mut Events)>,
 ) {
-    for (mut params, mut diff, mut events) in nodes.iter_mut() {
+    for (params, mut diff, mut events) in nodes.iter_mut() {
         params.0.to_messages(
             &diff.0,
             |event| events.push(EventData::Parameter(event)),
@@ -137,7 +137,11 @@ impl RegisterNode for bevy_app::App {
     }
 }
 
-/// A newtype wrapper aound [firewheel::node::NodeID].
+/// An ECS handle for an audio node.
+///
+/// [`Node`] may not necessarily be available immediately
+/// upon spawning audio nodes; [`Node`]s are acquired
+/// during the [`SeedlingSystems::Acquire`] set.
 ///
 /// The node is automatically removed from the audio
 /// graph when this component is removed.
@@ -159,9 +163,14 @@ impl Component for Node {
     }
 }
 
+/// Queued audio node removals.
+///
+/// This resource allows us to defer audio node removals
+/// until the audio graph is ready.
 #[derive(Debug, Default, Resource)]
 pub struct PendingRemovals(Vec<NodeID>);
 
+/// A target for node connections.
 #[derive(Debug)]
 pub enum ConnectTarget {
     Label(InternedNodeLabel),
@@ -169,6 +178,10 @@ pub enum ConnectTarget {
     Node(NodeID),
 }
 
+/// A pending connection between two nodes.
+///
+/// If an explicit port mapping is not provided,
+/// `[(0, 0), (1, 1)]` is used.
 #[derive(Debug)]
 pub struct PendingConnection {
     target: ConnectTarget,
@@ -199,6 +212,7 @@ impl From<Entity> for ConnectTarget {
 #[derive(Debug, Default, Component)]
 pub struct PendingConnections(Vec<PendingConnection>);
 
+/// An [`EntityCommands`] extension trait for connecting node entities.
 pub trait ConnectNode {
     /// Queue a connection from this entity to the target.
     ///

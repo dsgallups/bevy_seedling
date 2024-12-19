@@ -1,6 +1,12 @@
 use bevy::{log::LogPlugin, prelude::*};
-use bevy_seedling::{node::Params, sample::SamplePlayer, AudioContext, MainBus, SeedlingPlugin};
+use bevy_seedling::{
+    label::InternedLabel, node::Params, sample::SamplePlayer, volume::Volume, AudioContext,
+    ConnectNode, MainBus, NodeLabel, SeedlingPlugin,
+};
 use firewheel::{basic_nodes::VolumeParams, clock::ClockSeconds};
+
+#[derive(NodeLabel, PartialEq, Eq, Debug, Hash, Clone)]
+struct EffectsBus;
 
 fn main() {
     App::new()
@@ -13,7 +19,7 @@ fn main() {
         .add_systems(
             Startup,
             |server: Res<AssetServer>, mut commands: Commands| {
-                commands.spawn(SamplePlayer::new(server.load("snd_wobbler.wav")));
+                commands.spawn((Volume::new(1.), InternedLabel::new(EffectsBus)));
             },
         )
         .add_systems(
