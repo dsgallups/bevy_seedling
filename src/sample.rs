@@ -1,3 +1,5 @@
+//! Audio sample node.
+
 use crate::node::{EcsNode, Events};
 use bevy_asset::{Asset, AssetLoader, Assets, Handle};
 use bevy_ecs::prelude::*;
@@ -7,10 +9,12 @@ use firewheel::sample_resource::SampleResource;
 use firewheel::sampler::one_shot::OneShotSamplerNode;
 use std::sync::Arc;
 
+/// An audio sample.
 #[derive(Asset, TypePath, Clone)]
 pub struct Sample(Arc<dyn SampleResource>);
 
 impl Sample {
+    /// Share the inner value.
     pub fn get(&self) -> Arc<dyn SampleResource> {
         self.0.clone()
     }
@@ -32,10 +36,16 @@ impl SamplePlayer {
     }
 }
 
+/// A simple loader for audio samples.
 pub struct SampleLoader {
+    /// The sampling rate of the audio engine.
+    ///
+    /// This must be kept in sync with the engine if
+    /// the sample rate changes.
     pub sample_rate: u32,
 }
 
+/// Errors produced while loading samples.
 #[derive(Debug)]
 pub enum SampleLoaderError {
     StdIo(std::io::Error),
@@ -100,6 +110,8 @@ impl AssetLoader for SampleLoader {
     }
 }
 
+/// A marker struct for entities that are waiting
+/// for a sample to load.
 #[derive(Component)]
 #[component(storage = "SparseSet")]
 pub struct LoadingSample;

@@ -65,7 +65,7 @@ pub(crate) type InternedNodeLabel = Interned<dyn NodeLabel>;
 /// #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
 /// struct MyLabel;
 /// # fn system(mut commands: Commands) {
-///     
+///
 /// commands.spawn((Volume::new(0.25), InternedLabel::new(MyLabel)));
 /// # }
 /// ```

@@ -1,3 +1,5 @@
+//! Volume node.
+
 use crate::node::{EcsNode, Events, Params};
 use bevy_ecs::component::ComponentId;
 use bevy_ecs::prelude::*;
@@ -5,6 +7,7 @@ use bevy_ecs::world::DeferredWorld;
 use firewheel::basic_nodes::{VolumeNode, VolumeParams};
 use firewheel::node::{AudioNode, Continuous};
 
+/// A simple volume node.
 #[derive(Component)]
 #[component(on_insert = on_insert)]
 #[require(Events)]

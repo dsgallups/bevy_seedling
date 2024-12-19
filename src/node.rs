@@ -1,3 +1,5 @@
+//! Audio node connections and management.
+
 use crate::{
     label::{InternedLabel, InternedNodeLabel},
     AudioContext, MainBus, NodeLabel, SeedlingSystems,
@@ -68,14 +70,23 @@ fn insert_params<T: AudioParam + Send + Sync + Clone + 'static>(
 #[derive(Component)]
 struct ParamsDiff<T>(T);
 
+/// An event queue.
+///
+/// When inserted into an entity that contains a [Node],
+/// these events will automatically be drained and sent
+/// to the audio context in the [SeedlingSystems::Flush] set.
 #[derive(Component, Default)]
 pub struct Events(Vec<EventData>);
 
 impl Events {
+    /// Push a new event.
     pub fn push(&mut self, event: EventData) {
         self.0.push(event);
     }
 
+    /// Push a custom event.
+    ///
+    /// `value` is boxed and wrapped in [EventData::Custom].
     pub fn push_custom<T: Send + Sync + 'static>(&mut self, value: T) {
         self.0.push(EventData::Custom(Box::new(value)));
     }
@@ -121,6 +132,10 @@ fn acquire_id<T: EcsNode>(
     });
 }
 
+/// Register an audio node.
+///
+/// This will allow audio entities to automatically
+/// acquire IDs from the audio graph.
 pub trait RegisterNode {
     fn register_node<T: EcsNode>(&mut self) -> &mut Self;
 }
@@ -140,11 +155,13 @@ impl RegisterNode for bevy_app::App {
 /// An ECS handle for an audio node.
 ///
 /// [`Node`] may not necessarily be available immediately
-/// upon spawning audio nodes; [`Node`]s are acquired
-/// during the [`SeedlingSystems::Acquire`] set.
+/// upon spawning audio entities; [`Node`]s are acquired
+/// during the [`SeedlingSystems::Acquire`] set. Node
+/// acquisition will also be deferred if the audio context
+/// is disabled.
 ///
-/// The node is automatically removed from the audio
-/// graph when this component is removed.
+/// When this component is removed, the underlying
+/// audio node is removed from the graph.
 #[derive(Debug, Clone, Copy)]
 pub struct Node(pub NodeID);
 
@@ -168,24 +185,35 @@ impl Component for Node {
 /// This resource allows us to defer audio node removals
 /// until the audio graph is ready.
 #[derive(Debug, Default, Resource)]
-pub struct PendingRemovals(Vec<NodeID>);
+pub(crate) struct PendingRemovals(Vec<NodeID>);
 
 /// A target for node connections.
+///
+/// [`ConnectTarget`] can be constructed manually or
+/// used as a part of the [`ConnectNode`] API.
+/// ```
 #[derive(Debug)]
 pub enum ConnectTarget {
+    /// A global label such as [`MainBus`].
     Label(InternedNodeLabel),
+    /// An audio entity.
     Entity(Entity),
+    /// An existing node from the audio graph.
     Node(NodeID),
 }
 
 /// A pending connection between two nodes.
-///
-/// If an explicit port mapping is not provided,
-/// `[(0, 0), (1, 1)]` is used.
 #[derive(Debug)]
 pub struct PendingConnection {
-    target: ConnectTarget,
-    ports: Option<Vec<(u32, u32)>>,
+    pub target: ConnectTarget,
+    /// An optional [`firewheel`] port mapping.
+    ///
+    /// The first tuple element represents the source output,
+    /// and the second tuple element represents the sink input.
+    ///
+    /// If an explicit port mapping is not provided,
+    /// `[(0, 0), (1, 1)]` is used.
+    pub ports: Option<Vec<(u32, u32)>>,
 }
 
 impl From<NodeID> for ConnectTarget {
@@ -209,22 +237,50 @@ impl From<Entity> for ConnectTarget {
     }
 }
 
+/// The set of all [`PendingConnection`]s for an entity.
+///
+/// These connections are drained and synchronized with the
+/// audio graph in the [SeedlingSystems::Connect] set.
 #[derive(Debug, Default, Component)]
 pub struct PendingConnections(Vec<PendingConnection>);
 
+impl PendingConnections {
+    /// Push a new pending connection.
+    pub fn push(&mut self, connection: PendingConnection) {
+        self.0.push(connection)
+    }
+}
+
 /// An [`EntityCommands`] extension trait for connecting node entities.
+///
+/// These methods provide only source -> sink connections. The source
+/// is the receiver and the sink is the provided target.
+///
+/// [`EntityCommands`]: bevy_ecs::prelude::EntityCommands
 pub trait ConnectNode {
     /// Queue a connection from this entity to the target.
     ///
-    /// By default, this provides a port connection of `[(0, 0), (1, 1)]`.
-    /// To provide a specific port mapping, use [ConnectNode::connect_with].
+    /// ```
+    /// # use crate::label::MainBus;
+    /// # fn system(mut commands: Commands) {
+    /// // Connect a node to the MainBus.
+    /// let node = commands.spawn(Volume::new(0.5)).connect(MainBus).id();
     ///
-    /// The connection is deferred, finalizing in the [SeedlingSystems::Connect] set.
+    /// // Connect another node to the one we just spawned.
+    /// commands.spawn(Volume::new(0.25)).connect(node);
+    /// # }
+    /// ```
+    ///
+    /// By default, this provides a port connection of `[(0, 0), (1, 1)]`,
+    /// which represents a simple stereo connection.
+    /// To provide a specific port mapping, use [`connect_with`][ConnectNode::connect_with].
+    ///
+    /// The connection is deferred, finalizing in the [`SeedlingSystems::Connect`] set.
     fn connect(&mut self, target: impl Into<ConnectTarget>) -> &mut Self;
 
     /// Queue a connection from this entity to the target with the provided port mappings.
     ///
-    /// The connection is deferred, finalizing in the [SeedlingSystems::Connect] set.
+    /// The connection is deferred, finalizing in the [`SeedlingSystems::Connect`] set.
     fn connect_with(&mut self, target: impl Into<ConnectTarget>, ports: &[(u32, u32)])
         -> &mut Self;
 }
@@ -236,7 +292,7 @@ impl ConnectNode for EntityCommands<'_> {
         self.entry::<PendingConnections>()
             .or_default()
             .and_modify(|mut pending| {
-                pending.0.push(PendingConnection {
+                pending.push(PendingConnection {
                     target,
                     ports: None,
                 });
@@ -256,7 +312,7 @@ impl ConnectNode for EntityCommands<'_> {
         self.entry::<PendingConnections>()
             .or_default()
             .and_modify(|mut pending| {
-                pending.0.push(PendingConnection {
+                pending.push(PendingConnection {
                     target,
                     ports: Some(ports),
                 });
@@ -266,6 +322,11 @@ impl ConnectNode for EntityCommands<'_> {
     }
 }
 
+/// A map that associates [`NodeLabel`]s with audio
+/// graph nodes.
+///
+/// This will be automatically synchronized for
+/// entities with both a [`Node`] and [`InternedLabel`].
 #[derive(Default, Debug, Resource)]
 pub struct NodeMap(HashMap<InternedNodeLabel, NodeID>);
 

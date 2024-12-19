@@ -20,11 +20,33 @@ pub use label::{MainBus, NodeLabel};
 use node::RegisterNode;
 pub use node::{ConnectNode, ConnectTarget, Node};
 
-pub use seedling_macros::{AudioParam, NodeLabel};
+/// Node label derive macro.
+///
+/// Node labels provide a convenient way to manage
+/// connections with frequently used nodes.
+///
+/// ```
+/// # use crate::NodeLabel;
+/// #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct EffectsChain;
+///
+/// fn system(server: Res<AssetServer>, mut commands: Commands) {
+///     commands.spawn((Volume::new(0.25), InternedLabel::new(EffectsChain)));
+///
+///     // Now, any node can simply use `EffectsChain`
+///     // as a connection target.
+///     commands
+///         .spawn(SamplePlayer::new(server.load("sound.wav")))
+///         .connect(EffectsChain);
+/// }
+/// ```
+pub use seedling_macros::NodeLabel;
 
 /// Sets for all `bevy_seedling` systems.
 ///
-/// These are all inserted into the [Last] schedule.
+/// These are all inserted into the [`Last`] schedule.
+///
+/// [`Last`]: bevy_app::Last
 #[derive(Debug, SystemSet, PartialEq, Eq, Hash, Clone)]
 pub enum SeedlingSystems {
     /// Entities without audio nodes acquire them from the audio context.
@@ -34,15 +56,24 @@ pub enum SeedlingSystems {
     /// Queue audio engine events.
     ///
     /// While it's not strictly necessary to separate this
-    /// set from [SeedlingSystems::Connect], it's a nice
+    /// set from [`SeedlingSystems::Connect`], it's a nice
     /// semantic divide.
     Queue,
     /// The audio context is updated and flushed.
     Flush,
 }
 
+/// `bevy_seedling`'s top-level plugin.
+///
+/// This spawns the audio task in addition
+/// to inserting `bevy_seedling`'s systems
+/// and resources.
 #[derive(Default)]
 pub struct SeedlingPlugin {
+    /// [`firewheel`]'s config, forwarded directly to
+    /// the engine.
+    ///
+    /// [`firewheel`]: firewheel
     pub settings: FirewheelConfig,
 }
 
@@ -53,6 +84,12 @@ impl Plugin for SeedlingPlugin {
 
         app.insert_resource(context)
             .init_resource::<node::ParamSystems>()
+            .init_resource::<node::NodeMap>()
+            .init_resource::<node::PendingRemovals>()
+            .init_asset::<sample::Sample>()
+            .register_asset_loader(sample::SampleLoader { sample_rate })
+            .register_node::<sample::SamplePlayer>()
+            .register_node::<volume::Volume>()
             .configure_sets(
                 Last,
                 (
@@ -63,12 +100,6 @@ impl Plugin for SeedlingPlugin {
                         .after(SeedlingSystems::Queue),
                 ),
             )
-            .init_resource::<node::NodeMap>()
-            .init_resource::<node::PendingRemovals>()
-            .register_asset_loader(sample::SampleLoader { sample_rate })
-            .init_asset::<sample::Sample>()
-            .register_node::<sample::SamplePlayer>()
-            .register_node::<volume::Volume>()
             .add_systems(Startup, label::insert_main_bus)
             .add_systems(
                 Last,
