@@ -1,5 +1,4 @@
-//! A sprouting implementation of the [Firewheel](https://github.com/BillyDM/firewheel) audio engine for Bevy.
-
+#![doc = include_str!("../README.md")]
 #![allow(clippy::type_complexity)]
 
 extern crate self as bevy_seedling;
