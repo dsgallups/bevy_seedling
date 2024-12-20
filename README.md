@@ -42,4 +42,25 @@ A `Firewheel` audio node is typically represented in the ECS as
 an entity with a [`Node`] and a component that can generate
 `Firewheel` events such as [`VolumeNode`].
 
-Most interactions with the audio engine are buffered.
+Interactions with the audio engine are buffered.
+This includes inserting nodes into the audio graph,
+removing nodes from the graph, making connections 
+between nodes, and sending node events. This provides
+a few advantages:
+
+1. Audio entities do not need to wait until
+   they have Firewheel IDs before they can 
+   make connections.
+2. Systems that spawn or interact with
+   audio entities can be trivially parallelized.
+3. Graph-mutating interactions are properly deferred
+   while the audio graph isn't ready, for example
+   if it's been temporarily deactiviated.
+
+The main disadvantage is potentially increased latency,
+since several milliseconds may pass between an
+audio-event-generating system and actually passing
+those events to the audio engine. However, since
+`bevy_seedling` provides direct access to the audio context,
+you can always immediately queue and flush events
+if necessary.
