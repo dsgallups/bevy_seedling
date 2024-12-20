@@ -9,12 +9,14 @@ use bevy_asset::AssetApp;
 use bevy_ecs::prelude::*;
 use firewheel::FirewheelConfig;
 
+pub mod activity;
 pub mod context;
 pub mod label;
 pub mod lpf;
 pub mod node;
 pub mod sample;
 
+pub use activity::{Pause, Stop};
 pub use context::AudioContext;
 pub use label::{MainBus, NodeLabel};
 pub use node::{ConnectNode, ConnectTarget, Node};

@@ -19,7 +19,7 @@ bevy_ecs::define_label!(
     /// for audio node connections.
     /// ```
     /// # use bevy::prelude::*;
-    /// # use bevy_seedling::{NodeLabel, VolumeNode, sample::SamplePlayer, ConnectNode,
+    /// # use bevy_seedling::{NodeLabel, VolumeNode, sample::SamplePlayer, ConnectNode};
     /// #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
     /// struct EffectsChain;
     ///
@@ -69,7 +69,7 @@ pub(crate) fn insert_main_bus(mut commands: Commands, mut context: ResMut<AudioC
         .connect(terminal_node);
 }
 
-/// A collection of all node labels applied to this an entity.
+/// A collection of all node labels applied to an entity.
 ///
 /// To associate a label with an audio node,
 /// the node entity should be spawned with the label.
@@ -82,7 +82,7 @@ pub(crate) fn insert_main_bus(mut commands: Commands, mut context: ResMut<AudioC
 ///
 /// commands.spawn((VolumeNode::new(0.25), MyLabel));
 /// # }
-#[derive(Debug, Component)]
+#[derive(Debug, Default, Component)]
 #[component(on_remove = on_remove)]
 pub struct NodeLabels(SmallVec<[InternedNodeLabel; 1]>);
 
@@ -109,5 +109,34 @@ impl core::ops::Deref for NodeLabels {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl NodeLabels {
+    /// Insert an interned node label.
+    ///
+    /// Returns `true` if the label is newly inserted.
+    pub fn insert(&mut self, label: InternedNodeLabel) -> bool {
+        if !self.contains(&label) {
+            self.0.push(label);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove a label.
+    ///
+    /// Returns `true` if the label was in the set.
+    pub fn remove(&mut self, label: InternedNodeLabel) -> bool {
+        let index = self.iter().position(|l| l == &label);
+
+        match index {
+            Some(i) => {
+                self.0.remove(i);
+                true
+            }
+            None => false,
+        }
     }
 }

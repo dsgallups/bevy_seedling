@@ -4,10 +4,9 @@
 use bevy::{log::LogPlugin, prelude::*};
 use bevy_seedling::{
     firewheel::{basic_nodes::VolumeNode, clock::ClockSeconds},
-    label::InternedLabel,
     lpf::LowPassNode,
     sample::SamplePlayer,
-    AudioContext, ConnectNode, MainBus, NodeLabel, SeedlingPlugin,
+    AudioContext, ConnectNode, NodeLabel, SeedlingPlugin,
 };
 
 #[derive(NodeLabel, PartialEq, Eq, Debug, Hash, Clone)]
@@ -45,6 +44,11 @@ fn main() {
                 commands
                     .spawn(SamplePlayer::new(server.load("snd_wobbler.wav")))
                     .connect(EffectsBus);
+
+                // Once these connections are synchronized with the audio graph,
+                // it will look like:
+                //
+                // SamplePlayer -> VolumeNode (EffectsBus) -> LowPassNode -> VolumeNode (MainBus) -> Audio Output
             },
         )
         .add_systems(

@@ -1,6 +1,7 @@
+//! This example demonstrates how to play a one-shot sample.
+
 use bevy::{log::LogPlugin, prelude::*};
-use bevy_seedling::{sample::SamplePlayer, AudioContext, MainBus, SeedlingPlugin};
-use firewheel::{basic_nodes::VolumeNode, clock::ClockSeconds};
+use bevy_seedling::{sample::SamplePlayer, SeedlingPlugin};
 
 fn main() {
     App::new()
@@ -13,24 +14,11 @@ fn main() {
         .add_systems(
             Startup,
             |server: Res<AssetServer>, mut commands: Commands| {
+                // Spawning a `SamplePlayer` node will play a sample
+                // once as soon as it's loaded.
+                //
+                // This node is implicitly connected to the `MainBus`.
                 commands.spawn(SamplePlayer::new(server.load("snd_wobbler.wav")));
-            },
-        )
-        .add_systems(
-            PostStartup,
-            |q: Single<&mut VolumeNode, With<MainBus>>, mut context: ResMut<AudioContext>| {
-                let now = context.now();
-                let mut volume = q.into_inner();
-
-                volume
-                    .0
-                    .push_curve(
-                        0.,
-                        now,
-                        now + ClockSeconds(1.5),
-                        EaseFunction::ExponentialOut,
-                    )
-                    .unwrap();
             },
         )
         .run();

@@ -24,7 +24,21 @@ pub fn derive_label_inner(input: TokenStream) -> syn::Result<TokenStream2> {
             }
 
             #[allow(unused_variables)]
-            fn register_component_hooks(hooks: &mut #bevy_ecs::component::ComponentHooks) {}
+            fn register_component_hooks(hooks: &mut #bevy_ecs::component::ComponentHooks) {
+                hooks.on_insert(|mut world: #bevy_ecs::world::DeferredWorld, entity: #bevy_ecs::entity::Entity, _| {
+                    let value = world.get::<Self>(entity).unwrap();
+                    let interned = <Self as ::bevy_seedling::NodeLabel>::intern(value);
+
+                    world
+                        .commands()
+                        .entity(entity)
+                        .entry::<::bevy_seedling::label::NodeLabels>()
+                        .or_insert(::core::default::Default::default())
+                        .and_modify(move |mut labels| {
+                            labels.insert(interned);
+                        });
+                });
+            }
         }
     };
 

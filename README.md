@@ -20,7 +20,7 @@ bevy_seedling = { git = "https://github.com/corvusprudens/bevy_seedling" }
 
 Then, you'll need to add the [`SeedlingPlugin`] to your app.
 
-```no_test
+```no_run
 use bevy::prelude::*;
 use bevy_seedling::SeedlingPlugin;
 
@@ -40,17 +40,17 @@ should help you get up to speed on common usage patterns.
 
 A `Firewheel` audio node is typically represented in the ECS as
 an entity with a [`Node`] and a component that can generate
-`Firewheel` events such as [`VolumeNode`].
+`Firewheel` events, such as [`VolumeNode`].
 
 Interactions with the audio engine are buffered.
 This includes inserting nodes into the audio graph,
-removing nodes from the graph, making connections 
+removing nodes from the graph, making connections
 between nodes, and sending node events. This provides
 a few advantages:
 
 1. Audio entities do not need to wait until
-   they have Firewheel IDs before they can 
-   make connections.
+   they have Firewheel IDs before they can
+   make connections or generate events.
 2. Systems that spawn or interact with
    audio entities can be trivially parallelized.
 3. Graph-mutating interactions are properly deferred
@@ -58,9 +58,35 @@ a few advantages:
    if it's been temporarily deactiviated.
 
 The main disadvantage is potentially increased latency,
-since several milliseconds may pass between an
-audio-event-generating system and actually passing
-those events to the audio engine. However, since
+since several milliseconds may pass between
+event generation and actually propagating those events
+to the audio engine. However, since
 `bevy_seedling` provides direct access to the audio context,
 you can always immediately queue and flush events
 if necessary.
+
+## Future work
+
+- Graph operations
+
+  Audio entities currently support only a subset of the underlying
+  Firewheel graph API. In particular, disconnecting nodes and
+  providing non-default channel configurations will
+  need to be added.
+
+- One-shot node pool
+
+  One-shot audio nodes should be pooled, queuing up
+  samples to play as sample entities are spawned.
+
+- More audio nodes
+
+  There are plenty of nodes that remain to be authored either
+  in Firewheel or in this crate directly. Most pressing
+  are probably looping sample players.
+
+- Platform support
+
+  Both Firewheel and this crate have some work to do in
+  order to support `wasm` targets.
+

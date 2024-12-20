@@ -1,3 +1,5 @@
+//! One-pole, low-pass filter.
+
 use bevy_ecs::prelude::*;
 use firewheel::{
     node::{AudioNode, AudioNodeProcessor, EventData, ProcessStatus},
@@ -6,12 +8,23 @@ use firewheel::{
     ChannelConfig, ChannelCount,
 };
 
+/// A one-pole, low-pass filter.
 #[derive(seedling_macros::AudioParam, Debug, Clone, Component)]
 pub struct LowPassNode {
+    /// The cutoff frequency in hertz.
     pub frequency: Continuous<f32>,
 }
 
 impl LowPassNode {
+    /// Create a new [`LowPassNode`] with an initial cutoff frequency.
+    ///
+    /// ```
+    /// # use bevy_seedling::{*, lpf::LowPassNode};
+    /// # use bevy::prelude::*;
+    /// # fn system(mut commands: Commands) {
+    /// commands.spawn(LowPassNode::new(1000.0));
+    /// # }
+    /// ```
     pub fn new(frequency: f32) -> Self {
         Self {
             frequency: Continuous::new(frequency),
@@ -116,7 +129,7 @@ impl AudioNodeProcessor for LowPassProcessor {
         events: firewheel::node::NodeEventIter,
         proc_info: firewheel::node::ProcInfo,
     ) -> ProcessStatus {
-        // It would be nice of this process were made a little
+        // It would be nice if this process were made a little
         // more smooth, or it should at least be easy to
         // properly report errors without panicking or allocations.
         for event in events {
