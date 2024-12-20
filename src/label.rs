@@ -6,8 +6,9 @@
 //!
 //! Any node that doesn't provide an explicit connection when spawned
 //! will be automatically connected to [MainBus].
-use crate::VolumeNode;
-use bevy_ecs::{intern::Interned, prelude::*};
+use crate::{node::NodeMap, VolumeNode};
+use bevy_ecs::{component::ComponentId, intern::Interned, prelude::*, world::DeferredWorld};
+use smallvec::SmallVec;
 
 use crate::{AudioContext, ConnectNode};
 
@@ -19,12 +20,11 @@ bevy_ecs::define_label!(
     /// ```
     /// # use bevy::prelude::*;
     /// # use bevy_seedling::{NodeLabel, VolumeNode, sample::SamplePlayer, ConnectNode,
-    /// # label::InternedLabel};
     /// #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
     /// struct EffectsChain;
     ///
     /// fn system(server: Res<AssetServer>, mut commands: Commands) {
-    ///     commands.spawn((VolumeNode::new(0.25), InternedLabel::new(EffectsChain)));
+    ///     commands.spawn((VolumeNode::new(0.25), EffectsChain));
     ///
     ///     commands
     ///         .spawn(SamplePlayer::new(server.load("sound.wav")))
@@ -55,39 +55,59 @@ bevy_ecs::define_label!(
 ///     params.0.set(0.);
 /// }
 /// ```
-#[derive(crate::NodeLabel, Component, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(crate::NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MainBus;
 
-pub(crate) type InternedNodeLabel = Interned<dyn NodeLabel>;
-
 /// A type-erased node label.
-///
-/// To associate a label with an audio node,
-/// the node entity should be spawned with the label.
-/// ```
-/// # use bevy::prelude::*;
-/// # use bevy_seedling::{NodeLabel, VolumeNode, label::InternedLabel};
-/// #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
-/// struct MyLabel;
-/// # fn system(mut commands: Commands) {
-///
-/// commands.spawn((VolumeNode::new(0.25), InternedLabel::new(MyLabel)));
-/// # }
-/// ```
-#[derive(Debug, Component)]
-pub struct InternedLabel(pub(crate) InternedNodeLabel);
-
-impl InternedLabel {
-    #[inline(always)]
-    pub fn new(label: impl NodeLabel) -> Self {
-        Self(label.intern())
-    }
-}
+pub type InternedNodeLabel = Interned<dyn NodeLabel>;
 
 pub(crate) fn insert_main_bus(mut commands: Commands, mut context: ResMut<AudioContext>) {
     let terminal_node = context.with(|context| context.graph().graph_out_node());
 
     commands
-        .spawn((VolumeNode::new(1.), InternedLabel::new(MainBus), MainBus))
+        .spawn((VolumeNode::new(1.), MainBus))
         .connect(terminal_node);
+}
+
+/// A collection of all node labels applied to this an entity.
+///
+/// To associate a label with an audio node,
+/// the node entity should be spawned with the label.
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::{NodeLabel, VolumeNode};
+/// #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct MyLabel;
+/// # fn system(mut commands: Commands) {
+///
+/// commands.spawn((VolumeNode::new(0.25), MyLabel));
+/// # }
+#[derive(Debug, Component)]
+#[component(on_remove = on_remove)]
+pub struct NodeLabels(SmallVec<[InternedNodeLabel; 1]>);
+
+fn on_remove(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
+    let Some(labels) = world.get::<NodeLabels>(entity) else {
+        return;
+    };
+
+    if labels.0.len() == 1 {
+        let label = labels.0[0];
+        let mut node_map = world.resource_mut::<NodeMap>();
+
+        node_map.remove(&label);
+    } else {
+        let labels = labels.0.to_vec();
+        let mut node_map = world.resource_mut::<NodeMap>();
+
+        node_map.retain(|key, _| !labels.contains(key));
+    }
+}
+
+impl core::ops::Deref for NodeLabels {
+    type Target = [InternedNodeLabel];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }

@@ -1,9 +1,7 @@
 //! Audio node connections and management.
 
-use crate::{
-    label::{InternedLabel, InternedNodeLabel},
-    AudioContext, MainBus, NodeLabel, SeedlingSystems,
-};
+use crate::label::NodeLabels;
+use crate::{label::InternedNodeLabel, AudioContext, MainBus, NodeLabel, SeedlingSystems};
 use bevy_app::Last;
 use bevy_ecs::{prelude::*, world::DeferredWorld};
 use bevy_log::{error, warn_once};
@@ -51,14 +49,14 @@ fn generate_param_events<T: AudioParam + Component + Clone + Send + Sync + 'stat
 }
 
 fn acquire_id<T: Into<Box<dyn AudioNode>> + Component + Clone>(
-    q: Query<(Entity, &T, Option<&InternedLabel>), Without<Node>>,
+    q: Query<(Entity, &T, Option<&NodeLabels>), Without<Node>>,
     mut context: ResMut<AudioContext>,
     mut commands: Commands,
     mut node_map: ResMut<NodeMap>,
 ) {
     context.with(|context| {
         if let Some(graph) = context.graph_mut() {
-            for (entity, container, label) in q.iter() {
+            for (entity, container, labels) in q.iter() {
                 let node = match graph.add_node(container.clone().into(), None) {
                     Ok(node) => node,
                     Err(e) => {
@@ -67,8 +65,8 @@ fn acquire_id<T: Into<Box<dyn AudioNode>> + Component + Clone>(
                     }
                 };
 
-                if let Some(label) = label {
-                    node_map.0.insert(label.0, node);
+                for label in labels.iter().flat_map(|l| l.iter()) {
+                    node_map.0.insert(*label, node);
                 }
                 commands.entity(entity).insert(Node(node));
             }
@@ -302,7 +300,7 @@ impl ConnectNode for EntityCommands<'_> {
 /// graph nodes.
 ///
 /// This will be automatically synchronized for
-/// entities with both a [`Node`] and [`InternedLabel`].
+/// entities with both a [`Node`] and [`NodeLabel`].
 #[derive(Default, Debug, Resource)]
 pub struct NodeMap(HashMap<InternedNodeLabel, NodeID>);
 

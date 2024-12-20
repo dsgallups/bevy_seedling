@@ -11,6 +11,7 @@ use firewheel::FirewheelConfig;
 
 pub mod context;
 pub mod label;
+pub mod lpf;
 pub mod node;
 pub mod sample;
 
@@ -34,13 +35,13 @@ pub use firewheel::basic_nodes::VolumeNode;
 ///
 /// ```
 /// # use bevy::prelude::*;
-/// # use bevy_seedling::{NodeLabel, VolumeNode, label::InternedLabel, ConnectNode,
+/// # use bevy_seedling::{NodeLabel, VolumeNode, ConnectNode,
 /// # sample::SamplePlayer};
 /// #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
 /// struct EffectsChain;
 ///
 /// fn system(server: Res<AssetServer>, mut commands: Commands) {
-///     commands.spawn((VolumeNode::new(0.25), InternedLabel::new(EffectsChain)));
+///     commands.spawn((VolumeNode::new(0.25), EffectsChain));
 ///
 ///     // Now, any node can simply use `EffectsChain`
 ///     // as a connection target.
@@ -49,6 +50,14 @@ pub use firewheel::basic_nodes::VolumeNode;
 ///         .connect(EffectsChain);
 /// }
 /// ```
+///
+/// [`NodeLabel`] also implements [`Component`] with the
+/// required machinery to automatically synchronize itself
+/// when inserted and removed. If you want custom component
+/// behavior for your node labels, you'll need to derive
+/// [`NodeLabel`] manually.
+///
+/// [`Component`]: bevy_ecs::component::Component
 pub use seedling_macros::NodeLabel;
 
 /// Sets for all `bevy_seedling` systems.
@@ -97,6 +106,7 @@ impl Plugin for SeedlingPlugin {
             .init_asset::<sample::Sample>()
             .register_asset_loader(sample::SampleLoader { sample_rate })
             .register_node::<sample::SamplePlayer>()
+            .register_params_node::<lpf::LowPassNode>()
             .register_params_node::<VolumeNode>()
             .configure_sets(
                 Last,
