@@ -23,13 +23,13 @@ bevy_log = "0.15"
 bevy_hierarchy = "0.15"
 bevy_asset = "0.15"
 bevy_math = "0.15"
-firewheel = { path = "../firewheel" }
+firewheel = { git = "https://github.com/corvusprudens/firewheel.git", rev = "87667bf" }
 symphonium = "0.2.2"
 symphonia = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 smallvec = "1.13"
 arrayvec = "0.7"
-seedling_macros = { path = "./seedling_macros" }
+seedling_macros = { path = "./seedling_macros", version = "0.1.0" }
 
 
 [dev-dependencies]
