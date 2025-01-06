@@ -14,10 +14,11 @@ fn main() {
         .add_systems(
             Startup,
             |server: Res<AssetServer>, mut commands: Commands| {
-                // Spawning a `SamplePlayer` node will play a sample
+                // Spawning a `SamplePlayer` component will play a sample
                 // once as soon as it's loaded.
                 //
-                // This node is implicitly connected to the `MainBus`.
+                // The sample will be assign to one of the playback nodes
+                // connected to the `SamplePoolBus`.
                 commands.spawn(SamplePlayer::new(server.load("snd_wobbler.wav")));
             },
         )

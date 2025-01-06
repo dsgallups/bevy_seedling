@@ -4,7 +4,7 @@
 
 extern crate self as bevy_seedling;
 
-use bevy_app::{Last, Plugin, Startup};
+use bevy_app::{Last, Plugin, PreStartup};
 use bevy_asset::AssetApp;
 use bevy_ecs::prelude::*;
 use firewheel::FirewheelConfig;
@@ -12,9 +12,9 @@ use firewheel::FirewheelConfig;
 pub mod activity;
 pub mod bpf;
 pub mod context;
-pub mod label;
 pub mod lpf;
 pub mod node;
+pub mod node_label;
 pub mod sample;
 pub mod saw;
 
@@ -23,9 +23,15 @@ pub mod profiling;
 
 pub use activity::{Pause, Stop};
 pub use context::AudioContext;
-pub use label::{MainBus, NodeLabel};
 pub use node::{ConnectNode, ConnectTarget, Node};
 pub use node::{RegisterNode, RegisterParamsNode};
+pub use node_label::{MainBus, NodeLabel};
+pub use sample::{
+    label::{DefaultPool, PoolLabel},
+    pool::SpawnPool,
+    PlaybackSettings, SamplePlayer,
+};
+pub use seedling_macros::{AudioParam, PoolLabel};
 
 // Re-export firewheel.
 //
@@ -34,6 +40,8 @@ pub use node::{RegisterNode, RegisterParamsNode};
 // may just be an arbitrary commit in a fork.
 pub use firewheel;
 pub use firewheel::basic_nodes::{MixNode, VolumeNode};
+pub use firewheel::node::RepeatMode;
+pub use firewheel::sampler::SamplerNode;
 
 /// Node label derive macro.
 ///
@@ -93,31 +101,49 @@ pub enum SeedlingSystems {
 /// This spawns the audio task in addition
 /// to inserting `bevy_seedling`'s systems
 /// and resources.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SeedlingPlugin {
     /// [`firewheel`]'s config, forwarded directly to
     /// the engine.
     ///
     /// [`firewheel`]: firewheel
-    pub settings: FirewheelConfig,
+    pub config: FirewheelConfig,
+
+    /// The number of sampler nodes for the default
+    /// sampler pool. If `None` is provided,
+    /// the default pool will not be spawned, allowing
+    /// you to set it up how you like.
+    ///
+    /// This must not exceed 32 nodes.
+    pub sample_pool_size: Option<usize>,
+}
+
+impl Default for SeedlingPlugin {
+    fn default() -> Self {
+        Self {
+            config: Default::default(),
+            sample_pool_size: Some(24),
+        }
+    }
 }
 
 impl Plugin for SeedlingPlugin {
     fn build(&self, app: &mut bevy_app::App) {
-        let mut context = AudioContext::new(self.settings);
+        let mut context = AudioContext::new(self.config);
         let sample_rate = context.with(|ctx| ctx.stream_info().unwrap().sample_rate);
+        let sample_pool_size = self.sample_pool_size;
 
         app.insert_resource(context)
             .init_resource::<node::NodeMap>()
             .init_resource::<node::PendingRemovals>()
             .init_asset::<sample::Sample>()
             .register_asset_loader(sample::SampleLoader { sample_rate })
-            .register_node::<sample::SamplePlayer>()
             .register_params_node::<saw::SawNode>()
             .register_params_node::<lpf::LowPassNode>()
             .register_params_node::<bpf::BandPassNode>()
             .register_params_node::<VolumeNode>()
             .register_node::<MixNode>()
+            .register_node::<SamplerNode>()
             .configure_sets(
                 Last,
                 (
@@ -128,16 +154,14 @@ impl Plugin for SeedlingPlugin {
                         .after(SeedlingSystems::Queue),
                 ),
             )
-            .add_systems(Startup, label::insert_main_bus)
+            .add_systems(PreStartup, node_label::insert_main_bus)
             .add_systems(
                 Last,
                 (
-                    sample::on_add.in_set(SeedlingSystems::Acquire),
                     node::auto_connect
                         .before(SeedlingSystems::Connect)
                         .after(SeedlingSystems::Acquire),
                     node::process_connections.in_set(SeedlingSystems::Connect),
-                    sample::trigger_pending_samples.in_set(SeedlingSystems::Queue),
                     (
                         node::process_removals,
                         node::flush_events,
@@ -146,6 +170,13 @@ impl Plugin for SeedlingPlugin {
                         .chain()
                         .in_set(SeedlingSystems::Flush),
                 ),
-            );
+            )
+            .add_systems(PreStartup, move |mut commands: Commands| {
+                if let Some(size) = sample_pool_size {
+                    commands.spawn_pool(DefaultPool, size);
+                }
+            });
+
+        app.add_plugins(sample::pool::SamplePoolPlugin);
     }
 }

@@ -2,9 +2,8 @@
 
 use bevy_ecs::prelude::*;
 use firewheel::{
-    node::{AudioNode, AudioNodeProcessor, EventData, ProcessStatus},
-    param::AudioParam,
-    param::Timeline,
+    node::{AudioNode, AudioNodeProcessor, NodeEventType, ProcessStatus},
+    param::{AudioParam, ParamEvent, Timeline},
     ChannelConfig, ChannelCount,
 };
 
@@ -20,10 +19,10 @@ impl BandPassNode {
     /// Create a new [`BandPassNode`] with an initial cutoff frequency and quality.
     ///
     /// ```
-    /// # use bevy_seedling::{*, lpf::BandPassNode};
+    /// # use bevy_seedling::{*, bpf::BandPassNode};
     /// # use bevy::prelude::*;
     /// # fn system(mut commands: Commands) {
-    /// commands.spawn(BandPassNode::new(1000.0));
+    /// commands.spawn(BandPassNode::new(1000.0, 1.0));
     /// # }
     /// ```
     pub fn new(frequency: f32, q: f32) -> Self {
@@ -70,7 +69,7 @@ impl AudioNode for BandPassNode {
             params: self.clone(),
             channels: vec![
                 Bpf::new(
-                    stream_info.sample_rate as f32,
+                    stream_info.sample_rate.get() as f32,
                     self.frequency.get(),
                     self.q.get()
                 );
@@ -144,20 +143,14 @@ impl AudioNodeProcessor for BandPassProcessor {
         events: firewheel::node::NodeEventIter,
         proc_info: firewheel::node::ProcInfo,
     ) -> ProcessStatus {
-        // It would be nice if this process were made a little
-        // more smooth, or it should at least be easy to
-        // properly report errors without panicking or allocations.
         for event in events {
-            if let EventData::Parameter(p) = event {
-                let _ = self.params.patch(&p.data, &p.path);
+            if let NodeEventType::Custom(event) = event {
+                if let Some(param) = event.downcast_ref::<ParamEvent>() {
+                    let _ = self.params.patch(&param.data, &param.path);
+                }
             }
         }
 
-        // Actually this won't _technically_ be true, since
-        // the filter may cary over a bit of energy from
-        // when the inputs were just active.
-        //
-        // Allowing a bit of settling time would resolve this.
         if proc_info.in_silence_mask.all_channels_silent(inputs.len()) {
             // All inputs are silent.
             return ProcessStatus::ClearAllOutputs;
@@ -165,13 +158,20 @@ impl AudioNodeProcessor for BandPassProcessor {
 
         let seconds = proc_info.clock_seconds;
         for sample in 0..inputs[0].len() {
-            let seconds = seconds
-                + firewheel::clock::ClockSeconds(sample as f64 * proc_info.sample_rate_recip);
-            self.params.tick(seconds);
-            let frequency = self.params.frequency.get();
+            if sample % 32 == 0 {
+                let seconds = seconds
+                    + firewheel::clock::ClockSeconds(sample as f64 * proc_info.sample_rate_recip);
+                self.params.tick(seconds);
+                let frequency = self.params.frequency.get();
+                let q = self.params.q.get();
+
+                for channel in self.channels.iter_mut() {
+                    channel.center_freq = frequency;
+                    channel.q = q;
+                }
+            }
 
             for (i, channel) in self.channels.iter_mut().enumerate() {
-                channel.center_freq = frequency;
                 outputs[i][sample] = channel.process(inputs[i][sample]);
             }
         }
