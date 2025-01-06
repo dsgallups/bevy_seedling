@@ -19,7 +19,7 @@ impl Plugin for SamplePoolPlugin {
             (
                 (remove_finished, assign_default)
                     .before(SeedlingSystems::Queue)
-                    .after(SeedlingSystems::Connect),
+                    .after(SeedlingSystems::Acquire),
                 monitor_active
                     .before(SeedlingSystems::Flush)
                     .after(SeedlingSystems::Queue),
