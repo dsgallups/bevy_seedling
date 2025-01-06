@@ -69,8 +69,7 @@ if necessary.
 - Graph operations
 
   Audio entities currently support only a subset of the underlying
-  Firewheel graph API. In particular, disconnecting nodes and
-  providing non-default channel configurations will
+  Firewheel graph API. In particular, the ability to disconnect nodes will
   need to be added.
 
 - Platform support
