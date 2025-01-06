@@ -14,7 +14,7 @@ bevy_seedling = "0.2"
 
 # At this stage, it may be better to track the main branch
 [dependencies]
-bevy_seedling = { git = "https://github.com/corvusprudens/bevy_seedling" }
+bevy_seedling = { git = "https://github.com/corvusprudens/bevy_seedling.git" }
 ```
 
 Then, you'll need to add the [`SeedlingPlugin`] to your app.
