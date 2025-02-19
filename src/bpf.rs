@@ -1,14 +1,18 @@
 //! A simple band-pass filter.
 
+use crate::timeline::Timeline;
 use bevy_ecs::prelude::*;
-use firewheel::{
-    node::{AudioNode, AudioNodeProcessor, NodeEventType, ProcessStatus},
-    param::{AudioParam, ParamEvent, Timeline},
-    ChannelConfig, ChannelCount,
+use firewheel::prelude::{
+    channel_config::{ChannelConfig, ChannelCount},
+    diff::{Diff, Patch},
+    event::NodeEventList,
+    node::{
+        AudioNodeConstructor, AudioNodeInfo, AudioNodeProcessor, ProcessStatus, NUM_SCRATCH_BUFFERS,
+    },
 };
 
 /// A simple low-pass filter.
-#[derive(seedling_macros::AudioParam, Debug, Clone, Component)]
+#[derive(Diff, Patch, Debug, Clone, Component)]
 pub struct BandPassNode {
     /// The cutoff frequency in hertz.
     pub frequency: Timeline<f32>,
@@ -33,39 +37,23 @@ impl BandPassNode {
     }
 }
 
-impl From<BandPassNode> for Box<dyn AudioNode> {
-    fn from(value: BandPassNode) -> Self {
-        Box::new(value)
-    }
-}
-
-impl AudioNode for BandPassNode {
-    fn debug_name(&self) -> &'static str {
-        "band pass filter"
-    }
-
-    fn info(&self) -> firewheel::node::AudioNodeInfo {
-        firewheel::node::AudioNodeInfo {
-            num_min_supported_inputs: ChannelCount::MONO,
-            num_max_supported_inputs: ChannelCount::MAX,
-            num_min_supported_outputs: ChannelCount::MONO,
-            num_max_supported_outputs: ChannelCount::MAX,
-            equal_num_ins_and_outs: true,
-            default_channel_config: ChannelConfig {
-                num_inputs: ChannelCount::STEREO,
-                num_outputs: ChannelCount::STEREO,
+impl AudioNodeConstructor for BandPassNode {
+    fn info(&self) -> AudioNodeInfo {
+        AudioNodeInfo {
+            debug_name: "band pass filter",
+            channel_config: ChannelConfig {
+                num_inputs: ChannelCount::MAX,
+                num_outputs: ChannelCount::MAX,
             },
-            updates: false,
             uses_events: true,
         }
     }
 
-    fn activate(
+    fn processor(
         &mut self,
         stream_info: &firewheel::StreamInfo,
-        channel_config: ChannelConfig,
-    ) -> Result<Box<dyn firewheel::node::AudioNodeProcessor>, Box<dyn std::error::Error>> {
-        Ok(Box::new(BandPassProcessor {
+    ) -> Box<dyn firewheel::node::AudioNodeProcessor> {
+        Box::new(BandPassProcessor {
             params: self.clone(),
             channels: vec![
                 Bpf::new(
@@ -73,9 +61,9 @@ impl AudioNode for BandPassNode {
                     self.frequency.get(),
                     self.q.get()
                 );
-                channel_config.num_inputs.get() as usize
+                2
             ],
-        }))
+        })
     }
 }
 
@@ -140,28 +128,24 @@ impl AudioNodeProcessor for BandPassProcessor {
         &mut self,
         inputs: &[&[f32]],
         outputs: &mut [&mut [f32]],
-        events: firewheel::node::NodeEventIter,
-        proc_info: firewheel::node::ProcInfo,
+        events: NodeEventList,
+        proc_info: &firewheel::node::ProcInfo,
+        _: &mut [&mut [f32]; NUM_SCRATCH_BUFFERS],
     ) -> ProcessStatus {
-        for event in events {
-            if let NodeEventType::Custom(event) = event {
-                if let Some(param) = event.downcast_ref::<ParamEvent>() {
-                    let _ = self.params.patch(&param.data, &param.path);
-                }
-            }
-        }
+        self.params.patch_list(events);
 
         if proc_info.in_silence_mask.all_channels_silent(inputs.len()) {
             // All inputs are silent.
             return ProcessStatus::ClearAllOutputs;
         }
 
-        let seconds = proc_info.clock_seconds;
+        let seconds = proc_info.clock_seconds.start;
+        let frame_time = (proc_info.clock_seconds.end.0 - proc_info.clock_seconds.start.0)
+            / proc_info.frames as f64;
         for sample in 0..inputs[0].len() {
             if sample % 32 == 0 {
-                let seconds = seconds
-                    + firewheel::clock::ClockSeconds(sample as f64 * proc_info.sample_rate_recip);
-                self.params.tick(seconds);
+                let seconds = seconds + firewheel::clock::ClockSeconds(sample as f64 * frame_time);
+                self.params.frequency.tick(seconds);
                 let frequency = self.params.frequency.get();
                 let q = self.params.q.get();
 

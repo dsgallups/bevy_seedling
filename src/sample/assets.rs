@@ -1,16 +1,17 @@
 use bevy_asset::{Asset, AssetLoader};
 use bevy_reflect::TypePath;
+use firewheel::collector::ArcGc;
 use firewheel::sample_resource::SampleResource;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
 /// An audio sample.
 #[derive(Asset, TypePath, Clone)]
-pub struct Sample(Arc<dyn SampleResource>);
+pub struct Sample(ArcGc<dyn SampleResource>);
 
 impl Sample {
     /// Share the inner value.
-    pub fn get(&self) -> Arc<dyn SampleResource> {
+    pub fn get(&self) -> ArcGc<dyn SampleResource> {
         self.0.clone()
     }
 }
@@ -88,7 +89,9 @@ impl AssetLoader for SampleLoader {
             Default::default(),
         )?;
 
-        Ok(Sample(Arc::new(source)))
+        Ok(Sample(ArcGc::new_unsized(|| {
+            Arc::new(source) as Arc<dyn SampleResource>
+        })))
     }
 
     fn extensions(&self) -> &[&str] {

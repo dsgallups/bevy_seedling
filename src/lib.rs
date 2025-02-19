@@ -7,21 +7,23 @@ extern crate self as bevy_seedling;
 use bevy_app::{Last, Plugin, PreStartup};
 use bevy_asset::AssetApp;
 use bevy_ecs::prelude::*;
-use firewheel::FirewheelConfig;
+use firewheel::nodes::volume::VolumeParams;
+use firewheel::prelude::FirewheelConfig;
 
-pub mod activity;
 pub mod bpf;
 pub mod context;
+pub mod fixed_vec;
 pub mod lpf;
 pub mod node;
 pub mod node_label;
 pub mod sample;
-pub mod saw;
+pub mod timeline;
+
+mod firewheel_nodes;
 
 #[cfg(feature = "profiling")]
 pub mod profiling;
 
-pub use activity::{Pause, Stop};
 pub use context::AudioContext;
 pub use node::{ConnectNode, ConnectTarget, Node};
 pub use node::{RegisterNode, RegisterParamsNode};
@@ -32,16 +34,6 @@ pub use sample::{
     PlaybackSettings, SamplePlayer,
 };
 pub use seedling_macros::{AudioParam, PoolLabel};
-
-// Re-export firewheel.
-//
-// This will be convenient during development since
-// the version of firewheel tracked by this crate
-// may just be an arbitrary commit in a fork.
-pub use firewheel;
-pub use firewheel::basic_nodes::{MixNode, VolumeNode};
-pub use firewheel::node::RepeatMode;
-pub use firewheel::sampler::SamplerNode;
 
 /// Node label derive macro.
 ///
@@ -138,12 +130,10 @@ impl Plugin for SeedlingPlugin {
             .init_resource::<node::PendingRemovals>()
             .init_asset::<sample::Sample>()
             .register_asset_loader(sample::SampleLoader { sample_rate })
-            .register_params_node::<saw::SawNode>()
             .register_params_node::<lpf::LowPassNode>()
-            .register_params_node::<bpf::BandPassNode>()
-            .register_params_node::<VolumeNode>()
-            .register_node::<MixNode>()
-            .register_node::<SamplerNode>()
+            // .register_params_node::<bpf::BandPassNode>()
+            .register_params_node::<VolumeParams>()
+            .register_node::<firewheel::nodes::sampler::SamplerHandle>()
             .configure_sets(
                 Last,
                 (

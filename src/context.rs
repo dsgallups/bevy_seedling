@@ -2,7 +2,7 @@
 
 use bevy_ecs::prelude::*;
 use bevy_log::error;
-use firewheel::{clock::ClockSeconds, FirewheelConfig, FirewheelCpalCtx, UpdateStatus};
+use firewheel::prelude::{clock::ClockSeconds, FirewheelConfig, FirewheelContext};
 use std::sync::mpsc;
 
 /// A thread-safe wrapper around the underlying Firewheel audio context.
@@ -25,9 +25,9 @@ impl AudioContext {
     pub fn new(settings: FirewheelConfig) -> Self {
         let (bev_to_audio_tx, bev_to_audio_rx) = mpsc::channel::<ThreadLocalCall>();
         std::thread::spawn(move || {
-            let mut context = FirewheelCpalCtx::new(settings);
+            let mut context = FirewheelContext::new(settings);
             context
-                .activate(Default::default())
+                .start_stream(Default::default())
                 .expect("failed to activate the audio context");
 
             while let Ok(func) = bev_to_audio_rx.recv() {
@@ -39,7 +39,7 @@ impl AudioContext {
     }
 }
 
-type ThreadLocalCall = Box<dyn FnOnce(&mut FirewheelCpalCtx) + Send + 'static>;
+type ThreadLocalCall = Box<dyn FnOnce(&mut FirewheelContext) + Send + 'static>;
 
 impl AudioContext {
     /// Get an absolute timestamp from the audio thread of the current time.
@@ -65,7 +65,7 @@ impl AudioContext {
     /// }
     /// ```
     pub fn now(&mut self) -> ClockSeconds {
-        self.with(|c| c.graph().clock_now())
+        self.with(|c| c.clock_now())
     }
 
     /// Send `f` to the underlying control thread to operate on the audio context.
@@ -89,11 +89,11 @@ impl AudioContext {
     /// This API is based on [this PR](https://github.com/bevyengine/bevy/pull/9122).
     pub fn with<F, O>(&mut self, f: F) -> O
     where
-        F: FnOnce(&mut FirewheelCpalCtx) -> O + Send,
+        F: FnOnce(&mut FirewheelContext) -> O + Send,
         O: Send + 'static,
     {
         let (send, receive) = mpsc::sync_channel(1);
-        let func: Box<dyn FnOnce(&mut FirewheelCpalCtx) + Send> = Box::new(move |ctx| {
+        let func: Box<dyn FnOnce(&mut FirewheelContext) + Send> = Box::new(move |ctx| {
             let result = f(ctx);
             send.send(result).unwrap();
         });
@@ -104,8 +104,8 @@ impl AudioContext {
         // so we can pretend it has a static lifetime.
         let func = unsafe {
             core::mem::transmute::<
-                Box<dyn FnOnce(&mut FirewheelCpalCtx) + Send>,
-                Box<dyn FnOnce(&mut FirewheelCpalCtx) + Send + 'static>,
+                Box<dyn FnOnce(&mut FirewheelContext) + Send>,
+                Box<dyn FnOnce(&mut FirewheelContext) + Send + 'static>,
             >(func)
         };
 
@@ -119,17 +119,8 @@ impl AudioContext {
 
 pub(crate) fn update_context(mut context: ResMut<AudioContext>) {
     context.with(|context| {
-        match context.update() {
-            UpdateStatus::Inactive => {}
-            UpdateStatus::Active { graph_error } => {
-                if let Some(e) = graph_error {
-                    error!("graph error: {}", e);
-                }
-            }
-            UpdateStatus::Deactivated { error, .. } => {
-                error!("Deactivated unexpectedly: {:?}", error);
-            }
+        if let Err(e) = context.update() {
+            error!("graph error: {:?}", e);
         }
-        context.flush_events();
     });
 }

@@ -3,11 +3,11 @@
 
 use bevy::{log::LogPlugin, prelude::*};
 use bevy_seedling::{
-    firewheel::{basic_nodes::VolumeNode, clock::ClockSeconds},
     lpf::LowPassNode,
     sample::{pool::SpawnPool, SamplePlayer},
     AudioContext, ConnectNode, NodeLabel, PlaybackSettings, PoolLabel, SeedlingPlugin,
 };
+use firewheel::{clock::ClockSeconds, nodes::volume::VolumeParams};
 
 #[derive(NodeLabel, PartialEq, Eq, Debug, Hash, Clone)]
 struct EffectsBus;
@@ -39,7 +39,12 @@ fn main() {
                 // can use this type to connect to this node anywhere in
                 // the code.
                 commands
-                    .spawn((VolumeNode::new(1.), EffectsBus))
+                    .spawn((
+                        VolumeParams {
+                            normalized_volume: 1.0,
+                        },
+                        EffectsBus,
+                    ))
                     .connect(effects);
 
                 // Let's create a new sample player pool and route it to our effects bus.

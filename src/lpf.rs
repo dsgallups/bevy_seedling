@@ -1,14 +1,18 @@
 //! One-pole, low-pass filter.
 
+use crate::{node::NodeConstructor, timeline::Timeline};
 use bevy_ecs::prelude::*;
-use firewheel::{
-    node::{AudioNode, AudioNodeProcessor, NodeEventType, ProcessStatus},
-    param::{AudioParam, ParamEvent, Timeline},
-    ChannelConfig, ChannelCount,
+use firewheel::prelude::{
+    channel_config::{ChannelConfig, NonZeroChannelCount},
+    diff::{Diff, Patch},
+    event::NodeEventList,
+    node::{
+        AudioNodeConstructor, AudioNodeInfo, AudioNodeProcessor, ProcessStatus, NUM_SCRATCH_BUFFERS,
+    },
 };
 
 /// A one-pole, low-pass filter.
-#[derive(seedling_macros::AudioParam, Debug, Clone, Component)]
+#[derive(Diff, Patch, Debug, Clone, Component)]
 pub struct LowPassNode {
     /// The cutoff frequency in hertz.
     pub frequency: Timeline<f32>,
@@ -31,45 +35,65 @@ impl LowPassNode {
     }
 }
 
-impl From<LowPassNode> for Box<dyn AudioNode> {
-    fn from(value: LowPassNode) -> Self {
-        Box::new(value)
+#[derive(Debug, Component)]
+pub struct LowPassConfiguration {
+    pub channels: NonZeroChannelCount,
+}
+
+impl Default for LowPassConfiguration {
+    fn default() -> Self {
+        Self {
+            channels: NonZeroChannelCount::new(2).unwrap(),
+        }
     }
 }
 
-impl AudioNode for LowPassNode {
-    fn debug_name(&self) -> &'static str {
-        "low pass filter"
-    }
+struct LowPassConstructor {
+    node: LowPassNode,
+    channels: NonZeroChannelCount,
+}
 
+impl NodeConstructor for LowPassNode {
+    type Configuration = LowPassConfiguration;
+
+    fn construct(
+        &self,
+        _: &firewheel::core::StreamInfo,
+        config: &Self::Configuration,
+    ) -> impl AudioNodeConstructor + 'static {
+        LowPassConstructor {
+            node: self.clone(),
+            channels: config.channels,
+        }
+    }
+}
+
+impl AudioNodeConstructor for LowPassConstructor {
     fn info(&self) -> firewheel::node::AudioNodeInfo {
-        firewheel::node::AudioNodeInfo {
-            num_min_supported_inputs: ChannelCount::MONO,
-            num_max_supported_inputs: ChannelCount::MAX,
-            num_min_supported_outputs: ChannelCount::MONO,
-            num_max_supported_outputs: ChannelCount::MAX,
-            equal_num_ins_and_outs: true,
-            default_channel_config: ChannelConfig {
-                num_inputs: ChannelCount::STEREO,
-                num_outputs: ChannelCount::STEREO,
+        AudioNodeInfo {
+            debug_name: "low-pass filter",
+            channel_config: ChannelConfig {
+                num_inputs: self.channels.get(),
+                num_outputs: self.channels.get(),
             },
-            updates: false,
             uses_events: true,
         }
     }
 
-    fn activate(
+    fn processor(
         &mut self,
         stream_info: &firewheel::StreamInfo,
-        channel_config: ChannelConfig,
-    ) -> Result<Box<dyn firewheel::node::AudioNodeProcessor>, Box<dyn std::error::Error>> {
-        Ok(Box::new(LowPassProcessor {
-            params: self.clone(),
+    ) -> Box<dyn firewheel::node::AudioNodeProcessor> {
+        Box::new(LowPassProcessor {
+            params: self.node.clone(),
             channels: vec![
-                Lpf::new(stream_info.sample_rate.get() as f32, self.frequency.get());
-                channel_config.num_inputs.get() as usize
+                Lpf::new(
+                    stream_info.sample_rate.get() as f32,
+                    self.node.frequency.get()
+                );
+                self.channels.get().get() as usize
             ],
-        }))
+        })
     }
 }
 
@@ -125,19 +149,11 @@ impl AudioNodeProcessor for LowPassProcessor {
         &mut self,
         inputs: &[&[f32]],
         outputs: &mut [&mut [f32]],
-        events: firewheel::node::NodeEventIter,
-        proc_info: firewheel::node::ProcInfo,
+        events: NodeEventList,
+        proc_info: &firewheel::node::ProcInfo,
+        _: &mut [&mut [f32]; NUM_SCRATCH_BUFFERS],
     ) -> ProcessStatus {
-        // It would be nice if this process were made a little
-        // more smooth, or it should at least be easy to
-        // properly report errors without panicking or allocations.
-        for event in events {
-            if let NodeEventType::Custom(event) = event {
-                if let Some(param) = event.downcast_ref::<ParamEvent>() {
-                    let _ = self.params.patch(&param.data, &param.path);
-                }
-            }
-        }
+        self.params.patch_list(events);
 
         // Actually this won't _technically_ be true, since
         // the filter may cary over a bit of energy from
@@ -149,12 +165,13 @@ impl AudioNodeProcessor for LowPassProcessor {
             return ProcessStatus::ClearAllOutputs;
         }
 
-        let seconds = proc_info.clock_seconds;
+        let seconds = proc_info.clock_seconds.start;
+        let frame_time = (proc_info.clock_seconds.end.0 - proc_info.clock_seconds.start.0)
+            / proc_info.frames as f64;
         for sample in 0..inputs[0].len() {
             if sample % 32 == 0 {
-                let seconds = seconds
-                    + firewheel::clock::ClockSeconds(sample as f64 * proc_info.sample_rate_recip);
-                self.params.tick(seconds);
+                let seconds = seconds + firewheel::clock::ClockSeconds(sample as f64 * frame_time);
+                self.params.frequency.tick(seconds);
                 let frequency = self.params.frequency.get();
 
                 for channel in self.channels.iter_mut() {
