@@ -1,7 +1,6 @@
 use bevy_asset::{Asset, AssetLoader};
 use bevy_reflect::TypePath;
-use firewheel::collector::ArcGc;
-use firewheel::sample_resource::SampleResource;
+use firewheel::{collector::ArcGc, sample_resource::SampleResource};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 

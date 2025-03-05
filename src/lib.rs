@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 #![allow(clippy::type_complexity)]
+#![expect(clippy::needless_doctest_main)]
 #![warn(missing_debug_implementations)]
 
 extern crate self as bevy_seedling;
@@ -7,8 +8,8 @@ extern crate self as bevy_seedling;
 use bevy_app::{Last, Plugin, PreStartup};
 use bevy_asset::AssetApp;
 use bevy_ecs::prelude::*;
-use firewheel::nodes::volume::VolumeParams;
-use firewheel::prelude::FirewheelConfig;
+use firewheel::nodes::volume::VolumeNode;
+use firewheel::FirewheelConfig;
 
 pub mod bpf;
 pub mod context;
@@ -19,21 +20,19 @@ pub mod node_label;
 pub mod sample;
 pub mod timeline;
 
-mod firewheel_nodes;
-
 #[cfg(feature = "profiling")]
 pub mod profiling;
 
 pub use context::AudioContext;
+pub use node::RegisterNode;
 pub use node::{ConnectNode, ConnectTarget, Node};
-pub use node::{RegisterNode, RegisterParamsNode};
 pub use node_label::{MainBus, NodeLabel};
 pub use sample::{
     label::{DefaultPool, PoolLabel},
     pool::SpawnPool,
     PlaybackSettings, SamplePlayer,
 };
-pub use seedling_macros::{AudioParam, PoolLabel};
+pub use seedling_macros::PoolLabel;
 
 /// Node label derive macro.
 ///
@@ -105,8 +104,6 @@ pub struct SeedlingPlugin {
     /// sampler pool. If `None` is provided,
     /// the default pool will not be spawned, allowing
     /// you to set it up how you like.
-    ///
-    /// This must not exceed 32 nodes.
     pub sample_pool_size: Option<usize>,
 }
 
@@ -130,42 +127,49 @@ impl Plugin for SeedlingPlugin {
             .init_resource::<node::PendingRemovals>()
             .init_asset::<sample::Sample>()
             .register_asset_loader(sample::SampleLoader { sample_rate })
-            .register_params_node::<lpf::LowPassNode>()
-            // .register_params_node::<bpf::BandPassNode>()
-            .register_params_node::<VolumeParams>()
-            .register_node::<firewheel::nodes::sampler::SamplerHandle>()
-            .configure_sets(
-                Last,
+            .register_node::<lpf::LowPassNode>()
+            .register_node::<bpf::BandPassNode>()
+            .register_node::<VolumeNode>()
+            .register_node::<firewheel::nodes::volume_pan::VolumePanNode>()
+            .register_simple_node::<firewheel::nodes::StereoToMonoNode>()
+            .register_simple_node::<firewheel::nodes::sampler::SamplerNode>();
+
+        #[cfg(feature = "stream")]
+        app.register_simple_node::<firewheel::nodes::stream::reader::StreamReaderNode>()
+            .register_simple_node::<firewheel::nodes::stream::writer::StreamWriterNode>();
+
+        app.configure_sets(
+            Last,
+            (
+                SeedlingSystems::Connect.after(SeedlingSystems::Acquire),
+                SeedlingSystems::Queue.after(SeedlingSystems::Acquire),
+                SeedlingSystems::Flush
+                    .after(SeedlingSystems::Connect)
+                    .after(SeedlingSystems::Queue),
+            ),
+        )
+        .add_systems(PreStartup, node_label::insert_main_bus)
+        .add_systems(
+            Last,
+            (
+                node::auto_connect
+                    .before(SeedlingSystems::Connect)
+                    .after(SeedlingSystems::Acquire),
+                node::process_connections.in_set(SeedlingSystems::Connect),
                 (
-                    SeedlingSystems::Connect.after(SeedlingSystems::Acquire),
-                    SeedlingSystems::Queue.after(SeedlingSystems::Acquire),
-                    SeedlingSystems::Flush
-                        .after(SeedlingSystems::Connect)
-                        .after(SeedlingSystems::Queue),
-                ),
-            )
-            .add_systems(PreStartup, node_label::insert_main_bus)
-            .add_systems(
-                Last,
-                (
-                    node::auto_connect
-                        .before(SeedlingSystems::Connect)
-                        .after(SeedlingSystems::Acquire),
-                    node::process_connections.in_set(SeedlingSystems::Connect),
-                    (
-                        node::process_removals,
-                        node::flush_events,
-                        context::update_context,
-                    )
-                        .chain()
-                        .in_set(SeedlingSystems::Flush),
-                ),
-            )
-            .add_systems(PreStartup, move |mut commands: Commands| {
-                if let Some(size) = sample_pool_size {
-                    commands.spawn_pool(DefaultPool, size);
-                }
-            });
+                    node::process_removals,
+                    node::flush_events,
+                    context::update_context,
+                )
+                    .chain()
+                    .in_set(SeedlingSystems::Flush),
+            ),
+        )
+        .add_systems(PreStartup, move |mut commands: Commands| {
+            if let Some(size) = sample_pool_size {
+                commands.spawn_pool(DefaultPool, size);
+            }
+        });
 
         app.add_plugins(sample::pool::SamplePoolPlugin);
     }

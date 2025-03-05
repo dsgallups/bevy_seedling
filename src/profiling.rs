@@ -1,8 +1,10 @@
 //! Profiling utilities.
 
 use firewheel::{
-    backend::AudioBackend, clock::ClockSeconds, processor::FirewheelProcessor, FirewheelCtx,
-    StreamInfo,
+    backend::{AudioBackend, DeviceInfo},
+    clock::ClockSeconds,
+    processor::FirewheelProcessor,
+    FirewheelCtx, StreamInfo,
 };
 use std::num::NonZeroU32;
 
@@ -15,12 +17,20 @@ pub struct ProfilingContext {
     sample_rate_recip: f64,
 }
 
-struct ProfilingBackend {
+pub struct ProfilingBackend {
     processor: Option<FirewheelProcessor>,
 }
 
+impl core::fmt::Debug for ProfilingBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProfilingBackend")
+            .field("processor", &())
+            .finish()
+    }
+}
+
 #[derive(Debug)]
-struct ProfilingError;
+pub struct ProfilingError;
 
 impl core::fmt::Display for ProfilingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -36,11 +46,11 @@ impl AudioBackend for ProfilingBackend {
     type StartStreamError = ProfilingError;
     type StreamError = ProfilingError;
 
-    fn available_input_devices() -> Vec<firewheel::backend::DeviceInfo> {
+    fn available_input_devices() -> Vec<DeviceInfo> {
         vec![]
     }
 
-    fn available_output_devices() -> Vec<firewheel::backend::DeviceInfo> {
+    fn available_output_devices() -> Vec<DeviceInfo> {
         vec![]
     }
 
@@ -58,6 +68,7 @@ impl AudioBackend for ProfilingBackend {
                 declick_frames: NonZeroU32::new(16).unwrap(),
                 input_device_name: None,
                 output_device_name: None,
+                input_to_output_latency_seconds: 0.0,
             },
         ))
     }
@@ -84,6 +95,7 @@ impl ProfilingContext {
         }
     }
 
+    #[expect(unused)]
     pub fn process_interleaved(&mut self, input: &[f32], output: &mut [f32]) {
         let samples = output.len() / 2;
 

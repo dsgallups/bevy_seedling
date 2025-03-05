@@ -1,14 +1,15 @@
 //! One-pole, low-pass filter.
 
-use crate::{node::NodeConstructor, timeline::Timeline};
+use crate::timeline::Timeline;
 use bevy_ecs::prelude::*;
-use firewheel::prelude::{
+use firewheel::{
     channel_config::{ChannelConfig, NonZeroChannelCount},
+    clock::ClockSeconds,
     diff::{Diff, Patch},
     event::NodeEventList,
-    node::{
-        AudioNodeConstructor, AudioNodeInfo, AudioNodeProcessor, ProcessStatus, NUM_SCRATCH_BUFFERS,
-    },
+    node::ProcInfo,
+    node::{AudioNode, AudioNodeInfo, AudioNodeProcessor, ProcessStatus, NUM_SCRATCH_BUFFERS},
+    StreamInfo,
 };
 
 /// A one-pole, low-pass filter.
@@ -35,65 +36,44 @@ impl LowPassNode {
     }
 }
 
-#[derive(Debug, Component)]
-pub struct LowPassConfiguration {
+#[derive(Debug, Component, Clone)]
+pub struct LowPassConfig {
     pub channels: NonZeroChannelCount,
 }
 
-impl Default for LowPassConfiguration {
+impl Default for LowPassConfig {
     fn default() -> Self {
         Self {
-            channels: NonZeroChannelCount::new(2).unwrap(),
+            channels: NonZeroChannelCount::STEREO,
         }
     }
 }
 
-struct LowPassConstructor {
-    node: LowPassNode,
-    channels: NonZeroChannelCount,
-}
+impl AudioNode for LowPassNode {
+    type Configuration = LowPassConfig;
 
-impl NodeConstructor for LowPassNode {
-    type Configuration = LowPassConfiguration;
-
-    fn construct(
-        &self,
-        _: &firewheel::core::StreamInfo,
-        config: &Self::Configuration,
-    ) -> impl AudioNodeConstructor + 'static {
-        LowPassConstructor {
-            node: self.clone(),
-            channels: config.channels,
-        }
-    }
-}
-
-impl AudioNodeConstructor for LowPassConstructor {
-    fn info(&self) -> firewheel::node::AudioNodeInfo {
-        AudioNodeInfo {
-            debug_name: "low-pass filter",
-            channel_config: ChannelConfig {
-                num_inputs: self.channels.get(),
-                num_outputs: self.channels.get(),
-            },
-            uses_events: true,
-        }
+    fn info(&self, config: &Self::Configuration) -> AudioNodeInfo {
+        AudioNodeInfo::new()
+            .debug_name("low-pass filter")
+            .channel_config(ChannelConfig {
+                num_inputs: config.channels.get(),
+                num_outputs: config.channels.get(),
+            })
+            .uses_events(true)
     }
 
     fn processor(
-        &mut self,
-        stream_info: &firewheel::StreamInfo,
-    ) -> Box<dyn firewheel::node::AudioNodeProcessor> {
-        Box::new(LowPassProcessor {
-            params: self.node.clone(),
+        &self,
+        config: &Self::Configuration,
+        stream_info: &StreamInfo,
+    ) -> impl AudioNodeProcessor {
+        LowPassProcessor {
+            params: self.clone(),
             channels: vec![
-                Lpf::new(
-                    stream_info.sample_rate.get() as f32,
-                    self.node.frequency.get()
-                );
-                self.channels.get().get() as usize
+                Lpf::new(stream_info.sample_rate.get() as f32, self.frequency.get());
+                config.channels.get().get() as usize
             ],
-        })
+        }
     }
 }
 
@@ -150,7 +130,7 @@ impl AudioNodeProcessor for LowPassProcessor {
         inputs: &[&[f32]],
         outputs: &mut [&mut [f32]],
         events: NodeEventList,
-        proc_info: &firewheel::node::ProcInfo,
+        proc_info: &ProcInfo,
         _: &mut [&mut [f32]; NUM_SCRATCH_BUFFERS],
     ) -> ProcessStatus {
         self.params.patch_list(events);
@@ -170,7 +150,7 @@ impl AudioNodeProcessor for LowPassProcessor {
             / proc_info.frames as f64;
         for sample in 0..inputs[0].len() {
             if sample % 32 == 0 {
-                let seconds = seconds + firewheel::clock::ClockSeconds(sample as f64 * frame_time);
+                let seconds = seconds + ClockSeconds(sample as f64 * frame_time);
                 self.params.frequency.tick(seconds);
                 let frequency = self.params.frequency.get();
 

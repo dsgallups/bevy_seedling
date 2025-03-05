@@ -3,7 +3,7 @@ use bevy_math::{
     curve::{Ease, EaseFunction, EasingCurve},
     Curve,
 };
-use firewheel::prelude::{
+use firewheel::{
     clock::ClockSeconds,
     diff::{Diff, EventQueue, Patch, PatchError, PathBuilder},
     event::ParamData,

@@ -2,7 +2,7 @@
 
 use bevy_ecs::prelude::*;
 use bevy_log::error;
-use firewheel::prelude::{clock::ClockSeconds, FirewheelConfig, FirewheelContext};
+use firewheel::{clock::ClockSeconds, FirewheelConfig, FirewheelContext};
 use std::sync::mpsc;
 
 /// A thread-safe wrapper around the underlying Firewheel audio context.

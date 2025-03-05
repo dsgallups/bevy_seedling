@@ -51,13 +51,11 @@ fn main() {
                 commands.spawn_pool(EffectsPool, 4).connect(EffectsBus);
 
                 // Finally, let's play a sample through the chain.
-                commands
-                    .spawn((
-                        SamplePlayer::new(server.load("snd_wobbler.wav")),
-                        PlaybackSettings::LOOP,
-                        EffectsPool,
-                    ))
-                    .connect(EffectsBus);
+                commands.spawn((
+                    SamplePlayer::new(server.load("snd_wobbler.wav")),
+                    PlaybackSettings::LOOP,
+                    EffectsPool,
+                ));
 
                 // Once these connections are synchronized with the audio graph,
                 // it will look like:

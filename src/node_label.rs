@@ -8,7 +8,7 @@
 //! will be automatically connected to [MainBus].
 use crate::node::NodeMap;
 use bevy_ecs::{component::ComponentId, intern::Interned, prelude::*, world::DeferredWorld};
-use firewheel::nodes::volume::VolumeParams;
+use firewheel::nodes::volume::VolumeNode;
 use smallvec::SmallVec;
 
 use crate::{AudioContext, ConnectNode};
@@ -63,11 +63,11 @@ pub struct MainBus;
 pub type InternedNodeLabel = Interned<dyn NodeLabel>;
 
 pub(crate) fn insert_main_bus(mut commands: Commands, mut context: ResMut<AudioContext>) {
-    let terminal_node = context.with(|context| context.graph_out_node());
+    let terminal_node = context.with(|context| context.graph_out_node_id());
 
     commands
         .spawn((
-            VolumeParams {
+            VolumeNode {
                 normalized_volume: 1.,
             },
             MainBus,

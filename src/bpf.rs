@@ -2,13 +2,12 @@
 
 use crate::timeline::Timeline;
 use bevy_ecs::prelude::*;
-use firewheel::prelude::{
-    channel_config::{ChannelConfig, ChannelCount},
+use firewheel::{
+    channel_config::ChannelConfig,
+    core::{channel_config::NonZeroChannelCount, clock::ClockSeconds, node::ProcInfo, StreamInfo},
     diff::{Diff, Patch},
     event::NodeEventList,
-    node::{
-        AudioNodeConstructor, AudioNodeInfo, AudioNodeProcessor, ProcessStatus, NUM_SCRATCH_BUFFERS,
-    },
+    node::{AudioNode, AudioNodeInfo, AudioNodeProcessor, ProcessStatus, NUM_SCRATCH_BUFFERS},
 };
 
 /// A simple low-pass filter.
@@ -37,23 +36,38 @@ impl BandPassNode {
     }
 }
 
-impl AudioNodeConstructor for BandPassNode {
-    fn info(&self) -> AudioNodeInfo {
-        AudioNodeInfo {
-            debug_name: "band pass filter",
-            channel_config: ChannelConfig {
-                num_inputs: ChannelCount::MAX,
-                num_outputs: ChannelCount::MAX,
-            },
-            uses_events: true,
+#[derive(Debug, Component, Clone)]
+pub struct BandPassConfig {
+    pub channels: NonZeroChannelCount,
+}
+
+impl Default for BandPassConfig {
+    fn default() -> Self {
+        Self {
+            channels: NonZeroChannelCount::STEREO,
         }
+    }
+}
+
+impl AudioNode for BandPassNode {
+    type Configuration = BandPassConfig;
+
+    fn info(&self, config: &Self::Configuration) -> AudioNodeInfo {
+        AudioNodeInfo::new()
+            .debug_name("band-pass filter")
+            .channel_config(ChannelConfig {
+                num_inputs: config.channels.get(),
+                num_outputs: config.channels.get(),
+            })
+            .uses_events(true)
     }
 
     fn processor(
-        &mut self,
-        stream_info: &firewheel::StreamInfo,
-    ) -> Box<dyn firewheel::node::AudioNodeProcessor> {
-        Box::new(BandPassProcessor {
+        &self,
+        config: &Self::Configuration,
+        stream_info: &StreamInfo,
+    ) -> impl AudioNodeProcessor {
+        BandPassProcessor {
             params: self.clone(),
             channels: vec![
                 Bpf::new(
@@ -61,9 +75,9 @@ impl AudioNodeConstructor for BandPassNode {
                     self.frequency.get(),
                     self.q.get()
                 );
-                2
+                config.channels.get().get() as usize
             ],
-        })
+        }
     }
 }
 
@@ -129,7 +143,7 @@ impl AudioNodeProcessor for BandPassProcessor {
         inputs: &[&[f32]],
         outputs: &mut [&mut [f32]],
         events: NodeEventList,
-        proc_info: &firewheel::node::ProcInfo,
+        proc_info: &ProcInfo,
         _: &mut [&mut [f32]; NUM_SCRATCH_BUFFERS],
     ) -> ProcessStatus {
         self.params.patch_list(events);
@@ -144,7 +158,7 @@ impl AudioNodeProcessor for BandPassProcessor {
             / proc_info.frames as f64;
         for sample in 0..inputs[0].len() {
             if sample % 32 == 0 {
-                let seconds = seconds + firewheel::clock::ClockSeconds(sample as f64 * frame_time);
+                let seconds = seconds + ClockSeconds(sample as f64 * frame_time);
                 self.params.frequency.tick(seconds);
                 let frequency = self.params.frequency.get();
                 let q = self.params.q.get();

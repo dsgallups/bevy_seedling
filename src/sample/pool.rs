@@ -4,10 +4,8 @@ use bevy_app::{Last, Plugin};
 use bevy_asset::Assets;
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
 use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
-use firewheel::{
-    event::{NodeEventType, SequenceCommand},
-    nodes::sampler::{SamplerHandle, SamplerParams},
-};
+use firewheel::event::{NodeEventType, SequenceCommand};
+use firewheel::nodes::sampler::SamplerNode;
 
 pub(crate) struct SamplePoolPlugin;
 
@@ -94,7 +92,7 @@ impl SpawnPool for Commands<'_, '_> {
 
         let bus = self
             .spawn((
-                crate::VolumeParams {
+                crate::VolumeNode {
                     normalized_volume: volume,
                 },
                 SamplePoolNode,
@@ -106,14 +104,9 @@ impl SpawnPool for Commands<'_, '_> {
 
         let nodes: Vec<_> = (0..size)
             .map(|_| {
-                self.spawn((
-                    SamplerHandle::new(),
-                    SamplerParams::default(),
-                    SamplePoolNode,
-                    marker.clone(),
-                ))
-                .connect(bus)
-                .id()
+                self.spawn((SamplerNode::default(), SamplePoolNode, marker.clone()))
+                    .connect(bus)
+                    .id()
             })
             .collect();
 
@@ -127,10 +120,10 @@ impl SpawnPool for Commands<'_, '_> {
     fn despawn_pool<T: PoolLabel + Component>(&mut self) {
         self.queue(|world: &mut World| {
             let mut roots = world
-                .query_filtered::<Entity, (With<T>, With<SamplePoolNode>, With<crate::VolumeParams>)>(
+                .query_filtered::<Entity, (With<T>, With<SamplePoolNode>, With<crate::VolumeNode>)>(
                 );
 
-            let roots: Vec<_> = roots.iter(&world).collect();
+            let roots: Vec<_> = roots.iter(world).collect();
 
             let mut commands = world.commands();
 
@@ -148,7 +141,7 @@ struct SamplePoolNode;
 struct NodeRank(Vec<(Entity, u64)>);
 
 fn rank_nodes<T: Component>(
-    q: Query<(Entity, &SamplerHandle, &SamplerParams), (With<SamplePoolNode>, With<T>)>,
+    q: Query<(Entity, &SamplerNode), (With<SamplePoolNode>, With<T>)>,
     mut rank: Query<&mut NodeRank, With<T>>,
 ) {
     let Ok(mut rank) = rank.get_single_mut() else {
@@ -157,8 +150,8 @@ fn rank_nodes<T: Component>(
 
     rank.0.clear();
 
-    for (e, sampler, params) in q.iter() {
-        let score = sampler.worker_score(params);
+    for (e, params) in q.iter() {
+        let score = params.worker_score();
 
         rank.0.push((e, score));
     }
@@ -185,7 +178,7 @@ fn on_remove_active(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
 }
 
 fn remove_finished(
-    nodes: Query<(Entity, &SamplerHandle), With<ActiveSample>>,
+    nodes: Query<(Entity, &SamplerNode), With<ActiveSample>>,
     mut commands: Commands,
 ) {
     for (entity, sampler) in nodes.iter() {
@@ -199,10 +192,7 @@ fn remove_finished(
 }
 
 fn assign_work<T: Component>(
-    mut nodes: Query<
-        (Entity, &mut SamplerParams, &SamplerHandle, &mut Events),
-        (With<SamplePoolNode>, With<T>),
-    >,
+    mut nodes: Query<(Entity, &mut SamplerNode, &mut Events), (With<SamplePoolNode>, With<T>)>,
     queued_samples: Query<
         (Entity, &SamplePlayer, &PlaybackSettings),
         (With<QueuedSample>, With<T>),
@@ -225,12 +215,12 @@ fn assign_work<T: Component>(
             continue;
         };
 
-        let Ok((node_entity, mut params, handle, mut events)) = nodes.get_mut(*node_entity) else {
+        let Ok((node_entity, mut params, mut events)) = nodes.get_mut(*node_entity) else {
             continue;
         };
 
         params.set_sample(asset.get(), settings.volume, settings.mode);
-        let event = handle.sync_params_event(params.clone(), true);
+        let event = params.sync_params_event(true);
         events.push(event);
 
         rank.0.remove(0);

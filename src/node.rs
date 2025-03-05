@@ -6,10 +6,10 @@ use bevy_app::Last;
 use bevy_ecs::{prelude::*, world::DeferredWorld};
 use bevy_log::{error, error_once, warn_once};
 use bevy_utils::HashMap;
-use firewheel::prelude::{
+use firewheel::{
     diff::{Diff, Patch},
     event::{NodeEvent, NodeEventType},
-    node::{AudioNodeConstructor, NodeID},
+    node::{AudioNode, NodeID},
 };
 
 #[derive(Component)]
@@ -65,26 +65,11 @@ fn acquire_id<T>(
     mut commands: Commands,
     mut node_map: ResMut<NodeMap>,
 ) where
-    T: NodeConstructor<Configuration: Component> + Component + Clone,
+    T: AudioNode<Configuration: Component + Clone> + Component + Clone,
 {
     context.with(|context| {
         for (entity, container, config, labels) in q.iter() {
-            let default;
-            let config = match config {
-                Some(c) => c,
-                None => {
-                    default = T::Configuration::default();
-                    &default
-                }
-            };
-            let constructor = container.construct(
-                context
-                    .stream_info()
-                    .expect("stream info should be available"),
-                config,
-            );
-
-            let node = context.add_node(constructor);
+            let node = context.add_node(container.clone(), config.cloned());
 
             for label in labels.iter().flat_map(|l| l.iter()) {
                 node_map.0.insert(*label, entity);
@@ -95,35 +80,31 @@ fn acquire_id<T>(
     });
 }
 
-/// An empty configuration for nodes that need none.
-#[derive(Debug, Default, Component)]
-pub struct EmptyConfiguration;
+/// Register audio nodes in the ECS.
+pub trait RegisterNode {
+    /// Register an audio node with automatic diffing.
+    ///
+    /// This will allow audio entities to automatically
+    /// acquire IDs from the audio graph and perform
+    /// parameter diffing.
+    fn register_node<T>(&mut self) -> &mut Self
+    where
+        T: AudioNode<Configuration: Component + Clone> + Diff + Patch + Component + Clone;
 
-pub trait NodeConstructor {
-    type Configuration: Default;
-
-    fn construct(
-        &self,
-        stream_info: &firewheel::core::StreamInfo,
-        configuration: &Self::Configuration,
-    ) -> impl AudioNodeConstructor + 'static;
+    /// Register an audio node without automatic diffing.
+    ///
+    /// This will allow audio entities to automatically
+    /// acquire IDs from the audio graph and perform
+    /// parameter diffing.
+    fn register_simple_node<T>(&mut self) -> &mut Self
+    where
+        T: AudioNode<Configuration: Component + Clone> + Component + Clone;
 }
 
-/// Register an audio node with parameters.
-///
-/// This will allow audio entities to automatically
-/// acquire IDs from the audio graph and perform
-/// parameter diffing.
-pub trait RegisterParamsNode {
-    fn register_params_node<T>(&mut self) -> &mut Self
+impl RegisterNode for bevy_app::App {
+    fn register_node<T>(&mut self) -> &mut Self
     where
-        T: NodeConstructor<Configuration: Component> + Diff + Patch + Component + Clone;
-}
-
-impl RegisterParamsNode for bevy_app::App {
-    fn register_params_node<T>(&mut self) -> &mut Self
-    where
-        T: NodeConstructor<Configuration: Component> + Diff + Patch + Component + Clone,
+        T: AudioNode<Configuration: Component + Clone> + Diff + Patch + Component + Clone,
     {
         let world = self.world_mut();
 
@@ -144,22 +125,10 @@ impl RegisterParamsNode for bevy_app::App {
             ),
         )
     }
-}
 
-/// Register an audio node.
-///
-/// This will allow audio entities to automatically
-/// acquire IDs from the audio graph.
-pub trait RegisterNode {
-    fn register_node<T>(&mut self) -> &mut Self
+    fn register_simple_node<T>(&mut self) -> &mut Self
     where
-        T: NodeConstructor<Configuration: Component> + Component + Clone;
-}
-
-impl RegisterNode for bevy_app::App {
-    fn register_node<T>(&mut self) -> &mut Self
-    where
-        T: NodeConstructor<Configuration: Component> + Component + Clone,
+        T: AudioNode<Configuration: Component + Clone> + Component + Clone,
     {
         let world = self.world_mut();
         world.register_required_components::<T, Events>();
@@ -192,30 +161,10 @@ impl Component for Node {
             };
 
             let mut removals = world.resource_mut::<PendingRemovals>();
-            removals.0.push(node.0);
+            removals.push(node.0);
         });
     }
 }
-
-// #[derive(Clone)]
-// pub(crate) struct AutoMix {
-//     id: NodeID,
-// }
-
-// impl Component for AutoMix {
-//     const STORAGE_TYPE: bevy_ecs::component::StorageType = bevy_ecs::component::StorageType::Table;
-//
-//     fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
-//         hooks.on_remove(|mut world, entity, _| {
-//             let Some(node) = world.get::<AutoMix>(entity).map(|e| e.id) else {
-//                 return;
-//             };
-//
-//             let mut removals = world.resource_mut::<PendingRemovals>();
-//             removals.push(node);
-//         });
-//     }
-// }
 
 /// Queued audio node removals.
 ///
