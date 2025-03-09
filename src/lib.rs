@@ -8,8 +8,6 @@ extern crate self as bevy_seedling;
 use bevy_app::{Last, Plugin, PreStartup};
 use bevy_asset::AssetApp;
 use bevy_ecs::prelude::*;
-use firewheel::nodes::volume::VolumeNode;
-use firewheel::FirewheelConfig;
 
 pub mod bpf;
 pub mod context;
@@ -33,6 +31,23 @@ pub use sample::{
     PlaybackSettings, SamplePlayer,
 };
 pub use seedling_macros::PoolLabel;
+
+pub use firewheel::{
+    nodes::{
+        sampler::SamplerNode,
+        spatial_basic::{SpatialBasicConfig, SpatialBasicNode},
+        volume::{VolumeNode, VolumeNodeConfig},
+        volume_pan::{VolumePanNode, VolumePanNodeConfig},
+        StereoToMonoNode,
+    },
+    FirewheelConfig,
+};
+
+#[cfg(feature = "stream")]
+pub use firewheel::nodes::stream::{
+    reader::{StreamReaderConfig, StreamReaderNode},
+    writer::{StreamWriterConfig, StreamWriterNode},
+};
 
 /// Node label derive macro.
 ///
@@ -130,13 +145,14 @@ impl Plugin for SeedlingPlugin {
             .register_node::<lpf::LowPassNode>()
             .register_node::<bpf::BandPassNode>()
             .register_node::<VolumeNode>()
-            .register_node::<firewheel::nodes::volume_pan::VolumePanNode>()
-            .register_simple_node::<firewheel::nodes::StereoToMonoNode>()
-            .register_simple_node::<firewheel::nodes::sampler::SamplerNode>();
+            .register_node::<VolumePanNode>()
+            .register_node::<SpatialBasicNode>()
+            .register_simple_node::<StereoToMonoNode>()
+            .register_simple_node::<SamplerNode>();
 
         #[cfg(feature = "stream")]
-        app.register_simple_node::<firewheel::nodes::stream::reader::StreamReaderNode>()
-            .register_simple_node::<firewheel::nodes::stream::writer::StreamWriterNode>();
+        app.register_simple_node::<StreamReaderNode>()
+            .register_simple_node::<StreamWriterNode>();
 
         app.configure_sets(
             Last,
