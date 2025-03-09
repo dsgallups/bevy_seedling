@@ -25,9 +25,9 @@ pub use context::AudioContext;
 pub use node::RegisterNode;
 pub use node::{ConnectNode, ConnectTarget, Node};
 pub use node_label::{MainBus, NodeLabel};
+use sample::pool::Pool;
 pub use sample::{
     label::{DefaultPool, PoolLabel},
-    pool::SpawnPool,
     PlaybackSettings, SamplePlayer,
 };
 pub use seedling_macros::PoolLabel;
@@ -183,7 +183,7 @@ impl Plugin for SeedlingPlugin {
         )
         .add_systems(PreStartup, move |mut commands: Commands| {
             if let Some(size) = sample_pool_size {
-                commands.spawn_pool(DefaultPool, size);
+                Pool::new(DefaultPool, size).spawn(&mut commands);
             }
         });
 

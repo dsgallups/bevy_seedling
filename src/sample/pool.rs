@@ -4,6 +4,7 @@ use bevy_app::{Last, Plugin};
 use bevy_asset::Assets;
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
 use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
+use firewheel::diff::{Diff, Patch, PathBuilder};
 use firewheel::event::{NodeEventType, SequenceCommand};
 use firewheel::node::AudioNode;
 use firewheel::nodes::sampler::SamplerNode;
@@ -26,154 +27,252 @@ impl Plugin for SamplePoolPlugin {
     }
 }
 
-pub struct PoolCommands<'a, 'b: 'a> {
-    bus: Entity,
-    commands: &'a mut Commands<'b, 'b>,
-    terminal_entities: Vec<Entity>,
+/// A sampler pool builder.
+#[derive(Debug)]
+pub struct Pool<L, C> {
+    label: L,
+    size: usize,
+    effects_chain: C,
 }
 
-impl core::fmt::Debug for PoolCommands<'_, '_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PoolCommands")
-            .field("bus", &self.bus)
-            .field("terminal_entities", &self.terminal_entities)
-            .finish_non_exhaustive()
-    }
-}
-
-impl PoolCommands<'_, '_> {
-    pub fn chain_node<T: AudioNode + Clone + Component>(&mut self, node: T) -> &mut Self {
-        for entity in self.terminal_entities.iter_mut() {
-            let new_node = self.commands.spawn(node.clone()).id();
-            self.commands.entity(self.bus).add_child(new_node);
-            self.commands.entity(*entity).connect(new_node);
-            *entity = new_node;
-        }
-
-        self
-    }
-}
-
-impl Drop for PoolCommands<'_, '_> {
-    fn drop(&mut self) {
-        for entity in self.terminal_entities.iter() {
-            self.commands.entity(*entity).connect(self.bus);
+impl<L: PoolLabel + Component + Clone> Pool<L, ()> {
+    pub fn new(label: L, size: usize) -> Self {
+        Self {
+            label,
+            size,
+            effects_chain: (),
         }
     }
 }
 
-/// Provides methods on [`Commands`] to spawn new sample pools.
-pub trait SpawnPool<'a> {
-    /// Spawn a sample pool, returning the [`EntityCommands`] for
-    /// the terminal volume node.
-    ///
-    /// ```
-    /// # use bevy::prelude::*;
-    /// use bevy_seedling::{SpawnPool, PoolLabel, SamplePlayer};
-    ///
-    /// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
-    /// struct CustomPool;
-    ///
-    /// fn spawn_custom_pool(server: Res<AssetServer>, mut commands: Commands) {
-    ///     // Spawn a custom sample pool
-    ///     commands.spawn_pool(CustomPool, 16);
-    ///
-    ///     // Trigger sample playback in the custom pool
-    ///     commands.spawn((
-    ///         SamplePlayer::new(server.load("my_sample.wav")),
-    ///         CustomPool,
-    ///     ));
-    /// }
-    /// ```
-    fn spawn_pool<T: PoolLabel + Component + Clone>(
-        &mut self,
-        marker: T,
-        size: usize,
-    ) -> PoolCommands<'_, 'a> {
-        self.spawn_pool_with(marker, size, 1.0)
-    }
+pub trait ExtendTuple {
+    type Output<T>;
 
-    /// Spawn a sample pool with an initial volume, returning the [`EntityCommands`] for
-    /// the terminal volume node.
-    fn spawn_pool_with<T: PoolLabel + Component + Clone>(
-        &mut self,
-        marker: T,
-        size: usize,
-        volume: f32,
-    ) -> PoolCommands<'_, 'a>;
-
-    /// Despawn a sample pool, cleaning up its resources
-    /// in the ECS and audio graph.
-    ///
-    /// Despawning the terminal volume node recursively
-    /// will produce the same effect.
-    fn despawn_pool<T: PoolLabel + Component>(&mut self);
+    fn extend<T>(self, value: T) -> Self::Output<T>;
 }
 
-impl<'a> SpawnPool<'a> for Commands<'a, 'a> {
-    fn spawn_pool_with<T: PoolLabel + Component + Clone>(
-        &mut self,
-        marker: T,
-        size: usize,
-        volume: f32,
-    ) -> PoolCommands<'_, 'a> {
-        self.queue(|world: &mut World| {
-            world.schedule_scope(Last, |_, schedule| {
-                schedule.add_systems(
-                    (rank_nodes::<T>, assign_work::<T>)
-                        .chain()
-                        .in_set(SeedlingSystems::Queue),
-                );
-            });
-        });
+macro_rules! extend {
+    ($($A:ident),*) => {
+        impl<$($A),*> ExtendTuple for ($($A,)*) {
+            type Output<Z> = ($($A,)* Z,);
 
-        let bus = self
-            .spawn((
-                crate::VolumeNode {
-                    normalized_volume: volume,
-                },
-                SamplePoolNode,
-                marker.clone(),
-            ))
-            .id();
+            #[allow(non_snake_case)]
+            fn extend<Z>(self, value: Z) -> Self::Output<Z> {
+                let ($($A,)*) = self;
 
-        let rank = self.spawn((NodeRank::default(), marker.clone())).id();
-
-        let nodes: Vec<_> = (0..size)
-            .map(|_| {
-                self.spawn((SamplerNode::default(), SamplePoolNode, marker.clone()))
-                    .id()
-            })
-            .collect();
-
-        self.entity(bus).add_children(&nodes).add_child(rank);
-
-        PoolCommands {
-            bus,
-            commands: self,
-            terminal_entities: nodes,
-        }
-    }
-
-    fn despawn_pool<T: PoolLabel + Component>(&mut self) {
-        self.queue(|world: &mut World| {
-            let mut roots = world
-                .query_filtered::<Entity, (With<T>, With<SamplePoolNode>, With<crate::VolumeNode>)>(
-                );
-
-            let roots: Vec<_> = roots.iter(world).collect();
-
-            let mut commands = world.commands();
-
-            for root in roots {
-                commands.entity(root).despawn_recursive();
+                ($($A,)* value,)
             }
-        });
+        }
+    };
+}
+
+bevy_utils::all_tuples!(extend, 0, 15, A);
+
+impl<L, C: ExtendTuple> Pool<L, C> {
+    pub fn effect<T: AudioNode + Clone + Component>(self, node: T) -> Pool<L, C::Output<T>> {
+        Pool {
+            label: self.label,
+            size: self.size,
+            effects_chain: self.effects_chain.extend(node),
+        }
     }
 }
+
+macro_rules! spawn_impl {
+    ($($ty:ident),*) => {
+        impl<L: PoolLabel + Component + Clone, $($ty),*> Pool<L, ($($ty,)*)>
+        where $($ty: Component + Clone),*
+        {
+            #[allow(non_snake_case)]
+            pub fn spawn<'a>(
+                self,
+                commands: &'a mut Commands,
+            ) -> EntityCommands<'a> {
+                let Self {
+                    label,
+                    size,
+                    effects_chain,
+                } = self;
+
+                commands.queue(|world: &mut World| {
+                    world.schedule_scope(Last, |_, schedule| {
+                        schedule.add_systems(
+                            (rank_nodes::<L>, assign_work::<L>)
+                                .chain()
+                                .in_set(SeedlingSystems::Queue),
+                        );
+                    });
+                });
+
+                let bus = commands
+                    .spawn((
+                        crate::VolumeNode {
+                            normalized_volume: 1.0,
+                        },
+                        SamplePoolNode,
+                        label.clone(),
+                        SamplePoolDefaults(Box::new({
+                            let effects_chain = effects_chain.clone();
+                            #[allow(unused)]
+                            move |commands: &mut EntityCommands| {
+                                let ($($ty,)*) = &effects_chain;
+
+                                $(commands.entry::<$ty>().or_insert($ty.clone());)*
+                            }
+                        })),
+                    ))
+                    .id();
+
+                let rank = commands.spawn((NodeRank::default(), label.clone())).id();
+
+                let ($($ty,)*) = effects_chain;
+
+                let nodes: Vec<_> = (0..size)
+                    .map(|_| {
+                        let chain: Vec<Entity> = vec![$(
+                            commands.spawn((
+                                <$ty as ::core::clone::Clone>::clone(&$ty),
+                                SamplePoolNode,
+                                label.clone()
+                            )).id(),
+                        )*];
+
+                        let source = commands
+                            .spawn((SamplerNode::default(), SamplePoolNode, label.clone(), EffectsChain(chain.clone())))
+                            .add_children(&chain)
+                            .id();
+
+                        let mut chain = chain;
+                        chain.push(bus);
+
+                        commands.entity(source).connect(chain[0]);
+
+                        for pair in chain.windows(2) {
+                            commands.entity(pair[0]).connect(pair[1]);
+                        }
+
+                        source
+                    })
+                    .collect();
+
+                let mut bus = commands.entity(bus);
+                bus.add_children(&nodes).add_child(rank);
+
+                bus
+            }
+        }
+    };
+}
+
+bevy_utils::all_tuples!(spawn_impl, 0, 15, A);
+
+///// Provides methods on [`Commands`] to spawn new sample pools.
+//pub trait SpawnPool {
+//    /// Spawn a sample pool, returning the [`EntityCommands`] for
+//    /// the terminal volume node.
+//    ///
+//    /// ```
+//    /// # use bevy::prelude::*;
+//    /// use bevy_seedling::{SpawnPool, PoolLabel, SamplePlayer};
+//    ///
+//    /// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+//    /// struct CustomPool;
+//    ///
+//    /// fn spawn_custom_pool(server: Res<AssetServer>, mut commands: Commands) {
+//    ///     // Spawn a custom sample pool
+//    ///     commands.spawn_pool(CustomPool, 16);
+//    ///
+//    ///     // Trigger sample playback in the custom pool
+//    ///     commands.spawn((
+//    ///         SamplePlayer::new(server.load("my_sample.wav")),
+//    ///         CustomPool,
+//    ///     ));
+//    /// }
+//    /// ```
+//    fn pool(&mut self) -> PoolBuilder<()>;
+//
+//    ///// Spawn a sample pool with an initial volume, returning the [`EntityCommands`] for
+//    ///// the terminal volume node.
+//    //fn spawn_pool_with<T: PoolLabel + Component + Clone>(
+//    //    &mut self,
+//    //    marker: T,
+//    //    size: usize,
+//    //    volume: f32,
+//    //) -> PoolBuilder<()>;
+//    //
+//
+//    /// Despawn a sample pool, cleaning up its resources
+//    /// in the ECS and audio graph.
+//    ///
+//    /// Despawning the terminal volume node recursively
+//    /// will produce the same effect.
+//    fn despawn_pool<T: PoolLabel + Component>(&mut self);
+//}
+//
+//impl SpawnPool for Commands<'_, '_> {
+//    fn pool(&mut self) -> PoolBuilder<()> {
+//        // self.queue(|world: &mut World| {
+//        //     world.schedule_scope(Last, |_, schedule| {
+//        //         schedule.add_systems(
+//        //             (rank_nodes::<T>, assign_work::<T>)
+//        //                 .chain()
+//        //                 .in_set(SeedlingSystems::Queue),
+//        //         );
+//        //     });
+//        // });
+//        //
+//        // let bus = self
+//        //     .spawn((
+//        //         crate::VolumeNode {
+//        //             normalized_volume: 1.0,
+//        //         },
+//        //         SamplePoolNode,
+//        //         marker.clone(),
+//        //     ))
+//        //     .id();
+//        //
+//        // let rank = self.spawn((NodeRank::default(), marker.clone())).id();
+//        //
+//        // let nodes: Vec<_> = (0..size)
+//        //     .map(|_| {
+//        //         self.spawn((SamplerNode::default(), SamplePoolNode, marker.clone()))
+//        //             .id()
+//        //     })
+//        //     .collect();
+//        //
+//        // self.entity(bus).add_children(&nodes).add_child(rank);
+//
+//        PoolBuilder {
+//            commands: self.reborrow(),
+//            effects_chain: (),
+//        }
+//    }
+//
+//    fn despawn_pool<T: PoolLabel + Component>(&mut self) {
+//        self.queue(|world: &mut World| {
+//            let mut roots = world
+//                .query_filtered::<Entity, (With<T>, With<SamplePoolNode>, With<crate::VolumeNode>)>(
+//                );
+//
+//            let roots: Vec<_> = roots.iter(world).collect();
+//
+//            let mut commands = world.commands();
+//
+//            for root in roots {
+//                commands.entity(root).despawn_recursive();
+//            }
+//        });
+//    }
+//}
 
 #[derive(Component)]
 struct SamplePoolNode;
+
+#[derive(Component)]
+struct EffectsChain(Vec<Entity>);
+
+#[derive(Component)]
+struct SamplePoolDefaults(Box<dyn Fn(&mut EntityCommands) + Send + Sync + 'static>);
 
 #[derive(Default, Component)]
 struct NodeRank(Vec<(Entity, u64)>);
@@ -198,6 +297,13 @@ fn rank_nodes<T: Component>(
         .sort_unstable_by_key(|pair| std::cmp::Reverse(pair.1));
 }
 
+// fn supply_defaults<T: Component>(
+//     defaults: Query<&SamplePoolDefaults, With<T>>,
+//     q: Query<Entity, (With<SamplePlayer>, Added<T>)>,
+// ) {
+//
+// }
+
 #[derive(Component, Clone, Copy)]
 #[component(on_remove = on_remove_active)]
 struct ActiveSample {
@@ -216,26 +322,34 @@ fn on_remove_active(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
 }
 
 fn remove_finished(
-    nodes: Query<(Entity, &SamplerNode), With<ActiveSample>>,
+    nodes: Query<(Entity, &SamplerNode, &EffectsChain), With<ActiveSample>>,
     mut commands: Commands,
 ) {
-    for (entity, sampler) in nodes.iter() {
+    for (entity, sampler, effects_chain) in nodes.iter() {
         let state = sampler.playback_state();
 
         // TODO: this will remove samples when paused
         if !state.is_playing() {
             commands.entity(entity).remove::<ActiveSample>();
+
+            for effect in effects_chain.0.iter() {
+                commands.entity(*effect).remove::<ParamFollower>();
+            }
         }
     }
 }
 
 fn assign_work<T: Component>(
-    mut nodes: Query<(Entity, &mut SamplerNode, &mut Events), (With<SamplePoolNode>, With<T>)>,
+    mut nodes: Query<
+        (Entity, &mut SamplerNode, &mut Events, &EffectsChain),
+        (With<SamplePoolNode>, With<T>),
+    >,
     queued_samples: Query<
         (Entity, &SamplePlayer, &PlaybackSettings),
         (With<QueuedSample>, With<T>),
     >,
     mut rank: Query<&mut NodeRank, With<T>>,
+    defaults: Query<&SamplePoolDefaults, With<T>>,
     assets: Res<Assets<Sample>>,
     mut commands: Commands,
 ) {
@@ -253,13 +367,24 @@ fn assign_work<T: Component>(
             continue;
         };
 
-        let Ok((node_entity, mut params, mut events)) = nodes.get_mut(*node_entity) else {
+        let Ok((node_entity, mut params, mut events, effects_chain)) = nodes.get_mut(*node_entity)
+        else {
             continue;
         };
 
         params.set_sample(asset.get(), settings.volume, settings.mode);
         let event = params.sync_params_event(true);
         events.push(event);
+
+        // redirect all parameters to follow the sample source
+        for effect in effects_chain.0.iter() {
+            commands.entity(*effect).insert(ParamFollower(sample));
+        }
+
+        // Insert default pool parameters if not present.
+        if let Ok(defaults) = defaults.get_single() {
+            (defaults.0)(&mut commands.entity(sample));
+        }
 
         rank.0.remove(0);
         commands.entity(sample).remove::<QueuedSample>();
@@ -270,17 +395,46 @@ fn assign_work<T: Component>(
     }
 }
 
+/// A component that allows one entity's parameters to track another's.
+///
+/// This can only support a single relationship; cascading
+/// is not allowed.
+#[derive(Component)]
+pub(crate) struct ParamFollower(Entity);
+
+pub(crate) fn param_follower<T: Diff + Patch + Component>(
+    sources: Query<&T, Without<ParamFollower>>,
+    mut followers: Query<(&ParamFollower, &mut T)>,
+) {
+    let mut event_queue = Vec::new();
+    for (follower, mut params) in followers.iter_mut() {
+        let Ok(source) = sources.get(follower.0) else {
+            continue;
+        };
+
+        source.diff(&params, PathBuilder::default(), &mut event_queue);
+
+        for event in event_queue.drain(..) {
+            params.patch_event(&event);
+        }
+    }
+}
+
 // Stop playback if the source entity no longer exists.
 fn monitor_active(
-    mut nodes: Query<(Entity, &ActiveSample, &mut Events)>,
+    mut nodes: Query<(Entity, &ActiveSample, &mut Events, &EffectsChain)>,
     samples: Query<&SamplePlayer>,
     mut commands: Commands,
 ) {
-    for (node_entity, active, mut events) in nodes.iter_mut() {
+    for (node_entity, active, mut events, effects_chain) in nodes.iter_mut() {
         if samples.get(active.sample_entity).is_err() {
             events.push(NodeEventType::SequenceCommand(SequenceCommand::Stop));
 
             commands.entity(node_entity).remove::<ActiveSample>();
+
+            for effect in effects_chain.0.iter() {
+                commands.entity(*effect).remove::<ParamFollower>();
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 //! Audio node connections and management.
 
 use crate::node_label::NodeLabels;
+use crate::SamplePlayer;
 use crate::{node_label::InternedNodeLabel, AudioContext, MainBus, NodeLabel, SeedlingSystems};
 use bevy_app::Last;
 use bevy_ecs::{prelude::*, world::DeferredWorld};
@@ -46,8 +47,8 @@ impl Events {
     }
 }
 
-fn generate_param_events<T: Diff + Patch + Component + Clone + Send + Sync + 'static>(
-    mut nodes: Query<(&mut T, &mut Baseline<T>, &mut Events)>,
+fn generate_param_events<T: Diff + Patch + Component + Clone>(
+    mut nodes: Query<(&mut T, &mut Baseline<T>, &mut Events), Without<SamplePlayer>>,
 ) {
     for (params, mut baseline, mut events) in nodes.iter_mut() {
         params.diff(&baseline.0, Default::default(), &mut events.0);
@@ -60,7 +61,10 @@ fn generate_param_events<T: Diff + Patch + Component + Clone + Send + Sync + 'st
 }
 
 fn acquire_id<T>(
-    q: Query<(Entity, &T, Option<&T::Configuration>, Option<&NodeLabels>), Without<Node>>,
+    q: Query<
+        (Entity, &T, Option<&T::Configuration>, Option<&NodeLabels>),
+        (Without<Node>, Without<SamplePlayer>),
+    >,
     mut context: ResMut<AudioContext>,
     mut commands: Commands,
     mut node_map: ResMut<NodeMap>,
@@ -121,7 +125,12 @@ impl RegisterNode for bevy_app::App {
             Last,
             (
                 acquire_id::<T>.in_set(SeedlingSystems::Acquire),
-                generate_param_events::<T>.in_set(SeedlingSystems::Queue),
+                (
+                    super::sample::pool::param_follower::<T>,
+                    generate_param_events::<T>,
+                )
+                    .chain()
+                    .in_set(SeedlingSystems::Queue),
             ),
         )
     }
