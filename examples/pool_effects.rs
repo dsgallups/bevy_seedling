@@ -21,13 +21,13 @@ fn startup(server: Res<AssetServer>, mut commands: Commands) {
     commands.spawn(SamplePlayer::new(server.load("snd_wobbler.wav")));
 
     // normal approach
-    #[derive(PoolLabel)]
+    #[derive(PoolLabel, Clone, Debug, Hash, PartialEq, Eq)]
     struct MyPool;
 
     commands
         .spawn_pool(MyPool, 4)
-        .chain(LowPassNode { frequency: 1000.0 })
-        .chain(VolumeNode {
+        .chain_node(LowPassNode { frequency: 1000.0 })
+        .chain_node(VolumeNode {
             normalized_volume: 1.0,
         });
 

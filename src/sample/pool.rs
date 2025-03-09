@@ -5,6 +5,7 @@ use bevy_asset::Assets;
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
 use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
 use firewheel::event::{NodeEventType, SequenceCommand};
+use firewheel::node::AudioNode;
 use firewheel::nodes::sampler::SamplerNode;
 
 pub(crate) struct SamplePoolPlugin;
@@ -25,8 +26,44 @@ impl Plugin for SamplePoolPlugin {
     }
 }
 
+pub struct PoolCommands<'a, 'b: 'a> {
+    bus: Entity,
+    commands: &'a mut Commands<'b, 'b>,
+    terminal_entities: Vec<Entity>,
+}
+
+impl core::fmt::Debug for PoolCommands<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PoolCommands")
+            .field("bus", &self.bus)
+            .field("terminal_entities", &self.terminal_entities)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PoolCommands<'_, '_> {
+    pub fn chain_node<T: AudioNode + Clone + Component>(&mut self, node: T) -> &mut Self {
+        for entity in self.terminal_entities.iter_mut() {
+            let new_node = self.commands.spawn(node.clone()).id();
+            self.commands.entity(self.bus).add_child(new_node);
+            self.commands.entity(*entity).connect(new_node);
+            *entity = new_node;
+        }
+
+        self
+    }
+}
+
+impl Drop for PoolCommands<'_, '_> {
+    fn drop(&mut self) {
+        for entity in self.terminal_entities.iter() {
+            self.commands.entity(*entity).connect(self.bus);
+        }
+    }
+}
+
 /// Provides methods on [`Commands`] to spawn new sample pools.
-pub trait SpawnPool {
+pub trait SpawnPool<'a> {
     /// Spawn a sample pool, returning the [`EntityCommands`] for
     /// the terminal volume node.
     ///
@@ -52,7 +89,7 @@ pub trait SpawnPool {
         &mut self,
         marker: T,
         size: usize,
-    ) -> EntityCommands<'_> {
+    ) -> PoolCommands<'_, 'a> {
         self.spawn_pool_with(marker, size, 1.0)
     }
 
@@ -63,7 +100,7 @@ pub trait SpawnPool {
         marker: T,
         size: usize,
         volume: f32,
-    ) -> EntityCommands<'_>;
+    ) -> PoolCommands<'_, 'a>;
 
     /// Despawn a sample pool, cleaning up its resources
     /// in the ECS and audio graph.
@@ -73,13 +110,13 @@ pub trait SpawnPool {
     fn despawn_pool<T: PoolLabel + Component>(&mut self);
 }
 
-impl SpawnPool for Commands<'_, '_> {
+impl<'a> SpawnPool<'a> for Commands<'a, 'a> {
     fn spawn_pool_with<T: PoolLabel + Component + Clone>(
         &mut self,
         marker: T,
         size: usize,
         volume: f32,
-    ) -> EntityCommands<'_> {
+    ) -> PoolCommands<'_, 'a> {
         self.queue(|world: &mut World| {
             world.schedule_scope(Last, |_, schedule| {
                 schedule.add_systems(
@@ -105,16 +142,17 @@ impl SpawnPool for Commands<'_, '_> {
         let nodes: Vec<_> = (0..size)
             .map(|_| {
                 self.spawn((SamplerNode::default(), SamplePoolNode, marker.clone()))
-                    .connect(bus)
                     .id()
             })
             .collect();
 
-        let mut commands = self.entity(bus);
+        self.entity(bus).add_children(&nodes).add_child(rank);
 
-        commands.add_children(&nodes).add_child(rank);
-
-        commands
+        PoolCommands {
+            bus,
+            commands: self,
+            terminal_entities: nodes,
+        }
     }
 
     fn despawn_pool<T: PoolLabel + Component>(&mut self) {
