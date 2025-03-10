@@ -1,11 +1,41 @@
 //! Type-base sample pool labelling.
 //!
-//! `bevy_seedling` provides a single label, [MainBus],
-//! which represents the terminal node that every other
-//! node must eventually reach.
+//! `bevy_seedling` provides a single pool label, [`DefaultPool`].
+//! Any node that doesn't provide an explicit pool when spawned
+//! will be automatically played in the [`DefaultPool`].
 //!
-//! Any node that doesn't provide an explicit connection when spawned
-//! will be automatically connected to [MainBus].
+//! You can customize the default sampler pool by preventing
+//! automatic spawning.
+//!
+//! ```no_run
+//! use bevy::prelude::*;
+//! use bevy_seedling::{
+//!     SeedlingPlugin,
+//!     SpatialBasicNode,
+//!     sample::{label::DefaultPool, pool::Pool},
+//! };
+//!
+//! fn main() {
+//!     App::default()
+//!         .add_plugins((
+//!             DefaultPlugins,
+//!             SeedlingPlugin {
+//!                 sample_pool_size: None,
+//!                 ..Default::default(),
+//!             },
+//!         ))
+//!         .add_systems(
+//!             Startup,
+//!             |mut commands: Commands| {
+//!                 // Make the default pool provide spatial audio
+//!                 Pool::new(DefaultPool, 24)
+//!                     .effect(SpatialBasicNode::default())
+//!                     .spawn(&mut commands);
+//!             }
+//!         )
+//!         .run();
+//! }
+//! ```
 use bevy_ecs::{intern::Interned, prelude::*};
 
 bevy_ecs::define_label!(

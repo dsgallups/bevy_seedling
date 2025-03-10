@@ -6,7 +6,7 @@ use firewheel::nodes::spatial_basic::SpatialBasicNode;
 ///
 /// When this component is added to an entity with a transform,
 /// this transform is used to calculate spatial offsets for all
-/// emitters. An emitter is an entity with [`SpatialBasicNode`][crate::SpatialBasicNode]
+/// emitters. An emitter is an entity with [`SpatialBasicNode`]
 /// and transform components.
 ///
 /// Only a single listener is supported at a time.
@@ -19,7 +19,7 @@ pub struct SpatialListener2D;
 ///
 /// When this component is added to an entity with a transform,
 /// this transform is used to calculate spatial offsets for all
-/// emitters. An emitter is an entity with [`SpatialBasicNode`][crate::SpatialBasicNode]
+/// emitters. An emitter is an entity with [`SpatialBasicNode`]
 /// and transform components.
 ///
 /// Only a single listener is supported at a time.

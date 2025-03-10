@@ -136,7 +136,7 @@ impl<T: Ease + Clone> Timeline<T> {
 
     /// Get the current value without respect to time.
     ///
-    /// This depends on regular calls to [`AudioParam::tick`]
+    /// This depends on regular calls to [`Timeline::tick`]
     /// for accuracy.
     pub fn get(&self) -> T {
         self.value.clone()
