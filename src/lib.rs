@@ -16,6 +16,7 @@ pub mod lpf;
 pub mod node;
 pub mod node_label;
 pub mod sample;
+pub mod spatial;
 pub mod timeline;
 
 #[cfg(feature = "profiling")]
@@ -168,6 +169,8 @@ impl Plugin for SeedlingPlugin {
         .add_systems(
             Last,
             (
+                (spatial::update_2d_emitters, spatial::update_3d_emitters)
+                    .before(SeedlingSystems::Acquire),
                 node::auto_connect
                     .before(SeedlingSystems::Connect)
                     .after(SeedlingSystems::Acquire),

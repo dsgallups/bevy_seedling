@@ -29,7 +29,7 @@ fn main() {
 
 fn startup(server: Res<AssetServer>, mut commands: Commands) {
     // Here we spawn our custom pool with four sampler nodes.
-    commands.spawn_pool(CustomPool, 4);
+    commands.pool(CustomPool, 4);
 
     // And we start playing our sample in the custom pool.
     commands.spawn((

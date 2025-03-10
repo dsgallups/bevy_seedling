@@ -166,105 +166,6 @@ macro_rules! spawn_impl {
 
 bevy_utils::all_tuples!(spawn_impl, 0, 15, A);
 
-///// Provides methods on [`Commands`] to spawn new sample pools.
-//pub trait SpawnPool {
-//    /// Spawn a sample pool, returning the [`EntityCommands`] for
-//    /// the terminal volume node.
-//    ///
-//    /// ```
-//    /// # use bevy::prelude::*;
-//    /// use bevy_seedling::{SpawnPool, PoolLabel, SamplePlayer};
-//    ///
-//    /// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
-//    /// struct CustomPool;
-//    ///
-//    /// fn spawn_custom_pool(server: Res<AssetServer>, mut commands: Commands) {
-//    ///     // Spawn a custom sample pool
-//    ///     commands.spawn_pool(CustomPool, 16);
-//    ///
-//    ///     // Trigger sample playback in the custom pool
-//    ///     commands.spawn((
-//    ///         SamplePlayer::new(server.load("my_sample.wav")),
-//    ///         CustomPool,
-//    ///     ));
-//    /// }
-//    /// ```
-//    fn pool(&mut self) -> PoolBuilder<()>;
-//
-//    ///// Spawn a sample pool with an initial volume, returning the [`EntityCommands`] for
-//    ///// the terminal volume node.
-//    //fn spawn_pool_with<T: PoolLabel + Component + Clone>(
-//    //    &mut self,
-//    //    marker: T,
-//    //    size: usize,
-//    //    volume: f32,
-//    //) -> PoolBuilder<()>;
-//    //
-//
-//    /// Despawn a sample pool, cleaning up its resources
-//    /// in the ECS and audio graph.
-//    ///
-//    /// Despawning the terminal volume node recursively
-//    /// will produce the same effect.
-//    fn despawn_pool<T: PoolLabel + Component>(&mut self);
-//}
-//
-//impl SpawnPool for Commands<'_, '_> {
-//    fn pool(&mut self) -> PoolBuilder<()> {
-//        // self.queue(|world: &mut World| {
-//        //     world.schedule_scope(Last, |_, schedule| {
-//        //         schedule.add_systems(
-//        //             (rank_nodes::<T>, assign_work::<T>)
-//        //                 .chain()
-//        //                 .in_set(SeedlingSystems::Queue),
-//        //         );
-//        //     });
-//        // });
-//        //
-//        // let bus = self
-//        //     .spawn((
-//        //         crate::VolumeNode {
-//        //             normalized_volume: 1.0,
-//        //         },
-//        //         SamplePoolNode,
-//        //         marker.clone(),
-//        //     ))
-//        //     .id();
-//        //
-//        // let rank = self.spawn((NodeRank::default(), marker.clone())).id();
-//        //
-//        // let nodes: Vec<_> = (0..size)
-//        //     .map(|_| {
-//        //         self.spawn((SamplerNode::default(), SamplePoolNode, marker.clone()))
-//        //             .id()
-//        //     })
-//        //     .collect();
-//        //
-//        // self.entity(bus).add_children(&nodes).add_child(rank);
-//
-//        PoolBuilder {
-//            commands: self.reborrow(),
-//            effects_chain: (),
-//        }
-//    }
-//
-//    fn despawn_pool<T: PoolLabel + Component>(&mut self) {
-//        self.queue(|world: &mut World| {
-//            let mut roots = world
-//                .query_filtered::<Entity, (With<T>, With<SamplePoolNode>, With<crate::VolumeNode>)>(
-//                );
-//
-//            let roots: Vec<_> = roots.iter(world).collect();
-//
-//            let mut commands = world.commands();
-//
-//            for root in roots {
-//                commands.entity(root).despawn_recursive();
-//            }
-//        });
-//    }
-//}
-
 #[derive(Component)]
 struct SamplePoolNode;
 
@@ -297,13 +198,6 @@ fn rank_nodes<T: Component>(
         .sort_unstable_by_key(|pair| std::cmp::Reverse(pair.1));
 }
 
-// fn supply_defaults<T: Component>(
-//     defaults: Query<&SamplePoolDefaults, With<T>>,
-//     q: Query<Entity, (With<SamplePlayer>, Added<T>)>,
-// ) {
-//
-// }
-
 #[derive(Component, Clone, Copy)]
 #[component(on_remove = on_remove_active)]
 struct ActiveSample {
@@ -321,6 +215,8 @@ fn on_remove_active(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
     }
 }
 
+/// Automatically remove or despawn sampler players when their
+/// sample has finished playing.
 fn remove_finished(
     nodes: Query<(Entity, &SamplerNode, &EffectsChain), With<ActiveSample>>,
     mut commands: Commands,
@@ -339,6 +235,8 @@ fn remove_finished(
     }
 }
 
+/// Scan through the set of pending sample players
+/// and assign work to the most appropriate sampler node.
 fn assign_work<T: Component>(
     mut nodes: Query<
         (Entity, &mut SamplerNode, &mut Events, &EffectsChain),
@@ -402,6 +300,14 @@ fn assign_work<T: Component>(
 #[derive(Component)]
 pub(crate) struct ParamFollower(Entity);
 
+/// Apply diffing and patching between two sets of parameters
+/// in the ECS. This allows the engine-connected parameters
+/// to follow another set of parameters that may be
+/// closer to user code.
+///
+/// For example, it's much easier for users to set parameters
+/// on a sample player entity directly rather than drilling
+/// into the sample pool and node the sample is assigned to.
 pub(crate) fn param_follower<T: Diff + Patch + Component>(
     sources: Query<&T, Without<ParamFollower>>,
     mut followers: Query<(&ParamFollower, &mut T)>,
@@ -439,6 +345,7 @@ fn monitor_active(
     }
 }
 
+/// Assign the default pool label to a sample player that has no label.
 fn assign_default(
     samples: Query<Entity, (With<SamplePlayer>, Without<PoolLabelContainer>)>,
     mut commands: Commands,

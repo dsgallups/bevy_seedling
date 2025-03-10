@@ -29,6 +29,7 @@ bevy_log = "0.15"
 bevy_hierarchy = "0.15"
 bevy_asset = "0.15"
 bevy_math = "0.15"
+bevy_transform = "0.15"
 firewheel = { path = "firewheel", features = ["bevy", "spatial_basic_node"] }
 symphonium = "0.4"
 symphonia = "0.5"
