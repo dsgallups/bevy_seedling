@@ -261,7 +261,7 @@ impl<T: Ease + Clone + 'static> Patch for Timeline<T> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use firewheel::event::{NodeEvent, NodeEventType};
+    use firewheel::event::NodeEventType;
 
     #[test]
     fn test_continuous_diff() {
@@ -280,7 +280,7 @@ mod test {
         b.diff(&a, Default::default(), &mut events);
 
         assert!(
-            matches!(&events.as_slice(), &[NodeEventType::Param { data, .. }] if matches!(data, ParamData::F32(_)))
+            matches!(&events.as_slice(), &[NodeEventType::Param { data, .. }] if matches!(data, ParamData::Any(_)))
         )
     }
 

@@ -10,16 +10,12 @@ First, you'll need to add the dependency to your `Cargo.toml`.
 
 ```toml
 [dependencies]
-bevy_seedling = "0.2"
-
-# At this stage, it may be better to track the main branch
-[dependencies]
-bevy_seedling = { git = "https://github.com/corvusprudens/bevy_seedling.git" }
+bevy_seedling = "0.3"
 ```
 
 Then, you'll need to add the [`SeedlingPlugin`] to your app.
 
-```no_run
+```rs
 use bevy::prelude::*;
 use bevy_seedling::SeedlingPlugin;
 
@@ -64,6 +60,12 @@ to the audio engine. However, since
 you can always immediately queue and flush events
 if necessary.
 
+## Bevy version compatibility
+
+| `bevy` | `bevy_seedling` |
+| ------ | --------------- |
+| 0.15   | 0.3             |
+
 ## Future work
 
 - Graph operations
@@ -76,3 +78,18 @@ if necessary.
 
   Both Firewheel and this crate have some work to do in
   order to support `wasm` targets.
+
+#### License
+
+<sup>
+Licensed under either of <a href="LICENSE-APACHE">Apache License, Version
+2.0</a> or <a href="LICENSE-MIT">MIT license</a> at your option.
+</sup>
+
+<br>
+
+<sub>
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this crate by you, as defined in the Apache-2.0 license, shall
+be dual licensed as above, without any additional terms or conditions.
+</sub>

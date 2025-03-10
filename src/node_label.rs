@@ -25,7 +25,7 @@ bevy_ecs::define_label!(
     /// struct EffectsChain;
     ///
     /// fn system(server: Res<AssetServer>, mut commands: Commands) {
-    ///     commands.spawn((VolumeNode::new(0.25), EffectsChain));
+    ///     commands.spawn((VolumeNode { normalized_volume: 0.25 }, EffectsChain));
     ///
     ///     commands
     ///         .spawn(SamplePlayer::new(server.load("sound.wav")))
@@ -53,7 +53,7 @@ bevy_ecs::define_label!(
 /// # use bevy_seedling::{MainBus, VolumeNode};
 /// fn mute(mut q: Single<&mut VolumeNode, With<MainBus>>) {
 ///     let mut params = q.into_inner();
-///     params.0.set(0.);
+///     params.normalized_volume = 0.0;
 /// }
 /// ```
 #[derive(crate::NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
@@ -86,7 +86,7 @@ pub(crate) fn insert_main_bus(mut commands: Commands, mut context: ResMut<AudioC
 /// struct MyLabel;
 /// # fn system(mut commands: Commands) {
 ///
-/// commands.spawn((VolumeNode::new(0.25), MyLabel));
+/// commands.spawn((VolumeNode { normalized_volume: 0.25 }, MyLabel));
 /// # }
 #[derive(Debug, Default, Component)]
 #[component(on_remove = on_remove)]

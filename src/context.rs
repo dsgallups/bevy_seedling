@@ -47,13 +47,13 @@ impl AudioContext {
     /// This can be used to generate precisely-timed events.
     /// ```
     /// # use bevy::prelude::*;
-    /// # use bevy_seedling::{AudioContext, VolumeNode};
+    /// # use bevy_seedling::{AudioContext, lpf::LowPassNode};
     /// # use firewheel::clock::ClockSeconds;
-    /// fn mute_all(mut q: Query<&mut VolumeNode>, mut context: ResMut<AudioContext>) {
+    /// fn mute_all(mut q: Query<&mut LowPassNode>, mut context: ResMut<AudioContext>) {
     ///     let now = context.now();
-    ///     for mut volume in q.iter_mut() {
-    ///         volume
-    ///             .0
+    ///     for mut filter in q.iter_mut() {
+    ///         filter.
+    ///             frequency
     ///             .push_curve(
     ///                 0.,
     ///                 now,
@@ -76,8 +76,8 @@ impl AudioContext {
     /// # use bevy::prelude::*;
     /// # use bevy_seedling::AudioContext;
     /// fn system(mut context: ResMut<AudioContext>) {
-    ///     context.with(|context| {
-    ///         context.deactivate();
+    ///     let input_devices = context.with(|context| {
+    ///         context.available_input_devices()
     ///     });
     /// }
     /// ```

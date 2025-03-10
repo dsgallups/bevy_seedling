@@ -2,12 +2,9 @@
 
 use bevy::{log::LogPlugin, prelude::*};
 use bevy_seedling::{
-    bpf::BandPassNode,
-    lpf::LowPassNode,
     sample::{pool::Pool, SamplePlayer},
     spatial::SpatialListener2D,
-    timeline::Timeline,
-    PlaybackSettings, PoolLabel, SeedlingPlugin, SpatialBasicNode, VolumeNode,
+    PlaybackSettings, PoolLabel, SeedlingPlugin, SpatialBasicNode,
 };
 
 fn main() {
@@ -20,7 +17,7 @@ fn main() {
             },
             AssetPlugin::default(),
             SeedlingPlugin::default(),
-            TransformPlugin::default(),
+            TransformPlugin,
         ))
         .add_systems(Startup, startup)
         .add_systems(Update, spinner)

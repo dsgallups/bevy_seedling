@@ -265,10 +265,10 @@ pub trait ConnectNode {
     /// # use bevy_seedling::{MainBus, VolumeNode, ConnectNode};
     /// # fn system(mut commands: Commands) {
     /// // Connect a node to the MainBus.
-    /// let node = commands.spawn(VolumeNode::new(0.5)).connect(MainBus).id();
+    /// let node = commands.spawn(VolumeNode { normalized_volume: 0.5 }).connect(MainBus).id();
     ///
     /// // Connect another node to the one we just spawned.
-    /// commands.spawn(VolumeNode::new(0.25)).connect(node);
+    /// commands.spawn(VolumeNode { normalized_volume: 0.25 }).connect(node);
     /// # }
     /// ```
     ///

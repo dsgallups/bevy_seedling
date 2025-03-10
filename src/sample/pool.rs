@@ -354,3 +354,63 @@ fn assign_default(
         commands.entity(sample).insert(DefaultPool);
     }
 }
+
+/// A pool despawner command.
+///
+/// Despawn a sample pool, cleaning up its resources
+/// in the ECS and audio graph.
+///
+/// Despawning the terminal volume node recursively
+/// will produce the same effect.
+///
+/// This can be used directly or via the [`PoolCommands`] trait.
+///
+/// ```
+/// # use bevy_ecs::prelude::*;
+/// # use bevy_seedling::{PoolLabel, sample::pool::PoolDespawn};
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct MyLabel;
+///
+/// fn system(mut commands: Commands) {
+///     commands.queue(PoolDespawn::new(MyLabel));
+/// }
+/// ```
+#[derive(Debug)]
+pub struct PoolDespawn<T>(T);
+
+impl<T: PoolLabel + Component> PoolDespawn<T> {
+    pub fn new(label: T) -> Self {
+        Self(label)
+    }
+}
+
+impl<T: PoolLabel + Component> Command for PoolDespawn<T> {
+    fn apply(self, world: &mut World) {
+        let mut roots = world
+            .query_filtered::<Entity, (With<T>, With<SamplePoolNode>, With<crate::VolumeNode>)>();
+
+        let roots: Vec<_> = roots.iter(world).collect();
+
+        let mut commands = world.commands();
+
+        for root in roots {
+            commands.entity(root).despawn_recursive();
+        }
+    }
+}
+
+/// Provides methods on [`Commands`] to manage sample pools.
+pub trait PoolCommands {
+    /// Despawn a sample pool, cleaning up its resources
+    /// in the ECS and audio graph.
+    ///
+    /// Despawning the terminal volume node recursively
+    /// will produce the same effect.
+    fn despawn_pool<T: PoolLabel + Component>(&mut self, label: T);
+}
+
+impl PoolCommands for Commands<'_, '_> {
+    fn despawn_pool<T: PoolLabel + Component>(&mut self, label: T) {
+        self.queue(PoolDespawn::new(label));
+    }
+}
