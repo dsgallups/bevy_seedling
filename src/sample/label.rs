@@ -21,7 +21,7 @@
 //!             DefaultPlugins,
 //!             SeedlingPlugin {
 //!                 sample_pool_size: None,
-//!                 ..Default::default(),
+//!                 ..Default::default()
 //!             },
 //!         ))
 //!         .add_systems(
