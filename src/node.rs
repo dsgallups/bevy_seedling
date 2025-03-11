@@ -1,18 +1,20 @@
 //! Audio node connections and management.
 
 use crate::node_label::NodeLabels;
+use crate::SamplePlayer;
 use crate::{node_label::InternedNodeLabel, AudioContext, MainBus, NodeLabel, SeedlingSystems};
 use bevy_app::Last;
 use bevy_ecs::{prelude::*, world::DeferredWorld};
 use bevy_log::{error, error_once, warn_once};
 use bevy_utils::HashMap;
-use firewheel::basic_nodes::MixNode;
-use firewheel::node::{AudioNode, NodeEvent, NodeEventType, NodeID};
-use firewheel::param::AudioParam;
-use firewheel::{ChannelConfig, ChannelCount};
+use firewheel::{
+    diff::{Diff, Patch},
+    event::{NodeEvent, NodeEventType},
+    node::{AudioNode, NodeID},
+};
 
 #[derive(Component)]
-struct ParamsDiff<T>(pub(crate) T);
+struct Baseline<T>(pub(crate) T);
 
 /// An event queue.
 ///
@@ -45,122 +47,101 @@ impl Events {
     }
 }
 
-fn generate_param_events<T: AudioParam + Component + Clone + Send + Sync + 'static>(
-    mut nodes: Query<(&mut T, &mut ParamsDiff<T>, &mut Events)>,
-    mut ctx: ResMut<AudioContext>,
+fn generate_param_events<T: Diff + Patch + Component + Clone>(
+    mut nodes: Query<(&mut T, &mut Baseline<T>, &mut Events), Without<SamplePlayer>>,
 ) {
-    let now = ctx.now();
+    for (params, mut baseline, mut events) in nodes.iter_mut() {
+        params.diff(&baseline.0, Default::default(), &mut events.0);
 
-    for (mut params, mut diff, mut events) in nodes.iter_mut() {
-        // Keep params roughly synched.
-        params.tick(now);
-
-        params.diff(
-            &diff.0,
-            |event| events.push(NodeEventType::Custom(Box::new(event))),
-            Default::default(),
-        );
-
-        diff.0 = params.clone();
+        // Patch the baseline.
+        for event in &events.0 {
+            baseline.0.patch_event(event);
+        }
     }
 }
 
-fn acquire_id<T: Into<Box<dyn AudioNode>> + Component + Clone>(
-    q: Query<(Entity, &T, Option<&NodeLabels>, Option<&ChannelConfig>), Without<Node>>,
+fn acquire_id<T>(
+    q: Query<
+        (Entity, &T, Option<&T::Configuration>, Option<&NodeLabels>),
+        (Without<Node>, Without<SamplePlayer>),
+    >,
     mut context: ResMut<AudioContext>,
     mut commands: Commands,
     mut node_map: ResMut<NodeMap>,
-) {
+) where
+    T: AudioNode<Configuration: Component + Clone> + Component + Clone,
+{
     context.with(|context| {
-        if let Some(graph) = context.graph_mut() {
-            for (entity, container, labels, config) in q.iter() {
-                let node = match graph.add_node(container.clone().into(), config.cloned()) {
-                    Ok(node) => node,
-                    Err(e) => {
-                        error!("failed to insert node: {e}");
-                        continue;
-                    }
-                };
+        for (entity, container, config, labels) in q.iter() {
+            let node = context.add_node(container.clone(), config.cloned());
 
-                // let num_inputs = config.map(|c| c.num_inputs).unwrap_or(ChannelCount::STEREO);
-
-                // let mix_config = ChannelConfig {
-                //     num_inputs,
-                //     num_outputs: num_inputs,
-                // };
-                //
-                // let mix_node = match graph.add_node(MixNode.into(), Some(mix_config)) {
-                //     Ok(node) => node,
-                //     Err(e) => {
-                //         error!("failed to insert mix node: {e}");
-                //         continue;
-                //     }
-                // };
-                //
-                // let connections: Vec<_> = (0..num_inputs.get()).map(|i| (i, i)).collect();
-                //
-                // if let Err(e) = graph.connect(mix_node, node, &connections, false) {
-                //     error!("failed to connect mix node: {e}");
-                //     continue;
-                // }
-
-                for label in labels.iter().flat_map(|l| l.iter()) {
-                    node_map.0.insert(*label, entity);
-                }
-
-                commands.entity(entity).insert(Node(node));
+            for label in labels.iter().flat_map(|l| l.iter()) {
+                node_map.0.insert(*label, entity);
             }
+
+            commands.entity(entity).insert(Node(node));
         }
     });
 }
 
-/// Register an audio node with parameters.
-///
-/// This will allow audio entities to automatically
-/// acquire IDs from the audio graph and perform
-/// parameter diffing.
-pub trait RegisterParamsNode {
-    fn register_params_node<T: Into<Box<dyn AudioNode>> + AudioParam + Component + Clone>(
-        &mut self,
-    ) -> &mut Self;
+/// Register audio nodes in the ECS.
+pub trait RegisterNode {
+    /// Register an audio node with automatic diffing.
+    ///
+    /// This will allow audio entities to automatically
+    /// acquire IDs from the audio graph and perform
+    /// parameter diffing.
+    fn register_node<T>(&mut self) -> &mut Self
+    where
+        T: AudioNode<Configuration: Component + Clone> + Diff + Patch + Component + Clone;
+
+    /// Register an audio node without automatic diffing.
+    ///
+    /// This will allow audio entities to automatically
+    /// acquire IDs from the audio graph and perform
+    /// parameter diffing.
+    fn register_simple_node<T>(&mut self) -> &mut Self
+    where
+        T: AudioNode<Configuration: Component + Clone> + Component + Clone;
 }
 
-impl RegisterParamsNode for bevy_app::App {
-    fn register_params_node<T: Into<Box<dyn AudioNode>> + AudioParam + Component + Clone>(
-        &mut self,
-    ) -> &mut Self {
+impl RegisterNode for bevy_app::App {
+    fn register_node<T>(&mut self) -> &mut Self
+    where
+        T: AudioNode<Configuration: Component + Clone> + Diff + Patch + Component + Clone,
+    {
         let world = self.world_mut();
 
         world.register_component_hooks::<T>().on_insert(
             |mut world: DeferredWorld, entity: Entity, _| {
                 let value = world.get::<T>(entity).unwrap().clone();
-                world.commands().entity(entity).insert(ParamsDiff(value));
+                world.commands().entity(entity).insert(Baseline(value));
             },
         );
         world.register_required_components::<T, Events>();
+        world.register_required_components::<T, T::Configuration>();
 
         self.add_systems(
             Last,
             (
                 acquire_id::<T>.in_set(SeedlingSystems::Acquire),
-                generate_param_events::<T>.in_set(SeedlingSystems::Queue),
+                (
+                    super::sample::pool::param_follower::<T>,
+                    generate_param_events::<T>,
+                )
+                    .chain()
+                    .in_set(SeedlingSystems::Queue),
             ),
         )
     }
-}
 
-/// Register an audio node.
-///
-/// This will allow audio entities to automatically
-/// acquire IDs from the audio graph.
-pub trait RegisterNode {
-    fn register_node<T: Into<Box<dyn AudioNode>> + Component + Clone>(&mut self) -> &mut Self;
-}
-
-impl RegisterNode for bevy_app::App {
-    fn register_node<T: Into<Box<dyn AudioNode>> + Component + Clone>(&mut self) -> &mut Self {
+    fn register_simple_node<T>(&mut self) -> &mut Self
+    where
+        T: AudioNode<Configuration: Component + Clone> + Component + Clone,
+    {
         let world = self.world_mut();
         world.register_required_components::<T, Events>();
+        world.register_required_components::<T, T::Configuration>();
 
         self.add_systems(Last, acquire_id::<T>.in_set(SeedlingSystems::Acquire))
     }
@@ -189,27 +170,7 @@ impl Component for Node {
             };
 
             let mut removals = world.resource_mut::<PendingRemovals>();
-            removals.0.push(node.0);
-        });
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct AutoMix {
-    id: NodeID,
-}
-
-impl Component for AutoMix {
-    const STORAGE_TYPE: bevy_ecs::component::StorageType = bevy_ecs::component::StorageType::Table;
-
-    fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
-        hooks.on_remove(|mut world, entity, _| {
-            let Some(node) = world.get::<AutoMix>(entity).map(|e| e.id) else {
-                return;
-            };
-
-            let mut removals = world.resource_mut::<PendingRemovals>();
-            removals.push(node);
+            removals.push(node.0);
         });
     }
 }
@@ -304,10 +265,10 @@ pub trait ConnectNode {
     /// # use bevy_seedling::{MainBus, VolumeNode, ConnectNode};
     /// # fn system(mut commands: Commands) {
     /// // Connect a node to the MainBus.
-    /// let node = commands.spawn(VolumeNode::new(0.5)).connect(MainBus).id();
+    /// let node = commands.spawn(VolumeNode { normalized_volume: 0.5 }).connect(MainBus).id();
     ///
     /// // Connect another node to the one we just spawned.
-    /// commands.spawn(VolumeNode::new(0.25)).connect(node);
+    /// commands.spawn(VolumeNode { normalized_volume: 0.25 }).connect(node);
     /// # }
     /// ```
     ///
@@ -399,11 +360,9 @@ pub(crate) fn process_removals(
     mut context: ResMut<AudioContext>,
 ) {
     context.with(|context| {
-        if let Some(graph) = context.graph_mut() {
-            for node in removals.0.drain(..) {
-                if graph.remove_node(node).is_err() {
-                    error!("attempted to remove non-existent or invalid node from audio graph");
-                }
+        for node in removals.0.drain(..) {
+            if context.remove_node(node).is_err() {
+                error!("attempted to remove non-existent or invalid node from audio graph");
             }
         }
     });
@@ -414,178 +373,52 @@ const DEFAULT_CONNECTION: &[(u32, u32)] = &[(0, 0), (1, 1)];
 // this has turned into a bit of a monster
 pub(crate) fn process_connections(
     mut connections: Query<(&mut PendingConnections, &Node)>,
-    mut targets: Query<(Option<&mut AutoMix>, Option<&ChannelConfig>, &Node)>,
+    targets: Query<&Node>,
     node_map: Res<NodeMap>,
     mut context: ResMut<AudioContext>,
-    mut commands: Commands,
 ) {
-    let mut batched_connections = HashMap::new();
-
     context.with(|context| {
-        if let Some(graph) = context.graph_mut() {
-            for (mut pending, source_node) in connections.iter_mut() {
-                pending.0.retain(|connection| {
-                    let ports = connection.ports.as_deref().unwrap_or(&[(0, 0), (1, 1)]);
+        for (mut pending, source_node) in connections.iter_mut() {
+            pending.0.retain(|connection| {
+                let ports = connection.ports.as_deref().unwrap_or(DEFAULT_CONNECTION);
 
-                    let target_entity = match connection.target {
-                        ConnectTarget::Entity(entity) => entity,
-                        ConnectTarget::Label(label) => {
-                            let Some(entity) = node_map.get(&label) else {
-                                warn_once!("tried to connect audio node to label with no node");
+                let target_entity = match connection.target {
+                    ConnectTarget::Entity(entity) => entity,
+                    ConnectTarget::Label(label) => {
+                        let Some(entity) = node_map.get(&label) else {
+                            warn_once!("tried to connect audio node to label with no node");
 
-                                // We may need to wait for the intended label to be spawned.
-                                return true;
-                            };
+                            // We may need to wait for the intended label to be spawned.
+                            return true;
+                        };
 
-                            *entity
-                        }
-                        ConnectTarget::Node(dest_node) => {
-                            // no questions asked, simply connect
-                            if let Err(e) = graph.connect(source_node.0, dest_node, ports, false) {
-                                error_once!("failed to connect audio node to target: {e}");
-                            }
-
-                            // if this fails, the target node must have been removed from the graph
-                            return false;
-                        }
-                    };
-
-                    batched_connections
-                        .entry(target_entity)
-                        .or_insert(Vec::new())
-                        .push((source_node.0, connection.ports.clone()));
-
-                    false
-                });
-            }
-
-            // We batch the entity-based connections together so that
-            // we only need to spawn or modify a mix node once per schedule.
-            for (dest, sources) in batched_connections {
-                let Ok((auto_mix, channel_config, node)) = targets.get_mut(dest) else {
-                    error_once!("entity {dest:#?} has no audio node or does not exist");
-
-                    continue;
-                };
-
-                let base_inputs = channel_config.map(|c| c.num_inputs.get()).unwrap_or(2);
-
-                let existing_map = match auto_mix {
-                    // first, check if we can simply connect the nodes directly
-                    None if !graph.edges().any(|e| e.dst_node == node.0) && sources.len() == 1 => {
-                        let (source, ports) = &sources[0];
-
-                        if let Err(e) = graph.connect(
-                            *source,
-                            node.0,
-                            ports.as_deref().unwrap_or(DEFAULT_CONNECTION),
-                            false,
-                        ) {
+                        *entity
+                    }
+                    ConnectTarget::Node(dest_node) => {
+                        // no questions asked, simply connect
+                        if let Err(e) = context.connect(source_node.0, dest_node, ports, false) {
                             error_once!("failed to connect audio node to target: {e}");
                         }
 
-                        continue;
-                    }
-                    // otherwise, we'll create a mix node
-                    Some(auto_mix) => {
-                        let mut existing_map = HashMap::new();
-
-                        for edge in graph.edges().filter(|e| e.dst_node == auto_mix.id) {
-                            existing_map
-                                .entry(edge.src_node)
-                                .or_insert(Vec::new())
-                                // the destination ports should be considered only
-                                // as the remainder of the base input channels of the
-                                // target node
-                                .push((edge.src_port, edge.dst_port % base_inputs));
-                        }
-
-                        // disconnect the existing mix node
-                        let removals: Vec<_> = graph
-                            .edges()
-                            .filter(|e| e.src_node == auto_mix.id)
-                            .map(|e| e.id)
-                            .collect();
-                        for id in removals {
-                            graph.disconnect_by_edge_id(id);
-                        }
-
-                        existing_map
-                    }
-                    _ => {
-                        let mut existing_map = HashMap::new();
-                        let mut removals = Vec::new();
-
-                        for edge in graph.edges().filter(|e| e.dst_node == node.0) {
-                            existing_map
-                                .entry(edge.src_node)
-                                .or_insert(Vec::new())
-                                .push((edge.src_port, edge.dst_port));
-                            removals.push(edge.id);
-                        }
-
-                        for id in removals {
-                            graph.disconnect_by_edge_id(id);
-                        }
-
-                        existing_map
+                        // if this fails, the target node must have been removed from the graph
+                        return false;
                     }
                 };
 
-                // finally, create a new mix node to accomodate the connections
-                let total_inputs = base_inputs * (sources.len() + existing_map.len()) as u32;
-
-                let mix_node = graph.add_node(
-                    MixNode.into(),
-                    Some(ChannelConfig {
-                        num_inputs: ChannelCount::new(total_inputs).unwrap(),
-                        num_outputs: ChannelCount::new(base_inputs).unwrap(),
-                    }),
-                );
-
-                let mix_node = match mix_node {
-                    Ok(n) => n,
-                    Err(e) => {
-                        error_once!("failed to create automatic audio node mixing: {e}");
-                        continue;
+                let target = match targets.get(target_entity) {
+                    Ok(t) => t,
+                    Err(_) => {
+                        error_once!("failed to fetch audio node entity {target_entity:?}");
+                        return false;
                     }
                 };
 
-                let mut port_buffer = Vec::with_capacity(base_inputs as usize);
-
-                for i in 0..base_inputs {
-                    port_buffer.push((i, i));
+                if let Err(e) = context.connect(source_node.0, target.0, ports, false) {
+                    error_once!("failed to connect audio node to target: {e}");
                 }
 
-                if let Err(e) = graph.connect(mix_node, node.0, &port_buffer, false) {
-                    error_once!("failed to connect to automatic audio node mixing: {e}");
-                    continue;
-                }
-
-                for (i, (src, ports)) in
-                    existing_map
-                        .iter()
-                        .map(|(src, ports)| (src, ports.as_slice()))
-                        .chain(sources.iter().map(|(src, ports)| {
-                            (src, ports.as_deref().unwrap_or(DEFAULT_CONNECTION))
-                        }))
-                        .enumerate()
-                {
-                    port_buffer.clear();
-
-                    for pair in ports.iter() {
-                        port_buffer.push((pair.0, pair.1 + i as u32 * base_inputs));
-                    }
-
-                    if let Err(e) = graph.connect(*src, mix_node, &port_buffer, false) {
-                        error_once!("failed to connect to automatic audio node mixing: {e}");
-
-                        break;
-                    }
-                }
-
-                commands.entity(dest).insert(AutoMix { id: mix_node });
-            }
+                false
+            });
         }
     });
 }
@@ -595,15 +428,12 @@ pub(crate) fn flush_events(
     mut context: ResMut<AudioContext>,
 ) {
     context.with(|context| {
-        if let Some(graph) = context.graph_mut() {
-            for (node, mut events) in nodes.iter_mut() {
-                for event in events.0.drain(..) {
-                    graph.queue_event(NodeEvent {
-                        node_id: node.0,
-                        event,
-                        delay: firewheel::clock::EventDelay::Immediate,
-                    });
-                }
+        for (node, mut events) in nodes.iter_mut() {
+            for event in events.0.drain(..) {
+                context.queue_event(NodeEvent {
+                    node_id: node.0,
+                    event,
+                });
             }
         }
     });

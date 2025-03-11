@@ -1,41 +1,47 @@
-use bevy_seedling::{profiling::ProfilingContext, saw::SawNode, VolumeNode};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use firewheel::param::Timeline;
+// use bevy_seedling::{profiling::ProfilingBackend, VolumeNode};
+use criterion::{criterion_group, criterion_main, Criterion};
+// use firewheel::{channel_config::ChannelCount, FirewheelCtx};
 
-pub fn criterion_benchmark(c: &mut Criterion) {
-    // This benchmarks straightforward processing
-    // with two nodes.
-    c.bench_function("basic processing", {
-        let input = [0f32; 256 * 2];
-        let mut output = [0f32; 256 * 2];
+pub fn criterion_benchmark(_c: &mut Criterion) {
+    // // This benchmarks straightforward processing
+    // // with two nodes.
+    // c.bench_function("basic processing", {
+    //     // let input = [0f32; 256 * 2];
+    //     // let mut output = [0f32; 256 * 2];
 
-        let mut context = ProfilingContext::new(48000);
-        let graph = context.context.graph_mut().unwrap();
+    //     let mut context = FirewheelCtx::<ProfilingBackend>::new(firewheel::FirewheelConfig {
+    //         num_graph_inputs: ChannelCount::ZERO,
+    //         num_graph_outputs: ChannelCount::ZERO,
+    //         ..Default::default()
+    //     });
 
-        let out_node = graph.graph_out_node();
-        let volume = graph
-            .add_node(VolumeNode(Timeline::new(0.5f32)).into(), None)
-            .unwrap();
+    //     let out_node = context.graph_out_node_id();
+    //     let volume = context.add_node(
+    //         VolumeNode {
+    //             normalized_volume: 0.5,
+    //         },
+    //         None,
+    //     );
 
-        graph
-            .connect(volume, out_node, &[(0, 0), (1, 1)], false)
-            .unwrap();
+    //     context
+    //         .connect(volume, out_node, &[(0, 0), (1, 1)], false)
+    //         .unwrap();
 
-        let saw = graph.add_node(SawNode::new(440.).into(), None).unwrap();
+    //     // let saw = context.add_node(SawNode::new(440.).into(), None);
 
-        graph
-            .connect(saw, volume, &[(0, 0), (0, 1)], false)
-            .unwrap();
+    //     // context
+    //     //     .connect(saw, volume, &[(0, 0), (0, 1)], false)
+    //     //     .unwrap();
 
-        context.context.flush_events();
-        context.context.update();
+    //     context.update().unwrap();
 
-        move |b| {
-            b.iter(|| {
-                context.process_interleaved(black_box(&input), black_box(&mut output));
-            })
-        }
-    });
+    //     move |b| {
+    //         b.iter(|| {
+    //             todo!("direct processing");
+    //             // context.process_interleaved(black_box(&input), black_box(&mut output));
+    //         })
+    //     }
+    // });
 }
 
 criterion_group!(benches, criterion_benchmark);

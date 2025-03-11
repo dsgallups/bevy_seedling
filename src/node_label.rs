@@ -6,8 +6,9 @@
 //!
 //! Any node that doesn't provide an explicit connection when spawned
 //! will be automatically connected to [MainBus].
-use crate::{node::NodeMap, VolumeNode};
+use crate::node::NodeMap;
 use bevy_ecs::{component::ComponentId, intern::Interned, prelude::*, world::DeferredWorld};
+use firewheel::nodes::volume::VolumeNode;
 use smallvec::SmallVec;
 
 use crate::{AudioContext, ConnectNode};
@@ -24,7 +25,7 @@ bevy_ecs::define_label!(
     /// struct EffectsChain;
     ///
     /// fn system(server: Res<AssetServer>, mut commands: Commands) {
-    ///     commands.spawn((VolumeNode::new(0.25), EffectsChain));
+    ///     commands.spawn((VolumeNode { normalized_volume: 0.25 }, EffectsChain));
     ///
     ///     commands
     ///         .spawn(SamplePlayer::new(server.load("sound.wav")))
@@ -52,7 +53,7 @@ bevy_ecs::define_label!(
 /// # use bevy_seedling::{MainBus, VolumeNode};
 /// fn mute(mut q: Single<&mut VolumeNode, With<MainBus>>) {
 ///     let mut params = q.into_inner();
-///     params.0.set(0.);
+///     params.normalized_volume = 0.0;
 /// }
 /// ```
 #[derive(crate::NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
@@ -62,10 +63,15 @@ pub struct MainBus;
 pub type InternedNodeLabel = Interned<dyn NodeLabel>;
 
 pub(crate) fn insert_main_bus(mut commands: Commands, mut context: ResMut<AudioContext>) {
-    let terminal_node = context.with(|context| context.graph().graph_out_node());
+    let terminal_node = context.with(|context| context.graph_out_node_id());
 
     commands
-        .spawn((VolumeNode::new(1.), MainBus))
+        .spawn((
+            VolumeNode {
+                normalized_volume: 1.,
+            },
+            MainBus,
+        ))
         .connect(terminal_node);
 }
 
@@ -80,7 +86,7 @@ pub(crate) fn insert_main_bus(mut commands: Commands, mut context: ResMut<AudioC
 /// struct MyLabel;
 /// # fn system(mut commands: Commands) {
 ///
-/// commands.spawn((VolumeNode::new(0.25), MyLabel));
+/// commands.spawn((VolumeNode { normalized_volume: 0.25 }, MyLabel));
 /// # }
 #[derive(Debug, Default, Component)]
 #[component(on_remove = on_remove)]

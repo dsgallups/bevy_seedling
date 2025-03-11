@@ -3,11 +3,12 @@
 
 use bevy::{log::LogPlugin, prelude::*};
 use bevy_seedling::{
-    firewheel::{basic_nodes::VolumeNode, clock::ClockSeconds},
     lpf::LowPassNode,
-    sample::{pool::SpawnPool, SamplePlayer},
-    AudioContext, ConnectNode, NodeLabel, PlaybackSettings, PoolLabel, SeedlingPlugin,
+    sample::{pool::Pool, SamplePlayer},
+    timeline::Timeline,
+    AudioContext, ConnectNode, NodeLabel, PlaybackSettings, PoolLabel, SeedlingPlugin, VolumeNode,
 };
+use firewheel::clock::ClockSeconds;
 
 #[derive(NodeLabel, PartialEq, Eq, Debug, Hash, Clone)]
 struct EffectsBus;
@@ -39,20 +40,29 @@ fn main() {
                 // can use this type to connect to this node anywhere in
                 // the code.
                 commands
-                    .spawn((VolumeNode::new(1.), EffectsBus))
+                    .spawn((
+                        VolumeNode {
+                            normalized_volume: 1.0,
+                        },
+                        EffectsBus,
+                    ))
                     .connect(effects);
 
                 // Let's create a new sample player pool and route it to our effects bus.
-                commands.spawn_pool(EffectsPool, 4).connect(EffectsBus);
+                Pool::new(EffectsPool, 4)
+                    .effect(bevy_seedling::bpf::BandPassNode {
+                        frequency: Timeline::new(1000.0),
+                        q: Timeline::new(5.0),
+                    })
+                    .spawn(&mut commands)
+                    .connect(EffectsBus);
 
                 // Finally, let's play a sample through the chain.
-                commands
-                    .spawn((
-                        SamplePlayer::new(server.load("snd_wobbler.wav")),
-                        PlaybackSettings::LOOP,
-                        EffectsPool,
-                    ))
-                    .connect(EffectsBus);
+                commands.spawn((
+                    SamplePlayer::new(server.load("snd_wobbler.wav")),
+                    PlaybackSettings::LOOP,
+                    EffectsPool,
+                ));
 
                 // Once these connections are synchronized with the audio graph,
                 // it will look like:

@@ -2,13 +2,13 @@
 
 use bevy_asset::Handle;
 use bevy_ecs::prelude::*;
-use firewheel::node::RepeatMode;
 
 mod assets;
 pub mod label;
 pub mod pool;
 
 pub use assets::{Sample, SampleLoader, SampleLoaderError};
+use firewheel::nodes::sampler::RepeatMode;
 
 /// A component that queues sample playback.
 ///

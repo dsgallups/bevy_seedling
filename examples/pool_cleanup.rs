@@ -3,8 +3,11 @@
 
 use bevy::{log::LogPlugin, prelude::*};
 use bevy_seedling::{
-    sample::{PlaybackSettings, SamplePlayer},
-    PoolLabel, SeedlingPlugin, SpawnPool,
+    sample::{
+        pool::{Pool, PoolCommands},
+        PlaybackSettings, SamplePlayer,
+    },
+    PoolLabel, SeedlingPlugin,
 };
 use std::time::Duration;
 
@@ -29,7 +32,7 @@ fn main() {
 
 fn startup(server: Res<AssetServer>, mut commands: Commands) {
     // Here we spawn our custom pool with four sampler nodes.
-    commands.spawn_pool(CustomPool, 4);
+    Pool::new(CustomPool, 4).spawn(&mut commands);
 
     // And we start playing our sample in the custom pool.
     commands.spawn((
@@ -54,7 +57,7 @@ fn remove_pool(mut q: Query<(Entity, &mut PoolRemover)>, time: Res<Time>, mut co
             // This will remove the sampler and volume nodes
             // associated with this pool in both the ECS
             // and audio graph.
-            commands.despawn_pool::<CustomPool>();
+            commands.despawn_pool(CustomPool);
 
             commands.entity(e).despawn();
         }
