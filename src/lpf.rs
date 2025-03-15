@@ -7,9 +7,10 @@ use firewheel::{
     clock::ClockSeconds,
     diff::{Diff, Patch},
     event::NodeEventList,
-    node::ProcInfo,
-    node::{AudioNode, AudioNodeInfo, AudioNodeProcessor, ProcessStatus, NUM_SCRATCH_BUFFERS},
-    StreamInfo,
+    node::{
+        AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, ProcBuffers,
+        ProcInfo, ProcessStatus,
+    },
 };
 
 /// A one-pole, low-pass filter.
@@ -17,6 +18,12 @@ use firewheel::{
 pub struct LowPassNode {
     /// The cutoff frequency in hertz.
     pub frequency: Timeline<f32>,
+}
+
+impl Default for LowPassNode {
+    fn default() -> Self {
+        Self::new(24000.)
+    }
 }
 
 impl LowPassNode {
@@ -62,15 +69,18 @@ impl AudioNode for LowPassNode {
             .uses_events(true)
     }
 
-    fn processor(
+    fn construct_processor(
         &self,
         config: &Self::Configuration,
-        stream_info: &StreamInfo,
+        cx: ConstructProcessorContext,
     ) -> impl AudioNodeProcessor {
         LowPassProcessor {
             params: self.clone(),
             channels: vec![
-                Lpf::new(stream_info.sample_rate.get() as f32, self.frequency.get());
+                Lpf::new(
+                    cx.stream_info.sample_rate.get() as f32,
+                    self.frequency.get()
+                );
                 config.channels.get().get() as usize
             ],
         }
@@ -127,11 +137,11 @@ struct LowPassProcessor {
 impl AudioNodeProcessor for LowPassProcessor {
     fn process(
         &mut self,
-        inputs: &[&[f32]],
-        outputs: &mut [&mut [f32]],
-        events: NodeEventList,
+        ProcBuffers {
+            inputs, outputs, ..
+        }: ProcBuffers,
         proc_info: &ProcInfo,
-        _: &mut [&mut [f32]; NUM_SCRATCH_BUFFERS],
+        events: NodeEventList,
     ) -> ProcessStatus {
         self.params.patch_list(events);
 

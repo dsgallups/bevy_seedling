@@ -13,7 +13,7 @@ First, you'll need to add the dependency to your `Cargo.toml`.
 bevy_seedling = "0.3"
 ```
 
-Then, you'll need to add the [`SeedlingPlugin`] to your app.
+Then, you'll need to add the `SeedlingPlugin` to your app.
 
 ```rs
 use bevy::prelude::*;
@@ -34,8 +34,8 @@ should help you get up to speed on common usage patterns.
 `bevy_seedling` provides a thin ECS wrapper over `Firewheel`.
 
 A `Firewheel` audio node is typically represented in the ECS as
-an entity with a [`Node`] and a component that can generate
-`Firewheel` events, such as [`VolumeNode`].
+an entity with a `FirewheelNode` and a component that can generate
+`Firewheel` events, such as `VolumeNode`.
 
 Interactions with the audio engine are buffered.
 This includes inserting nodes into the audio graph,
@@ -73,11 +73,6 @@ if necessary.
   Audio entities currently support only a subset of the underlying
   Firewheel graph API. In particular, the ability to disconnect nodes will
   need to be added.
-
-- Platform support
-
-  Both Firewheel and this crate have some work to do in
-  order to support `wasm` targets.
 
 #### License
 

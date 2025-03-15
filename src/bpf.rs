@@ -4,10 +4,13 @@ use crate::timeline::Timeline;
 use bevy_ecs::prelude::*;
 use firewheel::{
     channel_config::ChannelConfig,
-    core::{channel_config::NonZeroChannelCount, clock::ClockSeconds, node::ProcInfo, StreamInfo},
+    core::{channel_config::NonZeroChannelCount, clock::ClockSeconds, node::ProcInfo},
     diff::{Diff, Patch},
     event::NodeEventList,
-    node::{AudioNode, AudioNodeInfo, AudioNodeProcessor, ProcessStatus, NUM_SCRATCH_BUFFERS},
+    node::{
+        AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, ProcBuffers,
+        ProcessStatus,
+    },
 };
 
 /// A simple low-pass filter.
@@ -62,16 +65,16 @@ impl AudioNode for BandPassNode {
             .uses_events(true)
     }
 
-    fn processor(
+    fn construct_processor(
         &self,
         config: &Self::Configuration,
-        stream_info: &StreamInfo,
+        cx: ConstructProcessorContext,
     ) -> impl AudioNodeProcessor {
         BandPassProcessor {
             params: self.clone(),
             channels: vec![
                 Bpf::new(
-                    stream_info.sample_rate.get() as f32,
+                    cx.stream_info.sample_rate.get() as f32,
                     self.frequency.get(),
                     self.q.get()
                 );
@@ -140,11 +143,11 @@ struct BandPassProcessor {
 impl AudioNodeProcessor for BandPassProcessor {
     fn process(
         &mut self,
-        inputs: &[&[f32]],
-        outputs: &mut [&mut [f32]],
-        events: NodeEventList,
+        ProcBuffers {
+            inputs, outputs, ..
+        }: ProcBuffers,
         proc_info: &ProcInfo,
-        _: &mut [&mut [f32]; NUM_SCRATCH_BUFFERS],
+        events: NodeEventList,
     ) -> ProcessStatus {
         self.params.patch_list(events);
 

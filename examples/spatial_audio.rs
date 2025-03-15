@@ -1,20 +1,13 @@
 //! This example demonstrates how to use spatial audio.
 
 use bevy::{log::LogPlugin, prelude::*};
-use bevy_seedling::{
-    sample::{pool::Pool, SamplePlayer},
-    spatial::SpatialListener2D,
-    PlaybackSettings, PoolLabel, SeedlingPlugin, SpatialBasicNode,
-};
+use bevy_seedling::prelude::*;
 
 fn main() {
     App::new()
         .add_plugins((
             MinimalPlugins,
-            LogPlugin {
-                level: bevy_log::Level::DEBUG,
-                ..Default::default()
-            },
+            LogPlugin::default(),
             AssetPlugin::default(),
             SeedlingPlugin::default(),
             TransformPlugin,
@@ -29,7 +22,7 @@ fn startup(server: Res<AssetServer>, mut commands: Commands) {
     struct MyPool;
 
     // Here we spawn a pool with a custom label and
-    // insert a spatial audio node as an effect.
+    // insert a spatial audio node as a per-sampler effect.
     Pool::new(MyPool, 4)
         .effect(SpatialBasicNode::default())
         .spawn(&mut commands);
@@ -37,16 +30,14 @@ fn startup(server: Res<AssetServer>, mut commands: Commands) {
     // To play a sound in this pool, we can simply spawn a sample
     // player with the pool label, making sure the entity
     // has a transform.
-    commands
-        .spawn((
-            MyPool,
-            SamplePlayer::new(server.load("snd_wobbler.wav")),
-            PlaybackSettings::LOOP,
-            // Both the emitter and listener need transforms
-            // for spatial information to propagate.
-            Transform::default(),
-        ))
-        .log_components();
+    commands.spawn((
+        MyPool,
+        SamplePlayer::new(server.load("snd_wobbler.wav")),
+        PlaybackSettings::LOOP,
+        // Both the emitter and listener need transforms
+        // for spatial information to propagate.
+        Transform::default(),
+    ));
 
     // Finally, we'll spawn a simple listener that just circles the emitter.
     commands.spawn((SpatialListener2D, Spinner(0.0), Transform::default()));

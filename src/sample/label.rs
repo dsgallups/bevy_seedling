@@ -1,19 +1,16 @@
-//! Type-base sample pool labelling.
+//! Type-based sample pool labeling.
 //!
 //! `bevy_seedling` provides a single pool label, [`DefaultPool`].
 //! Any node that doesn't provide an explicit pool when spawned
 //! will be automatically played in the [`DefaultPool`].
 //!
-//! You can customize the default sampler pool by preventing
-//! automatic spawning.
+//! You can customize the default sampler pool by setting
+//! [`SeedlingPlugin::sample_pool_size`][crate::prelude::SeedlingPlugin::sample_pool_size]
+//! to `None`, preventing the plugin from spawning it for you.
 //!
 //! ```no_run
 //! use bevy::prelude::*;
-//! use bevy_seedling::{
-//!     SeedlingPlugin,
-//!     SpatialBasicNode,
-//!     sample::{label::DefaultPool, pool::Pool},
-//! };
+//! use bevy_seedling::prelude::*;
 //!
 //! fn main() {
 //!     App::default()
@@ -36,7 +33,10 @@
 //!         .run();
 //! }
 //! ```
+
 use bevy_ecs::{intern::Interned, prelude::*};
+
+pub use seedling_macros::PoolLabel;
 
 bevy_ecs::define_label!(
     /// A label for differentiating sample pools.
@@ -50,7 +50,37 @@ bevy_ecs::define_label!(
 /// [`SamplePlayer`], this label will be inserted.
 ///
 /// [`SamplePlayer`]: crate::sample::SamplePlayer
-#[derive(crate::PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// You can customize the default sampler pool by setting
+/// [`SeedlingPlugin::sample_pool_size`][crate::prelude::SeedlingPlugin::sample_pool_size]
+/// to `None`, preventing the plugin from spawning it for you.
+///
+/// ```no_run
+/// use bevy::prelude::*;
+/// use bevy_seedling::prelude::*;
+///
+/// fn main() {
+///     App::default()
+///         .add_plugins((
+///             DefaultPlugins,
+///             SeedlingPlugin {
+///                 sample_pool_size: None,
+///                 ..Default::default()
+///             },
+///         ))
+///         .add_systems(
+///             Startup,
+///             |mut commands: Commands| {
+///                 // Make the default pool provide spatial audio
+///                 Pool::new(DefaultPool, 24)
+///                     .effect(SpatialBasicNode::default())
+///                     .spawn(&mut commands);
+///             }
+///         )
+///         .run();
+/// }
+/// ```
+#[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DefaultPool;
 
 /// A type-erased node label.
