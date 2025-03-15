@@ -7,10 +7,11 @@ use firewheel::{
     clock::ClockSeconds,
     diff::{Diff, Patch},
     event::NodeEventList,
-    node::{AudioNode, AudioNodeInfo, AudioNodeProcessor, ProcBuffers, ProcInfo, ProcessStatus},
-    StreamInfo,
+    node::{
+        AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, ProcBuffers,
+        ProcInfo, ProcessStatus,
+    },
 };
-use std::any::Any;
 
 /// A one-pole, low-pass filter.
 #[derive(Diff, Patch, Debug, Clone, Component)]
@@ -68,16 +69,18 @@ impl AudioNode for LowPassNode {
             .uses_events(true)
     }
 
-    fn processor(
+    fn construct_processor(
         &self,
         config: &Self::Configuration,
-        stream_info: &StreamInfo,
-        _: &mut Option<Box<dyn Any>>,
+        cx: ConstructProcessorContext,
     ) -> impl AudioNodeProcessor {
         LowPassProcessor {
             params: self.clone(),
             channels: vec![
-                Lpf::new(stream_info.sample_rate.get() as f32, self.frequency.get());
+                Lpf::new(
+                    cx.stream_info.sample_rate.get() as f32,
+                    self.frequency.get()
+                );
                 config.channels.get().get() as usize
             ],
         }

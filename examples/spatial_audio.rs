@@ -7,10 +7,7 @@ fn main() {
     App::new()
         .add_plugins((
             MinimalPlugins,
-            LogPlugin {
-                level: bevy_log::Level::DEBUG,
-                ..Default::default()
-            },
+            LogPlugin::default(),
             AssetPlugin::default(),
             SeedlingPlugin::default(),
             TransformPlugin,

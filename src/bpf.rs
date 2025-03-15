@@ -4,12 +4,14 @@ use crate::timeline::Timeline;
 use bevy_ecs::prelude::*;
 use firewheel::{
     channel_config::ChannelConfig,
-    core::{channel_config::NonZeroChannelCount, clock::ClockSeconds, node::ProcInfo, StreamInfo},
+    core::{channel_config::NonZeroChannelCount, clock::ClockSeconds, node::ProcInfo},
     diff::{Diff, Patch},
     event::NodeEventList,
-    node::{AudioNode, AudioNodeInfo, AudioNodeProcessor, ProcBuffers, ProcessStatus},
+    node::{
+        AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, ProcBuffers,
+        ProcessStatus,
+    },
 };
-use std::any::Any;
 
 /// A simple low-pass filter.
 #[derive(Diff, Patch, Debug, Clone, Component)]
@@ -63,17 +65,16 @@ impl AudioNode for BandPassNode {
             .uses_events(true)
     }
 
-    fn processor(
+    fn construct_processor(
         &self,
         config: &Self::Configuration,
-        stream_info: &StreamInfo,
-        _: &mut Option<Box<dyn Any>>,
+        cx: ConstructProcessorContext,
     ) -> impl AudioNodeProcessor {
         BandPassProcessor {
             params: self.clone(),
             channels: vec![
                 Bpf::new(
-                    stream_info.sample_rate.get() as f32,
+                    cx.stream_info.sample_rate.get() as f32,
                     self.frequency.get(),
                     self.q.get()
                 );

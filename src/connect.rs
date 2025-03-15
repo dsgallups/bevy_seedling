@@ -1,7 +1,7 @@
 //! Node connection utilities.
 
 use crate::node::label::InternedNodeLabel;
-use crate::prelude::{AudioContext, MainBus, Node, NodeLabel};
+use crate::prelude::{AudioContext, FirewheelNode, MainBus, NodeLabel};
 use bevy_ecs::prelude::*;
 use bevy_log::{error_once, warn_once};
 use bevy_utils::HashMap;
@@ -261,8 +261,8 @@ const DEFAULT_CONNECTION: &[(u32, u32)] = &[(0, 0), (1, 1)];
 
 // this has turned into a bit of a monster
 pub(crate) fn process_connections(
-    mut connections: Query<(&mut PendingConnections, &Node)>,
-    targets: Query<&Node>,
+    mut connections: Query<(&mut PendingConnections, &FirewheelNode)>,
+    targets: Query<&FirewheelNode>,
     node_map: Res<NodeMap>,
     mut context: ResMut<AudioContext>,
 ) {
@@ -316,7 +316,8 @@ pub(crate) fn process_connections(
 /// graph nodes.
 ///
 /// This will be automatically synchronized for
-/// entities with both a [`Node`] and [`NodeLabel`].
+/// entities with both a [`FirewheelNode`] and [`NodeLabel`]
+/// component.
 #[derive(Default, Debug, Resource)]
 pub struct NodeMap(HashMap<InternedNodeLabel, Entity>);
 
@@ -336,7 +337,7 @@ impl core::ops::DerefMut for NodeMap {
 
 /// Automatically connect nodes without manual connections to the main bus.
 pub(crate) fn auto_connect(
-    nodes: Query<Entity, (With<Node>, Without<PendingConnections>)>,
+    nodes: Query<Entity, (With<FirewheelNode>, Without<PendingConnections>)>,
     mut commands: Commands,
 ) {
     for node in nodes.iter() {
@@ -392,9 +393,9 @@ mod test {
         app.world_mut()
             .run_system_once(
                 |mut context: ResMut<AudioContext>,
-                 one: Single<&Node, With<One>>,
-                 two: Single<&Node, With<Two>>,
-                 main: Single<&Node, With<MainBus>>| {
+                 one: Single<&FirewheelNode, With<One>>,
+                 two: Single<&FirewheelNode, With<Two>>,
+                 main: Single<&FirewheelNode, With<MainBus>>| {
                     let one = one.into_inner();
                     let two = two.into_inner();
                     let main = main.into_inner();
@@ -434,9 +435,9 @@ mod test {
         app.world_mut()
             .run_system_once(
                 |mut context: ResMut<AudioContext>,
-                 one: Single<&Node, With<One>>,
-                 two: Single<&Node, With<Two>>,
-                 three: Single<&Node, With<Three>>| {
+                 one: Single<&FirewheelNode, With<One>>,
+                 two: Single<&FirewheelNode, With<Two>>,
+                 three: Single<&FirewheelNode, With<Three>>| {
                     let one = one.into_inner();
                     let two = two.into_inner();
                     let three = three.into_inner();

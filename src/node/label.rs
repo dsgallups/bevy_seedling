@@ -72,7 +72,7 @@ bevy_ecs::define_label!(
 /// reach the output.
 ///
 /// If no connections are specified for an entity
-/// with a [Node][crate::prelude::Node] component, the
+/// with a [FirewheelNode][crate::prelude::FirewheelNode] component, the
 /// node will automatically be routed to this bus.
 ///
 /// [MainBus] is a stereo volume node. To adjust the

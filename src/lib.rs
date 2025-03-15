@@ -140,7 +140,7 @@
 //! `bevy_seedling` provides a thin ECS wrapper over `Firewheel`.
 //!
 //! A `Firewheel` audio node is typically represented in the ECS as
-//! an entity with a [`Node`][prelude::Node] and a component that can generate
+//! an entity with a [`FirewheelNode`][prelude::FirewheelNode] and a component that can generate
 //! `Firewheel` events, such as [`VolumeNode`][prelude::VolumeNode].
 //!
 //! Interactions with the audio engine are buffered.
@@ -190,7 +190,7 @@ pub mod prelude {
     pub use crate::lpf::LowPassNode;
     pub use crate::node::{
         label::{MainBus, NodeLabel},
-        Node, RegisterNode,
+        FirewheelNode, RegisterNode,
     };
     pub use crate::sample::{
         label::{DefaultPool, PoolLabel},

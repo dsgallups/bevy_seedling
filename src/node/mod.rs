@@ -24,7 +24,7 @@ struct Baseline<T>(pub(crate) T);
 
 /// An event queue.
 ///
-/// When inserted into an entity that contains a [Node],
+/// When inserted into an entity that contains a [FirewheelNode],
 /// these events will automatically be drained and sent
 /// to the audio context in the [SeedlingSystems::Flush] set.
 #[derive(Component, Default)]
@@ -69,7 +69,7 @@ fn generate_param_events<T: Diff + Patch + Component + Clone>(
 fn acquire_id<T>(
     q: Query<
         (Entity, &T, Option<&T::Configuration>, Option<&NodeLabels>),
-        (Without<Node>, Without<ExcludeNode>),
+        (Without<FirewheelNode>, Without<ExcludeNode>),
     >,
     mut context: ResMut<AudioContext>,
     mut commands: Commands,
@@ -85,7 +85,7 @@ fn acquire_id<T>(
                 node_map.insert(*label, entity);
             }
 
-            commands.entity(entity).insert(Node(node));
+            commands.entity(entity).insert(FirewheelNode(node));
         }
     });
 }
@@ -152,8 +152,8 @@ impl RegisterNode for bevy_app::App {
 
 /// An ECS handle for an audio node.
 ///
-/// [`Node`] may not necessarily be available immediately
-/// upon spawning audio entities; [`Node`]s are acquired
+/// [`FirewheelNode`] may not necessarily be available immediately
+/// upon spawning audio entities; [`FirewheelNode`]s are acquired
 /// during the [`SeedlingSystems::Acquire`] set. Node
 /// acquisition will also be deferred if the audio context
 /// is disabled.
@@ -161,14 +161,14 @@ impl RegisterNode for bevy_app::App {
 /// When this component is removed, the underlying
 /// audio node is removed from the graph.
 #[derive(Debug, Clone, Copy)]
-pub struct Node(pub NodeID);
+pub struct FirewheelNode(pub NodeID);
 
-impl Component for Node {
+impl Component for FirewheelNode {
     const STORAGE_TYPE: bevy_ecs::component::StorageType = bevy_ecs::component::StorageType::Table;
 
     fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
         hooks.on_remove(|mut world, entity, _| {
-            let Some(node) = world.get::<Node>(entity).copied() else {
+            let Some(node) = world.get::<FirewheelNode>(entity).copied() else {
                 return;
             };
 
@@ -205,7 +205,7 @@ pub(crate) fn process_removals(
 }
 
 pub(crate) fn flush_events(
-    mut nodes: Query<(&Node, &mut Events)>,
+    mut nodes: Query<(&FirewheelNode, &mut Events)>,
     mut context: ResMut<AudioContext>,
 ) {
     context.with(|context| {

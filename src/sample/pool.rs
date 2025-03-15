@@ -2,17 +2,16 @@
 
 use super::{label::PoolLabelContainer, PlaybackSettings, QueuedSample, Sample, SamplePlayer};
 use crate::node::ParamFollower;
-use crate::prelude::{AudioContext, Connect, DefaultPool, Node, PoolLabel, VolumeNode};
+use crate::prelude::{AudioContext, Connect, DefaultPool, FirewheelNode, PoolLabel, VolumeNode};
 use crate::{node::Events, SeedlingSystems};
 use bevy_app::{Last, Plugin};
 use bevy_asset::Assets;
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
 use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
-use firewheel::nodes::sampler::SamplerState;
 use firewheel::{
     event::{NodeEventType, SequenceCommand},
     node::AudioNode,
-    nodes::sampler::SamplerNode,
+    nodes::sampler::{SamplerNode, SamplerState},
     Volume,
 };
 
@@ -186,7 +185,7 @@ struct SamplePoolDefaults(Box<dyn Fn(&mut EntityCommands) + Send + Sync + 'stati
 struct NodeRank(Vec<(Entity, u64)>);
 
 fn rank_nodes<T: Component>(
-    q: Query<(Entity, &SamplerNode, &Node), (With<SamplePoolNode>, With<T>)>,
+    q: Query<(Entity, &SamplerNode, &FirewheelNode), (With<SamplePoolNode>, With<T>)>,
     mut rank: Query<&mut NodeRank, With<T>>,
     mut context: ResMut<AudioContext>,
 ) {
@@ -232,7 +231,7 @@ fn on_remove_active(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
 /// Automatically remove or despawn sampler players when their
 /// sample has finished playing.
 fn remove_finished(
-    nodes: Query<(Entity, &EffectsChain, &Node), (With<ActiveSample>, With<SamplerNode>)>,
+    nodes: Query<(Entity, &EffectsChain, &FirewheelNode), (With<ActiveSample>, With<SamplerNode>)>,
     mut commands: Commands,
     mut context: ResMut<AudioContext>,
 ) {
@@ -260,7 +259,13 @@ fn remove_finished(
 /// and assign work to the most appropriate sampler node.
 fn assign_work<T: Component>(
     mut nodes: Query<
-        (Entity, &mut SamplerNode, &mut Events, &EffectsChain, &Node),
+        (
+            Entity,
+            &mut SamplerNode,
+            &mut Events,
+            &EffectsChain,
+            &FirewheelNode,
+        ),
         (With<SamplePoolNode>, With<T>),
     >,
     queued_samples: Query<
