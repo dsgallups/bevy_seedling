@@ -10,6 +10,7 @@
 //! Note that you'll need to disable Bevy's "bevy_audio" feature,
 //! meaning you'll need to specify quite a few features
 //! manually!
+//!
 //! ```toml
 //! [dependencies]
 //! bevy_seedling = "0.3"
@@ -19,6 +20,7 @@
 //!   # ...
 //! ] }
 //! ```
+//!
 //! [See here](https://docs.rs/crate/bevy/latest/features) for a list
 //! of Bevy's default features.
 //!
@@ -130,10 +132,11 @@
 //! }
 //! ```
 //!
-//! So far this has been fairly high-level, but
-//! `bevy_seedling` still allows you to drop down very close
-//! to Firewheel when needed. See [`Connect::connect_with`][prelude::Connect::connect_with]
-//! for how to manage nodes with different channel shapes.
+//! ## Custom nodes
+//!
+//! `bevy_seedling` is designed to make authoring custom nodes breeze!
+//! For an introduction, check out the [custom node example][https://github.com/CorvusPrudens/bevy_seedling/blob/master/examples/custom_node.rs]
+//! in the repository.
 //!
 //! ## Design
 //!
