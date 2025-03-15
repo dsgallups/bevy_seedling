@@ -7,17 +7,28 @@ audio engine for [Bevy](https://bevyengine.org/).
 ## Getting started
 
 First, you'll need to add the dependency to your `Cargo.toml`.
+Note that you'll need to disable Bevy's "bevy_audio" feature,
+meaning you'll need to specify quite a few features
+manually!
 
 ```toml
 [dependencies]
 bevy_seedling = "0.3"
+bevy = { version = "0.15", default-features = false, features = [
+  "bevy_asset",
+  "bevy_state",
+  # ...
+] }
 ```
+
+[See here](https://docs.rs/crate/bevy/latest/features) for a list
+of Bevy's default features.
 
 Then, you'll need to add the `SeedlingPlugin` to your app.
 
 ```rs
 use bevy::prelude::*;
-use bevy_seedling::SeedlingPlugin;
+use bevy_seedling::prelude::*;
 
 fn main() {
     App::default()
@@ -30,6 +41,104 @@ fn main() {
 should help you get up to speed on common usage patterns.
 
 ## Overview
+
+Once you've registered the plugin, playing a sample is easy!
+
+```rs
+# use bevy::prelude::*;
+# use bevy_seedling::prelude::*;
+fn play(mut commands: Commands, server: Res<AssetServer>) {
+    commands.spawn(SamplePlayer::new(server.load("my_sample.wav")));
+}
+```
+
+`PlaybackSettings` gives you some
+control over how your samples are played.
+
+```rs
+# use bevy::prelude::*;
+# use bevy_seedling::prelude::*;
+fn play_with_settings(mut commands: Commands, server: Res<AssetServer>) {
+    commands.spawn((
+        SamplePlayer::new(server.load("my_sample.wav")),
+        PlaybackSettings::LOOP,
+    ));
+}
+```
+
+By default, sample players are queued up in the default sample pool,
+`DefaultPool`. If you'd like to apply effects to your
+samples, you can define a new pool with per-sampler effects.
+
+```rs
+# use bevy::prelude::*;
+# use bevy_seedling::prelude::*;
+fn custom_pool(mut commands: Commands, server: Res<AssetServer>) {
+    // First, you'll need a label.
+    #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+    struct MyPool;
+
+    // Let's spawn a pool with spatial audio and four samplers.
+    Pool::new(MyPool, 4)
+        .effect(SpatialBasicNode::default())
+        .spawn(&mut commands);
+
+    // To play a sample in this pool, just spawn a sample
+    // player with its label.
+    commands.spawn((
+        MyPool,
+        SamplePlayer::new(server.load("my_sample.wav")),
+    ));
+}
+```
+
+You can also define free-standing effects chains and
+connect multiple pools to it.
+
+```rs
+# use bevy::prelude::*;
+# use bevy_seedling::prelude::*;
+fn chains(mut commands: Commands, server: Res<AssetServer>) {
+    // We can also define labels for individual nodes.
+    #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
+    struct UnderwaterEffects;
+
+    commands.spawn((
+        UnderwaterEffects,
+        // We'll use a low-pass filter to simulate sounds underwater
+        LowPassNode::new(1000.0),
+    ))
+    // Let's chain it into a volume node so everything's
+    // a little quieter.
+    .chain_node(VolumeNode {
+        volume: Volume::Linear(0.5),
+    });
+
+    // Finally, we'll create a couple sample pools and connect
+    // them to our water effects.
+    #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+    struct MusicPool;
+
+    Pool::new(MusicPool, 1)
+        .spawn(&mut commands)
+        .connect(UnderwaterEffects);
+
+    #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+    struct SfxPool;
+
+    Pool::new(SfxPool, 16)
+        .spawn(&mut commands)
+        .connect(UnderwaterEffects);
+}
+```
+
+## Custom nodes
+
+`bevy_seedling` is designed to make authoring custom nodes breeze!
+For an introduction, check out the [custom node example](https://github.com/CorvusPrudens/bevy_seedling/blob/master/examples/custom_node.rs)
+in the repository.
+
+## Design
 
 `bevy_seedling` provides a thin ECS wrapper over `Firewheel`.
 
@@ -51,14 +160,6 @@ a few advantages:
 3. Graph-mutating interactions are properly deferred
    while the audio graph isn't ready, for example
    if it's been temporarily deactiviated.
-
-The main disadvantage is potentially increased latency,
-since several milliseconds may pass between
-event generation and actually propagating those events
-to the audio engine. However, since
-`bevy_seedling` provides direct access to the audio context,
-you can always immediately queue and flush events
-if necessary.
 
 ## Bevy version compatibility
 

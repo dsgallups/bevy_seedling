@@ -135,7 +135,7 @@
 //! ## Custom nodes
 //!
 //! `bevy_seedling` is designed to make authoring custom nodes breeze!
-//! For an introduction, check out the [custom node example][https://github.com/CorvusPrudens/bevy_seedling/blob/master/examples/custom_node.rs]
+//! For an introduction, check out the [custom node example](https://github.com/CorvusPrudens/bevy_seedling/blob/master/examples/custom_node.rs)
 //! in the repository.
 //!
 //! ## Design
