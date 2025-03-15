@@ -45,8 +45,6 @@ should help you get up to speed on common usage patterns.
 Once you've registered the plugin, playing a sample is easy!
 
 ```rs
-# use bevy::prelude::*;
-# use bevy_seedling::prelude::*;
 fn play(mut commands: Commands, server: Res<AssetServer>) {
     commands.spawn(SamplePlayer::new(server.load("my_sample.wav")));
 }
@@ -56,8 +54,6 @@ fn play(mut commands: Commands, server: Res<AssetServer>) {
 control over how your samples are played.
 
 ```rs
-# use bevy::prelude::*;
-# use bevy_seedling::prelude::*;
 fn play_with_settings(mut commands: Commands, server: Res<AssetServer>) {
     commands.spawn((
         SamplePlayer::new(server.load("my_sample.wav")),
@@ -71,8 +67,6 @@ By default, sample players are queued up in the default sample pool,
 samples, you can define a new pool with per-sampler effects.
 
 ```rs
-# use bevy::prelude::*;
-# use bevy_seedling::prelude::*;
 fn custom_pool(mut commands: Commands, server: Res<AssetServer>) {
     // First, you'll need a label.
     #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
@@ -96,8 +90,6 @@ You can also define free-standing effects chains and
 connect multiple pools to it.
 
 ```rs
-# use bevy::prelude::*;
-# use bevy_seedling::prelude::*;
 fn chains(mut commands: Commands, server: Res<AssetServer>) {
     // We can also define labels for individual nodes.
     #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
