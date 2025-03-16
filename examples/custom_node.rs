@@ -130,7 +130,7 @@ fn main() {
             SeedlingPlugin {
                 // We'll manually spawn the default pool so
                 // we can chain our volume node.
-                sample_pool_size: None,
+                default_pool_size: None,
                 ..Default::default()
             },
         ))

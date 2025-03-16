@@ -177,7 +177,9 @@ pub mod context;
 pub mod fixed_vec;
 pub mod lpf;
 pub mod node;
+pub mod pool;
 pub mod sample;
+pub mod send;
 pub mod spatial;
 pub mod timeline;
 
@@ -195,11 +197,12 @@ pub mod prelude {
         label::{MainBus, NodeLabel},
         FirewheelNode, RegisterNode,
     };
+    pub use crate::pool::{Pool, PoolCommands, PoolDespawn};
     pub use crate::sample::{
         label::{DefaultPool, PoolLabel},
-        pool::{Pool, PoolCommands, PoolDespawn},
         PlaybackSettings, SamplePlayer,
     };
+    pub use crate::send::SendNode;
     pub use crate::spatial::{SpatialListener2D, SpatialListener3D};
     pub use crate::SeedlingPlugin;
 
@@ -260,14 +263,22 @@ pub struct SeedlingPlugin {
     /// sampler pool. If `None` is provided,
     /// the default pool will not be spawned, allowing
     /// you to set it up how you like.
-    pub sample_pool_size: Option<usize>,
+    pub default_pool_size: Option<usize>,
+
+    /// The size range for dynamic pools. Pools
+    /// will be spawned with the minimum value,
+    /// and will grow depending on demand to the
+    /// maximum size. Setting this field to `None`
+    /// will disabled dynamic pools entirely.
+    pub dynamic_pool_range: Option<core::ops::Range<usize>>,
 }
 
 impl Default for SeedlingPlugin {
     fn default() -> Self {
         Self {
             config: Default::default(),
-            sample_pool_size: Some(24),
+            default_pool_size: Some(24),
+            dynamic_pool_range: Some(4..16),
         }
     }
 }
@@ -278,15 +289,19 @@ impl Plugin for SeedlingPlugin {
 
         let mut context = AudioContext::new(self.config);
         let sample_rate = context.with(|ctx| ctx.stream_info().unwrap().sample_rate);
-        let sample_pool_size = self.sample_pool_size;
+        let sample_pool_size = self.default_pool_size;
 
         app.insert_resource(context)
             .init_resource::<connect::NodeMap>()
             .init_resource::<node::PendingRemovals>()
+            .insert_resource(pool::auto::DynamicPoolRange(
+                self.dynamic_pool_range.clone(),
+            ))
             .init_asset::<sample::Sample>()
             .register_asset_loader(sample::SampleLoader { sample_rate })
             .register_node::<lpf::LowPassNode>()
             .register_node::<bpf::BandPassNode>()
+            .register_node::<send::SendNode>()
             .register_node::<VolumeNode>()
             .register_node::<VolumePanNode>()
             .register_node::<SpatialBasicNode>()
@@ -310,7 +325,11 @@ impl Plugin for SeedlingPlugin {
         .add_systems(
             Last,
             (
-                (spatial::update_2d_emitters, spatial::update_3d_emitters)
+                (
+                    spatial::update_2d_emitters,
+                    spatial::update_3d_emitters,
+                    send::connect_sends,
+                )
                     .before(SeedlingSystems::Acquire),
                 connect::auto_connect
                     .before(SeedlingSystems::Connect)
@@ -337,6 +356,6 @@ impl Plugin for SeedlingPlugin {
             ),
         );
 
-        app.add_plugins(sample::pool::SamplePoolPlugin);
+        app.add_plugins(pool::SamplePoolPlugin);
     }
 }

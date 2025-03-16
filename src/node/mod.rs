@@ -1,6 +1,7 @@
 //! Audio node registration and management.
 
 use crate::connect::NodeMap;
+use crate::pool;
 use crate::{prelude::AudioContext, SeedlingSystems};
 use bevy_app::Last;
 use bevy_ecs::{prelude::*, world::DeferredWorld};
@@ -126,6 +127,7 @@ impl RegisterNode for bevy_app::App {
         );
         world.register_required_components::<T, Events>();
         world.register_required_components::<T, T::Configuration>();
+        world.register_required_components::<T, pool::auto::AutoRegister<T>>();
 
         self.add_systems(
             Last,
@@ -145,6 +147,7 @@ impl RegisterNode for bevy_app::App {
         let world = self.world_mut();
         world.register_required_components::<T, Events>();
         world.register_required_components::<T, T::Configuration>();
+        world.register_required_components::<T, pool::auto::AutoRegister<T>>();
 
         self.add_systems(Last, acquire_id::<T>.in_set(SeedlingSystems::Acquire))
     }

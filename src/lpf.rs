@@ -22,7 +22,7 @@ pub struct LowPassNode {
 
 impl Default for LowPassNode {
     fn default() -> Self {
-        Self::new(24000.)
+        Self::new(1000.)
     }
 }
 

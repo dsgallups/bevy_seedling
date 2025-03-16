@@ -151,7 +151,7 @@ a few advantages:
    audio entities can be trivially parallelized.
 3. Graph-mutating interactions are properly deferred
    while the audio graph isn't ready, for example
-   if it's been temporarily deactiviated.
+   if it's been temporarily deactivated.
 
 ## Bevy version compatibility
 

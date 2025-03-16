@@ -21,6 +21,15 @@ pub struct BandPassNode {
     pub q: Timeline<f32>,
 }
 
+impl Default for BandPassNode {
+    fn default() -> Self {
+        Self {
+            frequency: Timeline::new(1000.0),
+            q: Timeline::new(1.0),
+        }
+    }
+}
+
 impl BandPassNode {
     /// Create a new [`BandPassNode`] with an initial cutoff frequency and quality.
     ///

@@ -1,10 +1,15 @@
 //! Sampler pools, which represent primary sampler player mechanism.
 
-use super::{label::PoolLabelContainer, PlaybackSettings, QueuedSample, Sample, SamplePlayer};
+use std::sync::Arc;
+
 use crate::node::ParamFollower;
 use crate::prelude::{AudioContext, Connect, DefaultPool, FirewheelNode, PoolLabel, VolumeNode};
+use crate::sample::{
+    label::PoolLabelContainer, PlaybackSettings, QueuedSample, Sample, SamplePlayer,
+};
 use crate::{node::Events, SeedlingSystems};
-use bevy_app::{Last, Plugin};
+use auto::AutoPoolRegistry;
+use bevy_app::{Last, Plugin, PostUpdate};
 use bevy_asset::Assets;
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
 use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
@@ -15,21 +20,25 @@ use firewheel::{
     Volume,
 };
 
+pub mod auto;
+
 pub(crate) struct SamplePoolPlugin;
 
 impl Plugin for SamplePoolPlugin {
     fn build(&self, app: &mut bevy_app::App) {
-        app.add_systems(
-            Last,
-            (
-                (remove_finished, assign_default)
-                    .before(SeedlingSystems::Queue)
-                    .after(SeedlingSystems::Acquire),
-                monitor_active
-                    .before(SeedlingSystems::Flush)
-                    .after(SeedlingSystems::Queue),
-            ),
-        );
+        app.init_resource::<auto::Registries>()
+            .add_systems(
+                Last,
+                (
+                    (remove_finished, assign_default)
+                        .before(SeedlingSystems::Queue)
+                        .after(SeedlingSystems::Acquire),
+                    monitor_active
+                        .before(SeedlingSystems::Flush)
+                        .after(SeedlingSystems::Queue),
+                ),
+            )
+            .add_systems(PostUpdate, auto::update_auto_pools);
     }
 }
 
@@ -84,6 +93,73 @@ impl<L, C: ExtendTuple> Pool<L, C> {
     }
 }
 
+pub(crate) fn spawn_pool<
+    'a,
+    L: PoolLabel + Component + Clone,
+    C: Fn(&mut Commands) -> Vec<Entity>,
+>(
+    label: L,
+    size: usize,
+    chain_spawner: C,
+    defaults: SamplePoolDefaults,
+    commands: &'a mut Commands,
+) -> EntityCommands<'a> {
+    commands.queue(|world: &mut World| {
+        world.schedule_scope(Last, |_, schedule| {
+            schedule.add_systems(
+                (rank_nodes::<L>, assign_work::<L>)
+                    .chain()
+                    .in_set(SeedlingSystems::Queue),
+            );
+        });
+    });
+
+    let bus = commands
+        .spawn((
+            VolumeNode {
+                volume: Volume::Linear(1.0),
+            },
+            SamplePoolNode,
+            label.clone(),
+            defaults,
+        ))
+        .id();
+
+    let rank = commands.spawn((NodeRank::default(), label.clone())).id();
+
+    let nodes: Vec<_> = (0..size)
+        .map(|_| {
+            let chain = chain_spawner(commands);
+
+            let source = commands
+                .spawn((
+                    SamplerNode::default(),
+                    SamplePoolNode,
+                    label.clone(),
+                    EffectsChain(chain.clone()),
+                ))
+                .add_children(&chain)
+                .id();
+
+            let mut chain = chain;
+            chain.push(bus);
+
+            commands.entity(source).connect(chain[0]);
+
+            for pair in chain.windows(2) {
+                commands.entity(pair[0]).connect(pair[1]);
+            }
+
+            source
+        })
+        .collect();
+
+    let mut bus = commands.entity(bus);
+    bus.add_children(&nodes).add_child(rank);
+
+    bus
+}
+
 macro_rules! spawn_impl {
     ($($ty:ident),*) => {
         impl<L: PoolLabel + Component + Clone, $($ty),*> Pool<L, ($($ty,)*)>
@@ -100,71 +176,33 @@ macro_rules! spawn_impl {
                     effects_chain,
                 } = self;
 
-                commands.queue(|world: &mut World| {
-                    world.schedule_scope(Last, |_, schedule| {
-                        schedule.add_systems(
-                            (rank_nodes::<L>, assign_work::<L>)
-                                .chain()
-                                .in_set(SeedlingSystems::Queue),
-                        );
+                let defaults = {
+                    let ($($ty,)*) = effects_chain.clone();
+                    let mut defaults = SamplePoolDefaults::default();
+
+                    #[allow(unused)]
+                    defaults.push(move |commands: &mut EntityCommands| {
+                        $(commands.entry::<$ty>().or_insert($ty.clone());)*
                     });
-                });
 
-                let bus = commands
-                    .spawn((
-                        VolumeNode {
-                            volume: Volume::Linear(1.0),
-                        },
-                        SamplePoolNode,
-                        label.clone(),
-                        SamplePoolDefaults(Box::new({
-                            let effects_chain = effects_chain.clone();
-                            #[allow(unused)]
-                            move |commands: &mut EntityCommands| {
-                                let ($($ty,)*) = &effects_chain;
+                    defaults
+                };
 
-                                $(commands.entry::<$ty>().or_insert($ty.clone());)*
-                            }
-                        })),
-                    ))
-                    .id();
+                #[allow(unused)]
+                let chain_spawner = {
+                    let ($($ty,)*) = effects_chain;
+                    let label = label.clone();
 
-                let rank = commands.spawn((NodeRank::default(), label.clone())).id();
+                    move |commands: &mut Commands| vec![$(
+                        commands.spawn((
+                            <$ty as ::core::clone::Clone>::clone(&$ty),
+                            SamplePoolNode,
+                            label.clone()
+                        )).id(),
+                    )*]
+                };
 
-                let ($($ty,)*) = effects_chain;
-
-                let nodes: Vec<_> = (0..size)
-                    .map(|_| {
-                        let chain: Vec<Entity> = vec![$(
-                            commands.spawn((
-                                <$ty as ::core::clone::Clone>::clone(&$ty),
-                                SamplePoolNode,
-                                label.clone()
-                            )).id(),
-                        )*];
-
-                        let source = commands
-                            .spawn((SamplerNode::default(), SamplePoolNode, label.clone(), EffectsChain(chain.clone())))
-                            .add_children(&chain)
-                            .id();
-
-                        let mut chain = chain;
-                        chain.push(bus);
-
-                        commands.entity(source).connect(chain[0]);
-
-                        for pair in chain.windows(2) {
-                            commands.entity(pair[0]).connect(pair[1]);
-                        }
-
-                        source
-                    })
-                    .collect();
-
-                let mut bus = commands.entity(bus);
-                bus.add_children(&nodes).add_child(rank);
-
-                bus
+                spawn_pool(label, size, chain_spawner, defaults, commands)
             }
         }
     };
@@ -178,8 +216,21 @@ struct SamplePoolNode;
 #[derive(Component)]
 struct EffectsChain(Vec<Entity>);
 
-#[derive(Component)]
-struct SamplePoolDefaults(Box<dyn Fn(&mut EntityCommands) + Send + Sync + 'static>);
+// #[derive(Component)]
+// struct SamplePoolDefaults(Box<dyn Fn(&mut EntityCommands) + Send + Sync + 'static>);
+
+/// A collections of functions that insert a node's default value into an entity.
+#[derive(Component, Default, Clone)]
+pub(crate) struct SamplePoolDefaults(Vec<Arc<dyn Fn(&mut EntityCommands) + Send + Sync + 'static>>);
+
+impl SamplePoolDefaults {
+    pub fn push<F>(&mut self, f: F)
+    where
+        F: Fn(&mut EntityCommands) + Send + Sync + 'static,
+    {
+        self.0.push(Arc::new(f));
+    }
+}
 
 #[derive(Default, Component)]
 struct NodeRank(Vec<(Entity, u64)>);
@@ -314,7 +365,9 @@ fn assign_work<T: Component>(
 
             // Insert default pool parameters if not present.
             if let Ok(defaults) = defaults.get_single() {
-                (defaults.0)(&mut commands.entity(sample));
+                for item in defaults.0.iter() {
+                    item(&mut commands.entity(sample));
+                }
             }
 
             rank.0.remove(0);
@@ -348,7 +401,14 @@ fn monitor_active(
 
 /// Assign the default pool label to a sample player that has no label.
 fn assign_default(
-    samples: Query<Entity, (With<SamplePlayer>, Without<PoolLabelContainer>)>,
+    samples: Query<
+        Entity,
+        (
+            With<SamplePlayer>,
+            Without<PoolLabelContainer>,
+            Without<AutoPoolRegistry>,
+        ),
+    >,
     mut commands: Commands,
 ) {
     for sample in samples.iter() {

@@ -368,7 +368,7 @@ mod test {
             MinimalPlugins,
             AssetPlugin::default(),
             SeedlingPlugin {
-                sample_pool_size: None,
+                default_pool_size: None,
                 ..Default::default()
             },
         ))

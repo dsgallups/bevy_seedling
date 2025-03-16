@@ -7,7 +7,6 @@ use bevy_ecs::prelude::*;
 
 mod assets;
 pub mod label;
-pub mod pool;
 
 pub use assets::{Sample, SampleLoader, SampleLoaderError};
 use firewheel::nodes::sampler::RepeatMode;
