@@ -1,4 +1,4 @@
-//! This example demonstrates how to play a one-shot sample.
+//! This example demonstrates how to play a one-shot sample with effects.
 
 use bevy::{log::LogPlugin, prelude::*};
 use bevy_seedling::{pool::auto::AutoPool, prelude::*};
@@ -15,9 +15,7 @@ fn main() {
             Startup,
             |server: Res<AssetServer>, mut commands: Commands| {
                 // Spawning a `SamplePlayer` component will play a sample
-                // once as soon as it's loaded. If no pool is specified
-                // like in this example, the sample will be played in
-                // the `DefaultPool`.
+                // once as soon as it's loaded.
                 commands
                     .spawn(SamplePlayer::new(server.load("snd_wobbler.wav")))
                     .effect(BandPassNode::default())
