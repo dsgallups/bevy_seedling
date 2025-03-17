@@ -1,8 +1,7 @@
 use super::{SamplePoolDefaults, SamplePoolNode};
-use crate::sample::{PlaybackSettings, QueuedSample, Sample, SamplePlayer};
-use bevy_asset::Assets;
+use crate::sample::{QueuedSample, SamplePlayer};
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
-use bevy_utils::{HashMap, HashSet};
+use bevy_utils::HashMap;
 use core::marker::PhantomData;
 use firewheel::node::AudioNode;
 use seedling_macros::PoolLabel;
@@ -25,26 +24,10 @@ impl AutoPoolRegistry {
 
 struct RegistryEntry {
     root: Entity,
-    samples: HashSet<Entity>,
 }
 
 #[derive(Resource, Default)]
 pub(super) struct Registries(HashMap<AutoPoolRegistry, RegistryEntry>);
-
-// fn scan_registries(q: Query<(Entity, &AutoPoolRegistry)>, mut registries: ResMut<Registries>) {
-//     for (entity, registry) in q.iter() {
-//         match registries.0.get_mut(registry) {
-//             Some(entry) => {
-//                 entry.entities.insert(entity);
-//             }
-//             None => {
-//                 registries
-//                     .0
-//                     .insert(registry.clone(), core::iter::once(entity).collect());
-//             }
-//         }
-//     }
-// }
 
 #[derive(Resource, Clone, Debug)]
 pub struct DynamicPoolRange(pub Option<core::ops::Range<usize>>);
@@ -56,16 +39,9 @@ pub(super) struct DynamicPool(usize);
 /// and assign work to the most appropriate sampler node.
 pub(super) fn update_auto_pools(
     queued_samples: Query<
-        (
-            Entity,
-            &SamplePlayer,
-            &PlaybackSettings,
-            &AutoPoolRegistry,
-            &SamplePoolDefaults,
-        ),
-        (With<QueuedSample>, Without<DynamicPool>),
+        (Entity, &AutoPoolRegistry, &SamplePoolDefaults),
+        (With<QueuedSample>, With<SamplePlayer>, Without<DynamicPool>),
     >,
-    assets: Res<Assets<Sample>>,
     mut registries: ResMut<Registries>,
     mut commands: Commands,
     dynamic_range: Res<DynamicPoolRange>,
@@ -74,13 +50,9 @@ pub(super) fn update_auto_pools(
         return;
     };
 
-    for (sample, player, settings, registry, defaults) in queued_samples.iter() {
-        let Some(asset) = assets.get(&player.0) else {
-            continue;
-        };
-
+    for (sample, registry, defaults) in queued_samples.iter() {
         match registries.0.get_mut(registry) {
-            Some(entry) => {
+            Some(_) => {
                 commands.entity(sample).insert(DynamicPool(0));
             }
             None => {
@@ -104,18 +76,19 @@ pub(super) fn update_auto_pools(
                 };
 
                 // create the pool
-                let pool =
-                    super::spawn_pool(label, 4, chain_spawner, defaults.clone(), &mut commands);
-
-                registries.0.insert(
-                    registry.clone(),
-                    RegistryEntry {
-                        root: pool.id(),
-                        samples: HashSet::default(),
-                    },
+                let pool = super::spawn_pool(
+                    label,
+                    dynamic_range.start,
+                    chain_spawner,
+                    defaults.clone(),
+                    &mut commands,
                 );
 
-                commands.entity(sample).insert(DynamicPool(0));
+                registries
+                    .0
+                    .insert(registry.clone(), RegistryEntry { root: pool.id() });
+
+                commands.entity(sample).insert(label);
             }
         }
     }
@@ -200,18 +173,5 @@ impl<'a> AutoPool<'a> for AutoPoolCommands<'a> {
         self.commands.insert(node);
 
         self
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::prelude::*;
-    use bevy::prelude::*;
-
-    fn auto(mut commands: Commands, server: Res<AssetServer>) {
-        commands
-            .spawn(SamplePlayer::new(server.load("my_sample.wav")))
-            .auto_pool()
-            .effect(LowPassNode::default());
     }
 }

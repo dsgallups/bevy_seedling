@@ -1,5 +1,6 @@
 //! Sampler pools, which represent primary sampler player mechanism.
 
+use std::any::TypeId;
 use std::sync::Arc;
 
 use crate::node::ParamFollower;
@@ -13,6 +14,7 @@ use bevy_app::{Last, Plugin, PostUpdate};
 use bevy_asset::Assets;
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
 use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
+use bevy_utils::HashSet;
 use firewheel::{
     event::{NodeEventType, SequenceCommand},
     node::AudioNode,
@@ -93,6 +95,9 @@ impl<L, C: ExtendTuple> Pool<L, C> {
     }
 }
 
+#[derive(Resource, Default)]
+pub struct RegisteredPools(HashSet<TypeId>);
+
 pub(crate) fn spawn_pool<
     'a,
     L: PoolLabel + Component + Clone,
@@ -105,13 +110,17 @@ pub(crate) fn spawn_pool<
     commands: &'a mut Commands,
 ) -> EntityCommands<'a> {
     commands.queue(|world: &mut World| {
-        world.schedule_scope(Last, |_, schedule| {
-            schedule.add_systems(
-                (rank_nodes::<L>, assign_work::<L>)
-                    .chain()
-                    .in_set(SeedlingSystems::Queue),
-            );
-        });
+        let mut resource = world.get_resource_or_init::<RegisteredPools>();
+
+        if resource.0.insert(TypeId::of::<L>()) {
+            world.schedule_scope(Last, |_, schedule| {
+                schedule.add_systems(
+                    (rank_nodes::<L>, assign_work::<L>)
+                        .chain()
+                        .in_set(SeedlingSystems::Queue),
+                );
+            });
+        }
     });
 
     let bus = commands
@@ -122,10 +131,9 @@ pub(crate) fn spawn_pool<
             SamplePoolNode,
             label.clone(),
             defaults,
+            NodeRank::default(),
         ))
         .id();
-
-    let rank = commands.spawn((NodeRank::default(), label.clone())).id();
 
     let nodes: Vec<_> = (0..size)
         .map(|_| {
@@ -155,7 +163,7 @@ pub(crate) fn spawn_pool<
         .collect();
 
     let mut bus = commands.entity(bus);
-    bus.add_children(&nodes).add_child(rank);
+    bus.add_children(&nodes);
 
     bus
 }
@@ -216,9 +224,6 @@ struct SamplePoolNode;
 #[derive(Component)]
 struct EffectsChain(Vec<Entity>);
 
-// #[derive(Component)]
-// struct SamplePoolDefaults(Box<dyn Fn(&mut EntityCommands) + Send + Sync + 'static>);
-
 /// A collections of functions that insert a node's default value into an entity.
 #[derive(Component, Default, Clone)]
 pub(crate) struct SamplePoolDefaults(Vec<Arc<dyn Fn(&mut EntityCommands) + Send + Sync + 'static>>);
@@ -236,30 +241,35 @@ impl SamplePoolDefaults {
 struct NodeRank(Vec<(Entity, u64)>);
 
 fn rank_nodes<T: Component>(
-    q: Query<(Entity, &SamplerNode, &FirewheelNode), (With<SamplePoolNode>, With<T>)>,
-    mut rank: Query<&mut NodeRank, With<T>>,
+    q: Query<
+        (Entity, &SamplerNode, &FirewheelNode, &PoolLabelContainer),
+        (With<SamplePoolNode>, With<T>),
+    >,
+    mut rank: Query<(&mut NodeRank, &PoolLabelContainer), With<T>>,
     mut context: ResMut<AudioContext>,
 ) {
-    let Ok(mut rank) = rank.get_single_mut() else {
-        return;
-    };
+    for (mut rank, label) in rank.iter_mut() {
+        rank.0.clear();
 
-    rank.0.clear();
+        context.with(|c| {
+            for (e, params, node, node_label) in q.iter() {
+                if node_label != label {
+                    continue;
+                }
 
-    context.with(|c| {
-        for (e, params, node) in q.iter() {
-            let Some(state) = c.node_state::<SamplerState>(node.0) else {
-                continue;
-            };
+                let Some(state) = c.node_state::<SamplerState>(node.0) else {
+                    continue;
+                };
 
-            let score = state.worker_score(params);
+                let score = state.worker_score(params);
 
-            rank.0.push((e, score));
-        }
-    });
+                rank.0.push((e, score));
+            }
+        });
 
-    rank.0
-        .sort_unstable_by_key(|pair| std::cmp::Reverse(pair.1));
+        rank.0
+            .sort_unstable_by_key(|pair| std::cmp::Reverse(pair.1));
+    }
 }
 
 #[derive(Component, Clone, Copy)]
@@ -320,22 +330,29 @@ fn assign_work<T: Component>(
         (With<SamplePoolNode>, With<T>),
     >,
     queued_samples: Query<
-        (Entity, &SamplePlayer, &PlaybackSettings),
+        (
+            Entity,
+            &SamplePlayer,
+            &PlaybackSettings,
+            &PoolLabelContainer,
+        ),
         (With<QueuedSample>, With<T>),
     >,
-    mut rank: Query<&mut NodeRank, With<T>>,
-    defaults: Query<&SamplePoolDefaults, With<T>>,
+    mut rank: Query<(&mut NodeRank, &SamplePoolDefaults, &PoolLabelContainer), With<T>>,
     assets: Res<Assets<Sample>>,
     mut commands: Commands,
     mut context: ResMut<AudioContext>,
 ) {
-    let Ok(mut rank) = rank.get_single_mut() else {
-        return;
-    };
-
     context.with(|context| {
-        for (sample, player, settings) in queued_samples.iter() {
+        for (sample, player, settings, label) in queued_samples.iter() {
             let Some(asset) = assets.get(&player.0) else {
+                continue;
+            };
+
+            let Some((mut rank, defaults)) = rank
+                .iter_mut()
+                .find_map(|(rank, defaults, l)| (l == label).then_some((rank, defaults)))
+            else {
                 continue;
             };
 
@@ -364,10 +381,8 @@ fn assign_work<T: Component>(
             }
 
             // Insert default pool parameters if not present.
-            if let Ok(defaults) = defaults.get_single() {
-                for item in defaults.0.iter() {
-                    item(&mut commands.entity(sample));
-                }
+            for item in defaults.0.iter() {
+                item(&mut commands.entity(sample));
             }
 
             rank.0.remove(0);
@@ -448,14 +463,20 @@ impl<T: PoolLabel + Component> PoolDespawn<T> {
 impl<T: PoolLabel + Component> Command for PoolDespawn<T> {
     fn apply(self, world: &mut World) {
         let mut roots =
-            world.query_filtered::<Entity, (With<T>, With<SamplePoolNode>, With<VolumeNode>)>();
+            world.query_filtered::<(Entity, &PoolLabelContainer), (With<T>, With<SamplePoolNode>, With<VolumeNode>)>();
 
-        let roots: Vec<_> = roots.iter(world).collect();
+        let roots: Vec<_> = roots
+            .iter(world)
+            .map(|(root, label)| (root, label.clone()))
+            .collect();
 
         let mut commands = world.commands();
 
-        for root in roots {
-            commands.entity(root).despawn_recursive();
+        let interned = PoolLabelContainer::new(&self.0);
+        for (root, label) in roots {
+            if label == interned {
+                commands.entity(root).despawn_recursive();
+            }
         }
     }
 }
