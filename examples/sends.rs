@@ -9,24 +9,20 @@ fn main() {
             MinimalPlugins,
             LogPlugin::default(),
             AssetPlugin::default(),
-            SeedlingPlugin {
-                default_pool_size: None,
-                ..Default::default()
-            },
+            SeedlingPlugin::default(),
         ))
         .add_systems(
             Startup,
             |server: Res<AssetServer>, mut commands: Commands| {
                 #[derive(NodeLabel, PartialEq, Eq, Hash, Clone, Debug)]
-                struct SendLabel;
+                struct EffectsSend;
 
-                commands.spawn((LowPassNode::new(500.0), SendLabel));
+                // TODO: use reverb here so you can actually hear the effect
+                commands.spawn((LowPassNode::new(500.0), EffectsSend));
 
-                Pool::new(DefaultPool, 16)
-                    .spawn(&mut commands)
-                    .chain_node(SendNode::new(Volume::Linear(1.0), SendLabel));
-
-                commands.spawn(SamplePlayer::new(server.load("snd_wobbler.wav")));
+                commands
+                    .spawn(SamplePlayer::new(server.load("caw.ogg")))
+                    .effect(SendNode::new(Volume::Linear(1.0), EffectsSend));
             },
         )
         .run();

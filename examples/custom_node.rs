@@ -17,6 +17,24 @@ use firewheel::{
     Volume,
 };
 
+fn main() {
+    App::new()
+        .add_plugins((
+            MinimalPlugins,
+            bevy_log::LogPlugin::default(),
+            AssetPlugin::default(),
+            SeedlingPlugin::default(),
+        ))
+        // All you need to do to register your node is call
+        // `RegisterNode::register_node`. This will automatically
+        // handle parameter diffing, node connections, and audio
+        // graph management.
+        .register_node::<CustomVolumeNode>()
+        .add_systems(Startup, startup)
+        .add_systems(Update, update)
+        .run();
+}
+
 // A Firehwel node typically contains your audio
 // processor's parameters. Firewheel's `Diff` and
 // `Patch` traits allows this struct to send
@@ -120,49 +138,25 @@ impl AudioNodeProcessor for VolumeProcessor {
     }
 }
 
-// Now, let's use this node in the ECS!
-fn main() {
-    App::new()
-        .add_plugins((
-            MinimalPlugins,
-            bevy_log::LogPlugin::default(),
-            AssetPlugin::default(),
-            SeedlingPlugin {
-                // We'll manually spawn the default pool so
-                // we can chain our volume node.
-                default_pool_size: None,
-                ..Default::default()
-            },
-        ))
-        // All you need to do to register your node is call
-        // `RegisterNode::register_node`. This will automatically
-        // handle parameter diffing, node connections, and audio
-        // graph management.
-        .register_node::<CustomVolumeNode>()
-        .add_systems(Startup, startup)
-        .add_systems(Update, update)
-        .run();
-}
-
 fn startup(server: Res<AssetServer>, mut commands: Commands) {
-    // Here we manually define the default sample pool
-    // and connect it to our custom volume node.
-    Pool::new(DefaultPool, 16)
-        .spawn(&mut commands)
-        .chain_node(CustomVolumeNode {
-            volume: Volume::UNITY_GAIN,
-        });
-
     // Let's spawn a looping sample.
-    commands.spawn((
-        SamplePlayer::new(server.load("snd_wobbler.wav")),
-        PlaybackSettings::LOOP,
-    ));
+    commands
+        .spawn((
+            SamplePlayer::new(server.load("selfless_courage.ogg")),
+            PlaybackSettings::LOOP,
+        ))
+        .effect(CustomVolumeNode {
+            volume: Volume::Linear(1.0),
+        });
 }
 
 // Here we'll see how simply mutating the parameters
 // will be automatically synchronized with the audio processor.
-fn update(custom_node: Single<&mut CustomVolumeNode>, time: Res<Time>, mut angle: Local<f32>) {
+fn update(
+    custom_node: Single<&mut CustomVolumeNode, With<SamplePlayer>>,
+    time: Res<Time>,
+    mut angle: Local<f32>,
+) {
     let mut custom_node = custom_node.into_inner();
 
     custom_node.volume = Volume::Linear(angle.cos() * 0.25 + 0.5);

@@ -2,7 +2,7 @@
 
 use bevy_ecs::prelude::*;
 use bevy_log::error;
-use firewheel::{clock::ClockSeconds, FirewheelConfig, FirewheelContext};
+use firewheel::{backend::AudioBackend, clock::ClockSeconds, FirewheelConfig};
 
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -13,6 +13,12 @@ use web::InnerContext;
 mod os;
 #[cfg(not(target_arch = "wasm32"))]
 use os::InnerContext;
+
+mod seedling_context;
+
+pub use seedling_context::{
+    ErasedNode, SeedlingContext, SeedlingContextError, SeedlingContextWrapper,
+};
 
 /// A thread-safe wrapper around the underlying Firewheel audio context.
 ///
@@ -32,8 +38,13 @@ pub struct AudioContext(InnerContext);
 
 impl AudioContext {
     /// Initialize the audio process.
-    pub fn new(settings: FirewheelConfig) -> Self {
-        AudioContext(InnerContext::new(settings))
+    pub fn new<B>(settings: FirewheelConfig, stream_settings: B::Config) -> Self
+    where
+        B: AudioBackend + 'static,
+        B::Config: Send + 'static,
+        B::StreamError: Send + Sync + 'static,
+    {
+        AudioContext(InnerContext::new::<B>(settings, stream_settings))
     }
 
     /// Get an absolute timestamp from the audio thread of the current time.
@@ -45,8 +56,8 @@ impl AudioContext {
     /// fn mute_all(mut q: Query<&mut LowPassNode>, mut context: ResMut<AudioContext>) {
     ///     let now = context.now();
     ///     for mut filter in q.iter_mut() {
-    ///         filter.
-    ///             frequency
+    ///         filter
+    ///             .frequency
     ///             .push_curve(
     ///                 0.,
     ///                 now,
@@ -74,14 +85,12 @@ impl AudioContext {
     /// # use bevy::prelude::*;
     /// # use bevy_seedling::prelude::*;
     /// fn system(mut context: ResMut<AudioContext>) {
-    ///     let input_devices = context.with(|context| {
-    ///         context.available_input_devices()
-    ///     });
+    ///     let input_devices = context.with(|context| context.available_input_devices());
     /// }
     /// ```
     pub fn with<F, O>(&mut self, f: F) -> O
     where
-        F: FnOnce(&mut FirewheelContext) -> O + Send,
+        F: FnOnce(&mut SeedlingContext) -> O + Send,
         O: Send + 'static,
     {
         self.0.with(f)

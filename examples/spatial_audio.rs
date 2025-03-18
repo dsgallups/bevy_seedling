@@ -18,29 +18,25 @@ fn main() {
 }
 
 fn startup(server: Res<AssetServer>, mut commands: Commands) {
-    #[derive(PoolLabel, Clone, Debug, Hash, PartialEq, Eq)]
-    struct MyPool;
+    // Here we spawn a sample player with a spatial effect,
+    // making sure our sample player entity has a transform.
+    commands
+        .spawn((
+            SamplePlayer::new(server.load("selfless_courage.ogg")),
+            PlaybackSettings::LOOP,
+            Transform::default(),
+        ))
+        .effect(SpatialBasicNode {
+            // This should make the panning obvious.
+            panning_threshold: 0.8,
+            ..Default::default()
+        });
 
-    // Here we spawn a pool with a custom label and
-    // insert a spatial audio node as a per-sampler effect.
-    Pool::new(MyPool, 4)
-        .effect(SpatialBasicNode::default())
-        .spawn(&mut commands);
-
-    // To play a sound in this pool, we can simply spawn a sample
-    // player with the pool label, making sure the entity
-    // has a transform.
-    commands.spawn((
-        MyPool,
-        SamplePlayer::new(server.load("snd_wobbler.wav")),
-        PlaybackSettings::LOOP,
-        // Both the emitter and listener need transforms
-        // for spatial information to propagate.
-        Transform::default(),
-    ));
-
-    // Finally, we'll spawn a simple listener that just circles the emitter.
-    commands.spawn((SpatialListener2D, Spinner(0.0), Transform::default()));
+    // Then, we'll spawn a simple listener that just circles the emitter.
+    //
+    // `Transform` is a required component of `SpatialListener2D`, so we
+    // don't have to explicitly insert one.
+    commands.spawn((SpatialListener2D, Spinner(0.0)));
 }
 
 #[derive(Component)]
@@ -48,8 +44,8 @@ struct Spinner(f32);
 
 fn spinner(mut spinners: Query<(&mut Spinner, &mut Transform), With<Spinner>>, time: Res<Time>) {
     for (mut spinner, mut transform) in spinners.iter_mut() {
-        let spin_radius = 5.0;
-        let spin_seconds = 4.0;
+        let spin_radius = 2.0;
+        let spin_seconds = 5.0;
 
         let position =
             Vec2::new(spinner.0.cos() * spin_radius, spinner.0.sin() * spin_radius).extend(0.0);

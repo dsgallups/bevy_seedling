@@ -1,8 +1,5 @@
 //! Sampler pools, which represent primary sampler player mechanism.
 
-use std::any::TypeId;
-use std::sync::Arc;
-
 use crate::node::ParamFollower;
 use crate::prelude::{AudioContext, Connect, DefaultPool, FirewheelNode, PoolLabel, VolumeNode};
 use crate::sample::{
@@ -21,6 +18,8 @@ use firewheel::{
     nodes::sampler::{SamplerNode, SamplerState},
     Volume,
 };
+use std::any::TypeId;
+use std::sync::Arc;
 
 pub mod auto;
 
@@ -96,7 +95,7 @@ impl<L, C: ExtendTuple> Pool<L, C> {
 }
 
 #[derive(Resource, Default)]
-pub struct RegisteredPools(HashSet<TypeId>);
+pub(crate) struct RegisteredPools(HashSet<TypeId>);
 
 pub(crate) fn spawn_pool<
     'a,

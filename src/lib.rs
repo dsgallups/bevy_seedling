@@ -85,10 +85,7 @@
 //!
 //!     // To play a sample in this pool, just spawn a sample
 //!     // player with its label.
-//!     commands.spawn((
-//!         MyPool,
-//!         SamplePlayer::new(server.load("my_sample.wav")),
-//!     ));
+//!     commands.spawn((MyPool, SamplePlayer::new(server.load("my_sample.wav"))));
 //! }
 //! ```
 //!
@@ -103,16 +100,17 @@
 //!     #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
 //!     struct UnderwaterEffects;
 //!
-//!     commands.spawn((
-//!         UnderwaterEffects,
-//!         // We'll use a low-pass filter to simulate sounds underwater
-//!         LowPassNode::new(1000.0),
-//!     ))
-//!     // Let's chain it into a volume node so everything's
-//!     // a little quieter.
-//!     .chain_node(VolumeNode {
-//!         volume: Volume::Linear(0.5),
-//!     });
+//!     commands
+//!         .spawn((
+//!             UnderwaterEffects,
+//!             // We'll use a low-pass filter to simulate sounds underwater
+//!             LowPassNode::new(1000.0),
+//!         ))
+//!         // Let's chain it into a volume node so everything's
+//!         // a little quieter.
+//!         .chain_node(VolumeNode {
+//!             volume: Volume::Linear(0.5),
+//!         });
 //!
 //!     // Finally, we'll create a couple sample pools and connect
 //!     // them to our water effects.
@@ -170,6 +168,7 @@ extern crate self as bevy_seedling;
 use bevy_app::{Last, Plugin, PreStartup};
 use bevy_asset::AssetApp;
 use bevy_ecs::prelude::*;
+use firewheel::{backend::AudioBackend, CpalBackend};
 
 pub mod bpf;
 pub mod connect;
@@ -183,7 +182,7 @@ pub mod send;
 pub mod spatial;
 pub mod timeline;
 
-#[cfg(feature = "profiling")]
+#[cfg(any(feature = "profiling", test))]
 pub mod profiling;
 
 pub mod prelude {
@@ -197,7 +196,7 @@ pub mod prelude {
         label::{MainBus, NodeLabel},
         FirewheelNode, RegisterNode,
     };
-    pub use crate::pool::{Pool, PoolCommands, PoolDespawn};
+    pub use crate::pool::{auto::AutoPool, Pool, PoolCommands, PoolDespawn};
     pub use crate::sample::{
         label::{DefaultPool, PoolLabel},
         PlaybackSettings, SamplePlayer,
@@ -252,12 +251,15 @@ pub enum SeedlingSystems {
 /// to inserting `bevy_seedling`'s systems
 /// and resources.
 #[derive(Debug)]
-pub struct SeedlingPlugin {
+pub struct SeedlingPlugin<B: AudioBackend = CpalBackend> {
     /// [`firewheel`]'s config, forwarded directly to
     /// the engine.
     ///
     /// [`firewheel`]: firewheel
     pub config: prelude::FirewheelConfig,
+
+    /// The stream settings, forwarded directly to the backend.
+    pub stream_config: B::Config,
 
     /// The number of sampler nodes for the default
     /// sampler pool. If `None` is provided,
@@ -273,21 +275,37 @@ pub struct SeedlingPlugin {
     pub dynamic_pool_range: Option<core::ops::Range<usize>>,
 }
 
-impl Default for SeedlingPlugin {
+impl Default for SeedlingPlugin<CpalBackend> {
     fn default() -> Self {
+        SeedlingPlugin::<CpalBackend>::new()
+    }
+}
+
+impl<B: AudioBackend> SeedlingPlugin<B>
+where
+    B::Config: Default,
+{
+    /// Create a new default [`SeedlingPlugin`].
+    pub fn new() -> Self {
         Self {
             config: Default::default(),
+            stream_config: Default::default(),
             default_pool_size: Some(24),
             dynamic_pool_range: Some(4..16),
         }
     }
 }
 
-impl Plugin for SeedlingPlugin {
+impl<B: AudioBackend> Plugin for SeedlingPlugin<B>
+where
+    B: 'static,
+    B::Config: Clone + Send + Sync + 'static,
+    B::StreamError: Send + Sync + 'static,
+{
     fn build(&self, app: &mut bevy_app::App) {
         use prelude::*;
 
-        let mut context = AudioContext::new(self.config);
+        let mut context = AudioContext::new::<B>(self.config, self.stream_config.clone());
         let sample_rate = context.with(|ctx| ctx.stream_info().unwrap().sample_rate);
         let sample_pool_size = self.default_pool_size;
 

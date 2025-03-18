@@ -24,12 +24,17 @@ use smallvec::SmallVec;
 /// struct EffectsChain;
 ///
 /// fn system(server: Res<AssetServer>, mut commands: Commands) {
-///     commands.spawn((VolumeNode { volume: Volume::Linear(0.25) }, EffectsChain));
+///     commands.spawn((
+///         VolumeNode {
+///             volume: Volume::Linear(0.25),
+///         },
+///         EffectsChain,
+///     ));
 ///
 ///     // Now, any node can simply use `EffectsChain`
 ///     // as a connection target.
 ///     commands
-///         .spawn(SamplePlayer::new(server.load("sound.wav")))
+///         .spawn(SamplePlayer::new(server.load("my_sample.wav")))
 ///         .connect(EffectsChain);
 /// }
 /// ```
@@ -58,7 +63,7 @@ bevy_ecs::define_label!(
     ///     commands.spawn((VolumeNode { volume: Volume::Linear(0.25) }, EffectsChain));
     ///
     ///     commands
-    ///         .spawn(SamplePlayer::new(server.load("sound.wav")))
+    ///         .spawn(SamplePlayer::new(server.load("my_sample.wav")))
     ///         .connect(EffectsChain);
     /// }
     /// ```

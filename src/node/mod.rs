@@ -235,16 +235,22 @@ pub(crate) fn flush_events(
 /// # use bevy_ecs::prelude::*;
 /// # use bevy_seedling::{prelude::*, node::{ExcludeNode, ParamFollower}};
 /// fn system(mut commands: Commands) {
-///     let pod = commands.spawn((
-///         VolumeNode { volume: Volume::UNITY_GAIN },
-///         ExcludeNode,
-///     )).head();
+///     let pod = commands
+///         .spawn((
+///             VolumeNode {
+///                 volume: Volume::UNITY_GAIN,
+///             },
+///             ExcludeNode,
+///         ))
+///         .head();
 ///
 ///     // This node will be inserted into the graph,
 ///     // and the volume will track any changes
 ///     // made to the `pod` entity.
 ///     commands.spawn((
-///         VolumeNode { volume: Volume::UNITY_GAIN },
+///         VolumeNode {
+///             volume: Volume::UNITY_GAIN,
+///         },
 ///         ParamFollower(pod),
 ///     ));
 /// }

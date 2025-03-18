@@ -86,13 +86,17 @@ pub trait Connect<'a>: Sized {
     /// # fn system(mut commands: Commands) {
     /// // Connect a node to the MainBus.
     /// let node = commands
-    ///     .spawn(VolumeNode { volume: Volume::Linear(0.5) })
+    ///     .spawn(VolumeNode {
+    ///         volume: Volume::Linear(0.5),
+    ///     })
     ///     .connect(MainBus)
     ///     .head();
     ///
     /// // Connect another node to the one we just spawned.
     /// commands
-    ///     .spawn(VolumeNode { volume: Volume::Linear(0.25) })
+    ///     .spawn(VolumeNode {
+    ///         volume: Volume::Linear(0.25),
+    ///     })
     ///     .connect(node);
     /// # }
     /// ```
@@ -347,7 +351,7 @@ pub(crate) fn auto_connect(
 
 #[cfg(test)]
 mod test {
-    use crate::SeedlingPlugin;
+    use crate::{profiling::ProfilingBackend, SeedlingPlugin};
 
     use super::*;
     use bevy::prelude::*;
@@ -367,9 +371,9 @@ mod test {
         app.add_plugins((
             MinimalPlugins,
             AssetPlugin::default(),
-            SeedlingPlugin {
+            SeedlingPlugin::<ProfilingBackend> {
                 default_pool_size: None,
-                ..Default::default()
+                ..SeedlingPlugin::<ProfilingBackend>::new()
             },
         ))
         .add_systems(Startup, startup);
@@ -402,12 +406,18 @@ mod test {
 
                     context.with(|context| {
                         // input node, output node, One, Two, and MainBus
-                        assert_eq!(context.nodes().count(), 5);
+                        assert_eq!(context.nodes().len(), 5);
 
-                        let outgoing_edges_one: Vec<_> =
-                            context.edges().filter(|e| e.src_node == one.0).collect();
-                        let outgoing_edges_two: Vec<_> =
-                            context.edges().filter(|e| e.src_node == two.0).collect();
+                        let outgoing_edges_one: Vec<_> = context
+                            .edges()
+                            .into_iter()
+                            .filter(|e| e.src_node == one.0)
+                            .collect();
+                        let outgoing_edges_two: Vec<_> = context
+                            .edges()
+                            .into_iter()
+                            .filter(|e| e.src_node == two.0)
+                            .collect();
 
                         assert_eq!(outgoing_edges_one.len(), 2);
                         assert_eq!(outgoing_edges_two.len(), 2);
@@ -444,10 +454,13 @@ mod test {
 
                     context.with(|context| {
                         // input node, output node, One, Two, Three, and MainBus
-                        assert_eq!(context.nodes().count(), 6);
+                        assert_eq!(context.nodes().len(), 6);
 
-                        let outgoing_edges_three: Vec<_> =
-                            context.edges().filter(|e| e.src_node == three.0).collect();
+                        let outgoing_edges_three: Vec<_> = context
+                            .edges()
+                            .into_iter()
+                            .filter(|e| e.src_node == three.0)
+                            .collect();
 
                         assert_eq!(
                             outgoing_edges_three

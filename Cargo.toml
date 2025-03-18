@@ -14,10 +14,19 @@ categories = ["game-development", "multimedia::audio"]
 exclude = ["/assets"]
 
 [features]
-default = ["stream"]
+default = ["stream", "wav", "ogg"]
 stream = ["firewheel/stream_nodes"]
-mp3 = ["symphonia/mp3"]
-ogg = ["symphonia/ogg"]
+
+# formats
+wav = ["symphonium/wav", "symphonium/pcm"]
+ogg = ["symphonium/ogg", "symphonium/vorbis"]
+flac = ["symphonium/flac"]
+mkv = ["symphonium/mkv"]
+
+# codecs
+mp3 = ["symphonium/mp3"]
+adpcm = ["symphonium/adpcm"]
+
 profiling = []
 
 [dependencies]
@@ -31,7 +40,10 @@ bevy_asset = "0.15"
 bevy_math = "0.15"
 bevy_transform = "0.15"
 firewheel = { path = "firewheel", features = ["bevy", "spatial_basic_node"] }
-symphonium = "0.4"
+symphonium = { version = "0.4", default-features = false, features = [
+  "opt-simd",
+  "fft-resampler",
+] }
 symphonia = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 smallvec = "1.13"

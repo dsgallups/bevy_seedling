@@ -30,11 +30,12 @@ fn startup(server: Res<AssetServer>, mut commands: Commands) {
 
     // And we start playing our sample in the custom pool.
     commands.spawn((
-        SamplePlayer::new(server.load("snd_wobbler.wav")),
+        SamplePlayer::new(server.load("crow_ambience.ogg")),
         PlaybackSettings::LOOP,
         CustomPool,
     ));
 
+    // Queuing up the pool's removal.
     commands.spawn(PoolRemover(Timer::new(
         Duration::from_secs(3),
         TimerMode::Once,

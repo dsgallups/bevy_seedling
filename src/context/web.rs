@@ -3,7 +3,7 @@ use firewheel::{FirewheelConfig, FirewheelContext};
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
-    static CONTEXT: RefCell<FirewheelContext> = panic!("audio context should be initialized");
+    static CONTEXT: RefCell<SeedlingContext> = panic!("audio context should be initialized");
 }
 
 /// A simple, single-threaded context wrapper.
@@ -19,7 +19,7 @@ impl InnerContext {
             .start_stream(Default::default())
             .expect("failed to activate the audio context");
 
-        CONTEXT.set(context);
+        CONTEXT.set(SeedlingContext::new(context));
 
         Self(())
     }

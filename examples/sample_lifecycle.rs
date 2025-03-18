@@ -44,10 +44,7 @@ fn main() {
 fn startup(server: Res<AssetServer>, mut commands: Commands) {
     // The default playback settings (a required component of `SamplePlayer`)
     // will cause the sample to play once, despawning the entity when complete.
-    commands.spawn((
-        SamplePlayer::new(server.load("snd_wobbler.wav")),
-        OnFinished,
-    ));
+    commands.spawn((SamplePlayer::new(server.load("caw.ogg")), OnFinished));
 }
 
 fn play_event(
@@ -60,7 +57,7 @@ fn play_event(
         // playing indefinitely until the sample entity is despawned.
         let sample = commands
             .spawn((
-                SamplePlayer::new(server.load("snd_wobbler.wav")),
+                SamplePlayer::new(server.load("caw.ogg")),
                 PlaybackSettings::LOOP,
             ))
             .id();

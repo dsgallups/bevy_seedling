@@ -16,9 +16,14 @@ fn main() {
             |server: Res<AssetServer>, mut commands: Commands| {
                 // Spawning a `SamplePlayer` component will play a sample
                 // once as soon as it's loaded. If no pool is specified
-                // like in this example, teh sample will be played in
+                // like in this example, the sample will be played in
                 // the `DefaultPool`.
-                commands.spawn(SamplePlayer::new(server.load("snd_wobbler.wav")));
+                commands.spawn(SamplePlayer::new(server.load("caw.ogg")));
+
+                commands.spawn((
+                    SamplePlayer::new(server.load("crow_ambience.ogg")),
+                    PlaybackSettings::LOOP,
+                ));
             },
         )
         .run();

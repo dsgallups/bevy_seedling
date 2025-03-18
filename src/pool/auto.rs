@@ -23,7 +23,7 @@ impl AutoPoolRegistry {
 }
 
 struct RegistryEntry {
-    root: Entity,
+    label: DynamicPool,
 }
 
 #[derive(Resource, Default)]
@@ -52,11 +52,11 @@ pub(super) fn update_auto_pools(
 
     for (sample, registry, defaults) in queued_samples.iter() {
         match registries.0.get_mut(registry) {
-            Some(_) => {
-                commands.entity(sample).insert(DynamicPool(0));
+            Some(entry) => {
+                commands.entity(sample).insert(entry.label);
             }
             None => {
-                let label = DynamicPool(0);
+                let label = DynamicPool(registries.0.len());
 
                 let chain_spawner = {
                     let defaults = defaults.clone();
@@ -76,7 +76,7 @@ pub(super) fn update_auto_pools(
                 };
 
                 // create the pool
-                let pool = super::spawn_pool(
+                super::spawn_pool(
                     label,
                     dynamic_range.start,
                     chain_spawner,
@@ -86,7 +86,7 @@ pub(super) fn update_auto_pools(
 
                 registries
                     .0
-                    .insert(registry.clone(), RegistryEntry { root: pool.id() });
+                    .insert(registry.clone(), RegistryEntry { label });
 
                 commands.entity(sample).insert(label);
             }

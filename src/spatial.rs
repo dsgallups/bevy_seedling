@@ -12,38 +12,28 @@
 //! present in the world at a time. If more than one is present, spatial
 //! audio will not be calculated.
 //!
-//! Typically, you'll want to include a [`SpatialBasicNode`] as an
-//! effect in a sampler pool.
+//! Typically, you'll want to include a [`SpatialBasicNode`] as an effect.
 //!
 //! ```
 //! # use bevy_seedling::prelude::*;
 //! # use bevy::prelude::*;
 //! fn spawn_spatial(mut commands: Commands, server: Res<AssetServer>) {
-//!     #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
-//!     struct SpatialPool;
+//!     // Spawn a player with a transform (1).
+//!     commands
+//!         .spawn((
+//!             SamplePlayer::new(server.load("my_sample.wav")),
+//!             Transform::default(),
+//!         ))
+//!         .effect(SpatialBasicNode::default());
 //!
-//!     Pool::new(SpatialPool, 4)
-//!         .effect(SpatialBasicNode::default())
-//!         .spawn(&mut commands);
-//!
-//!     // spawn a listener with a transform (2, 3)
-//!     commands.spawn((SpatialListener2D, Transform::default()));
-//!
-//!     // then, spawn a player with a transform (1)
-//!     commands.spawn((
-//!         SpatialPool,
-//!         SamplePlayer::new(server.load("my_sample.wav")),
-//!         Transform::default(),
-//!     ));
+//!     // Then, spawn a listener (2), which automatically inserts
+//!     // a transform if it doesn't already exist (3).
+//!     commands.spawn(SpatialListener2D);
 //! }
 //! ```
-//!
-//! Since the pool will automatically insert an [excluded][crate::node::ExcludeNode]
-//! [`SpatialBasicNode`] on any [`SamplePlayer`][crate::prelude::SamplePlayer]
-//! entity, (1) will be satisfied.
 
 use bevy_ecs::prelude::*;
-use bevy_transform::components::GlobalTransform;
+use bevy_transform::components::{GlobalTransform, Transform};
 use firewheel::nodes::spatial_basic::SpatialBasicNode;
 
 /// A 2D spatial listener.
@@ -57,6 +47,7 @@ use firewheel::nodes::spatial_basic::SpatialBasicNode;
 /// Multiple listeners will overwrite each other
 /// in a non-deterministic order.
 #[derive(Debug, Component)]
+#[require(Transform)]
 pub struct SpatialListener2D;
 
 /// A 3D spatial listener.
@@ -70,6 +61,7 @@ pub struct SpatialListener2D;
 /// Multiple listeners will overwrite each other
 /// in a non-deterministic order.
 #[derive(Debug, Component)]
+#[require(Transform)]
 pub struct SpatialListener3D;
 
 pub(crate) fn update_2d_emitters(

@@ -94,6 +94,17 @@ impl AssetLoader for SampleLoader {
     }
 
     fn extensions(&self) -> &[&str] {
-        &["wav"]
+        &[
+            #[cfg(feature = "wav")]
+            "wav",
+            #[cfg(feature = "ogg")]
+            "ogg",
+            #[cfg(feature = "mp3")]
+            "mp3",
+            #[cfg(feature = "flac")]
+            "flac",
+            #[cfg(feature = "mkv")]
+            "mkv",
+        ]
     }
 }

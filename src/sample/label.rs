@@ -5,7 +5,7 @@
 //! will be automatically played in the [`DefaultPool`].
 //!
 //! You can customize the default sampler pool by setting
-//! [`SeedlingPlugin::sample_pool_size`][crate::prelude::SeedlingPlugin::sample_pool_size]
+//! [`SeedlingPlugin::default_pool_size`][crate::prelude::SeedlingPlugin::default_pool_size]
 //! to `None`, preventing the plugin from spawning it for you.
 //!
 //! ```no_run
@@ -17,19 +17,16 @@
 //!         .add_plugins((
 //!             DefaultPlugins,
 //!             SeedlingPlugin {
-//!                 sample_pool_size: None,
+//!                 default_pool_size: None,
 //!                 ..Default::default()
 //!             },
 //!         ))
-//!         .add_systems(
-//!             Startup,
-//!             |mut commands: Commands| {
-//!                 // Make the default pool provide spatial audio
-//!                 Pool::new(DefaultPool, 24)
-//!                     .effect(SpatialBasicNode::default())
-//!                     .spawn(&mut commands);
-//!             }
-//!         )
+//!         .add_systems(Startup, |mut commands: Commands| {
+//!             // Make the default pool provide spatial audio
+//!             Pool::new(DefaultPool, 24)
+//!                 .effect(SpatialBasicNode::default())
+//!                 .spawn(&mut commands);
+//!         })
 //!         .run();
 //! }
 //! ```
@@ -52,7 +49,7 @@ bevy_ecs::define_label!(
 /// [`SamplePlayer`]: crate::sample::SamplePlayer
 ///
 /// You can customize the default sampler pool by setting
-/// [`SeedlingPlugin::sample_pool_size`][crate::prelude::SeedlingPlugin::sample_pool_size]
+/// [`SeedlingPlugin::default_pool_size`][crate::prelude::SeedlingPlugin::default_pool_size]
 /// to `None`, preventing the plugin from spawning it for you.
 ///
 /// ```no_run
@@ -64,19 +61,16 @@ bevy_ecs::define_label!(
 ///         .add_plugins((
 ///             DefaultPlugins,
 ///             SeedlingPlugin {
-///                 sample_pool_size: None,
+///                 default_pool_size: None,
 ///                 ..Default::default()
 ///             },
 ///         ))
-///         .add_systems(
-///             Startup,
-///             |mut commands: Commands| {
-///                 // Make the default pool provide spatial audio
-///                 Pool::new(DefaultPool, 24)
-///                     .effect(SpatialBasicNode::default())
-///                     .spawn(&mut commands);
-///             }
-///         )
+///         .add_systems(Startup, |mut commands: Commands| {
+///             // Make the default pool provide spatial audio
+///             Pool::new(DefaultPool, 24)
+///                 .effect(SpatialBasicNode::default())
+///                 .spawn(&mut commands);
+///         })
 ///         .run();
 /// }
 /// ```
