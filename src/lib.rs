@@ -163,6 +163,7 @@
 #![expect(clippy::needless_doctest_main)]
 #![warn(missing_debug_implementations)]
 
+// Naming trick to facilitate straightforward internal macro usage.
 extern crate self as bevy_seedling;
 
 use bevy_app::{Last, Plugin, PreStartup};
@@ -196,11 +197,12 @@ pub mod prelude {
         label::{MainBus, NodeLabel},
         FirewheelNode, RegisterNode,
     };
-    pub use crate::pool::{auto::AutoPool, Pool, PoolCommands, PoolDespawn};
-    pub use crate::sample::{
+    pub use crate::pool::{
+        auto::AutoPool,
         label::{DefaultPool, PoolLabel},
-        PlaybackSettings, SamplePlayer,
+        Pool, PoolCommands, PoolDespawn,
     };
+    pub use crate::sample::{PlaybackSettings, SamplePlayer};
     pub use crate::send::SendNode;
     pub use crate::spatial::{SpatialListener2D, SpatialListener3D};
     pub use crate::SeedlingPlugin;

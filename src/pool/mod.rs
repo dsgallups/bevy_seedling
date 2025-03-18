@@ -2,9 +2,7 @@
 
 use crate::node::ParamFollower;
 use crate::prelude::{AudioContext, Connect, DefaultPool, FirewheelNode, PoolLabel, VolumeNode};
-use crate::sample::{
-    label::PoolLabelContainer, PlaybackSettings, QueuedSample, Sample, SamplePlayer,
-};
+use crate::sample::{PlaybackSettings, QueuedSample, Sample, SamplePlayer};
 use crate::{node::Events, SeedlingSystems};
 use auto::AutoPoolRegistry;
 use bevy_app::{Last, Plugin, PostUpdate};
@@ -22,6 +20,9 @@ use std::any::TypeId;
 use std::sync::Arc;
 
 pub mod auto;
+pub mod label;
+
+use label::PoolLabelContainer;
 
 pub(crate) struct SamplePoolPlugin;
 

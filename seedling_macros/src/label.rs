@@ -62,7 +62,7 @@ pub fn derive_pool_label_inner(input: TokenStream) -> syn::Result<TokenStream2> 
             fn register_component_hooks(hooks: &mut #bevy_ecs::component::ComponentHooks) {
                 hooks.on_insert(|mut world: #bevy_ecs::world::DeferredWorld, entity: #bevy_ecs::entity::Entity, _| {
                     let value = world.get::<Self>(entity).unwrap();
-                    let container = ::bevy_seedling::sample::label::PoolLabelContainer::new(value);
+                    let container = ::bevy_seedling::pool::label::PoolLabelContainer::new(value);
 
                     world
                         .commands()
