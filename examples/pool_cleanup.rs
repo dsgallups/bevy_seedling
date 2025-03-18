@@ -5,12 +5,6 @@ use bevy::{log::LogPlugin, prelude::*};
 use bevy_seedling::prelude::*;
 use std::time::Duration;
 
-#[derive(PoolLabel, PartialEq, Eq, Debug, Hash, Clone)]
-struct CustomPool;
-
-#[derive(Component)]
-struct PoolRemover(Timer);
-
 fn main() {
     App::new()
         .add_plugins((
@@ -24,23 +18,29 @@ fn main() {
         .run();
 }
 
-fn startup(server: Res<AssetServer>, mut commands: Commands) {
-    // Here we spawn our custom pool with four sampler nodes.
-    Pool::new(CustomPool, 4).spawn(&mut commands);
+#[derive(PoolLabel, PartialEq, Eq, Debug, Hash, Clone)]
+struct AmbiencePool;
 
-    // And we start playing our sample in the custom pool.
+fn startup(server: Res<AssetServer>, mut commands: Commands) {
+    // Here we spawn our custom ambience pool with four sampler nodes.
+    Pool::new(AmbiencePool, 4).spawn(&mut commands);
+
+    // And we start playing our sample in the pool.
     commands.spawn((
         SamplePlayer::new(server.load("crow_ambience.ogg")),
         PlaybackSettings::LOOP,
-        CustomPool,
+        AmbiencePool,
     ));
 
-    // Queuing up the pool's removal.
+    // Then, we queue up the pool's removal.
     commands.spawn(PoolRemover(Timer::new(
         Duration::from_secs(3),
         TimerMode::Once,
     )));
 }
+
+#[derive(Component)]
+struct PoolRemover(Timer);
 
 fn remove_pool(mut q: Query<(Entity, &mut PoolRemover)>, time: Res<Time>, mut commands: Commands) {
     for (e, mut remover) in q.iter_mut() {
@@ -52,7 +52,7 @@ fn remove_pool(mut q: Query<(Entity, &mut PoolRemover)>, time: Res<Time>, mut co
             // This will remove the sampler and volume nodes
             // associated with this pool in both the ECS
             // and audio graph.
-            commands.despawn_pool(CustomPool);
+            commands.despawn_pool(AmbiencePool);
 
             commands.entity(e).despawn();
         }

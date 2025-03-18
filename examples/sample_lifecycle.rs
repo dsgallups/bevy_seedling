@@ -8,25 +8,6 @@ use bevy::{
 use bevy_seedling::prelude::*;
 use std::time::Duration;
 
-#[derive(Component)]
-#[component(on_remove = on_remove)]
-struct OnFinished;
-
-fn on_remove(mut world: DeferredWorld, _: Entity, _: ComponentId) {
-    info!("One-shot sample finished!");
-
-    world.send_event(PlayEvent);
-}
-
-#[derive(Event)]
-struct PlayEvent;
-
-#[derive(Component)]
-struct LoopingRemover {
-    timer: Timer,
-    sample: Entity,
-}
-
 fn main() {
     App::new()
         .add_plugins((
@@ -68,6 +49,25 @@ fn play_event(
             sample,
         });
     }
+}
+
+#[derive(Component)]
+#[component(on_remove = on_remove)]
+struct OnFinished;
+
+fn on_remove(mut world: DeferredWorld, _: Entity, _: ComponentId) {
+    info!("One-shot sample finished!");
+
+    world.send_event(PlayEvent);
+}
+
+#[derive(Event)]
+struct PlayEvent;
+
+#[derive(Component)]
+struct LoopingRemover {
+    timer: Timer,
+    sample: Entity,
 }
 
 fn remove_looping(

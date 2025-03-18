@@ -4,11 +4,11 @@ use crate::node::ExcludeNode;
 use crate::prelude::Volume;
 use bevy_asset::Handle;
 use bevy_ecs::prelude::*;
+use firewheel::nodes::sampler::RepeatMode;
 
 mod assets;
 
 pub use assets::{Sample, SampleLoader, SampleLoaderError};
-use firewheel::nodes::sampler::RepeatMode;
 
 /// A component that queues sample playback.
 ///
