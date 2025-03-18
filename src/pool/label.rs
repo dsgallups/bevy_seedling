@@ -2,7 +2,7 @@
 //!
 //! `bevy_seedling` provides a single pool label, [`DefaultPool`].
 //! Any node that doesn't provide an explicit pool when spawned
-//! will be automatically played in the [`DefaultPool`].
+//! and has no effects will be automatically played in the [`DefaultPool`].
 //!
 //! You can customize the default sampler pool by setting
 //! [`SeedlingPlugin::default_pool_size`][crate::prelude::SeedlingPlugin::default_pool_size]
@@ -44,7 +44,8 @@ bevy_ecs::define_label!(
 /// The default sample pool.
 ///
 /// If no pool is specified when spawning a
-/// [`SamplePlayer`], this label will be inserted.
+/// [`SamplePlayer`] and no effects are applied,
+/// this label will be inserted automatically.
 ///
 /// [`SamplePlayer`]: crate::sample::SamplePlayer
 ///

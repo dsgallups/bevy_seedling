@@ -255,6 +255,10 @@ pub(crate) fn flush_events(
 ///     ));
 /// }
 /// ```
+///
+/// Nodes inserted into an entity with [`ExcludeNode`] can be
+/// thought of as *remote nodes* that other graph-connected
+/// nodes can track.
 #[derive(Debug, Default, Component)]
 pub struct ExcludeNode;
 

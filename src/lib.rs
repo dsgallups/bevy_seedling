@@ -7,7 +7,7 @@
 //! ## Getting started
 //!
 //! First, you'll need to add the dependency to your `Cargo.toml`.
-//! Note that you'll need to disable Bevy's "bevy_audio" feature,
+//! Note that you'll need to disable Bevy's `bevy_audio` feature,
 //! meaning you'll need to specify quite a few features
 //! manually!
 //!
@@ -15,14 +15,38 @@
 //! [dependencies]
 //! bevy_seedling = "0.3"
 //! bevy = { version = "0.15", default-features = false, features = [
+//!   "animation",
 //!   "bevy_asset",
+//!   "bevy_color",
+//!   "bevy_core_pipeline",
+//!   "bevy_gilrs",
+//!   "bevy_gizmos",
+//!   "bevy_gltf",
+//!   "bevy_mesh_picking_backend",
+//!   "bevy_pbr",
+//!   "bevy_picking",
+//!   "bevy_render",
+//!   "bevy_scene",
+//!   "bevy_sprite",
+//!   "bevy_sprite_picking_backend",
 //!   "bevy_state",
-//!   # ...
+//!   "bevy_text",
+//!   "bevy_ui",
+//!   "bevy_ui_picking_backend",
+//!   "bevy_window",
+//!   "bevy_winit",
+//!   "custom_cursor",
+//!   "default_font",
+//!   "hdr",
+//!   "multi_threaded",
+//!   "png",
+//!   "smaa_luts",
+//!   "sysinfo_plugin",
+//!   "tonemapping_luts",
+//!   "webgl2",
+//!   "x11",
 //! ] }
 //! ```
-//!
-//! [See here](https://docs.rs/crate/bevy/latest/features) for a list
-//! of Bevy's default features.
 //!
 //! Then, you'll need to add the [`SeedlingPlugin`] to your app.
 //!
@@ -37,23 +61,40 @@
 //! }
 //! ```
 //!
-//! [The repository's examples](https://github.com/CorvusPrudens/bevy_seedling/tree/master/examples)
-//! should help you get up to speed on common usage patterns.
-//!
-//! ## Overview
-//!
-//! Once you've registered the plugin, playing a sample is easy!
+//! After which you can play sounds right away!
 //!
 //! ```
 //! # use bevy::prelude::*;
 //! # use bevy_seedling::prelude::*;
-//! fn play(mut commands: Commands, server: Res<AssetServer>) {
+//! fn play_sound(mut commands: Commands, server: Res<AssetServer>) {
 //!     commands.spawn(SamplePlayer::new(server.load("my_sample.wav")));
 //! }
 //! ```
 //!
-//! [`PlaybackSettings`][prelude::PlaybackSettings] gives you some
-//! control over how your samples are played.
+//! [The repository's examples](https://github.com/CorvusPrudens/bevy_seedling/tree/master/examples)
+//! should help you get up to speed on common usage patterns.
+//!
+//! ## Table of contents
+//!
+//! Below is a structured overview of this crate's documentation,
+//! arranged to ease you into `bevy_seedling`'s features.
+//!
+//! ### Playing samples
+//! - [The `SamplePlayer` type][prelude::SamplePlayer]
+//! - [Controlling playback][prelude::PlaybackSettings]
+//! - [The sample lifecycle][prelude::SamplePlayer#lifecycle]
+//! - [Applying effects][prelude::SamplePlayer#applying-effects]
+//!
+//! ### Sampler pools
+//! - [Building a sampler pool][prelude::Pool]
+//! - [Static and dynamic pools][prelude::Pool]
+//!
+//! ### Audio routing
+//! - [Routing overview][crate::connect]
+//! - [Routing targets][prelude::ConnectTarget]
+//!
+//! ### Custom nodes
+//! - [Creating and registering nodes][prelude::RegisterNode]
 //!
 //! ```
 //! # use bevy::prelude::*;
@@ -136,6 +177,18 @@
 //! For an introduction, check out the [custom node example](https://github.com/CorvusPrudens/bevy_seedling/blob/master/examples/custom_node.rs)
 //! in the repository.
 //!
+//! ## Feature flags
+//!
+//! | Flag | Description | Default feature |
+//! | ---  | ----------- | --------------- |
+//! | `wav` | Enable WAV format and PCM encoding. | Yes |
+//! | `ogg` | Enable Ogg format and Vorbis encoding. | Yes |
+//! | `mp3` | Enable mp3 format and encoding. | No |
+//! | `mkv` | Enable mkv format. | No |
+//! | `adpcm` | Enable adpcm encoding. | No |
+//! | `flac` | Enable FLAC format and encoding. | No |
+//! | `stream` | Enable CPAL input and output stream nodes. | Yes |
+//!
 //! ## Design
 //!
 //! `bevy_seedling` provides a thin ECS wrapper over `Firewheel`.
@@ -202,7 +255,7 @@ pub mod prelude {
         label::{DefaultPool, PoolLabel},
         Pool, PoolCommands, PoolDespawn,
     };
-    pub use crate::sample::{PlaybackSettings, SamplePlayer};
+    pub use crate::sample::{OnComplete, PlaybackSettings, SamplePlayer};
     pub use crate::send::SendNode;
     pub use crate::spatial::{SpatialListener2D, SpatialListener3D};
     pub use crate::SeedlingPlugin;
@@ -210,7 +263,7 @@ pub mod prelude {
     pub use firewheel::{
         clock::{ClockSamples, ClockSeconds},
         nodes::{
-            sampler::SamplerNode,
+            sampler::{RepeatMode, SamplerNode},
             spatial_basic::{SpatialBasicConfig, SpatialBasicNode},
             volume::{VolumeNode, VolumeNodeConfig},
             volume_pan::{VolumePanNode, VolumePanNodeConfig},
