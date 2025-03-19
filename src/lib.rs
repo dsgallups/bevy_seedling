@@ -11,7 +11,7 @@
 //! meaning you'll need to specify quite a few features
 //! manually!
 //!
-//! ```
+//! ```toml
 //! [dependencies]
 //! bevy_seedling = "0.3"
 //! bevy = { version = "0.15", default-features = false, features = [
@@ -76,7 +76,7 @@
 //!             SamplePlayer::new(server.load("my_ambience.wav")),
 //!             PlaybackSettings::LOOP,
 //!         ))
-//!         .effect(LowPasNode::new(500.0));
+//!         .effect(LowPassNode::new(500.0));
 //! }
 //! ```
 //!
@@ -127,7 +127,7 @@
 //! you'll need to enable it in your `Cargo.toml`.
 //!
 //!
-//! ```
+//! ```toml
 //! [dependencies]
 //! bevy_seedling = { version = "0.3.0", features = ["mp3"] }
 //! ```
@@ -137,7 +137,7 @@
 //! `bevy_seedling` does quite a bit with Firewheel nodes under the hood.
 //! To enable this machinery, you need to [register your audio node][prelude::RegisterNode].
 //!
-//! ```no_run
+//! ```skip
 //! use bevy::prelude::*;
 //! use bevy_seedling::prelude::*;
 //!

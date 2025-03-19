@@ -134,7 +134,7 @@ pub trait Connect<'a>: Sized {
     /// # use bevy_seedling::prelude::*;
     /// # fn head(mut commands: Commands, server: Res<AssetServer>) {
     /// commands
-    ///     .spawn(LowPasNode::default())
+    ///     .spawn(LowPassNode::default())
     ///     .chain_node(BandPassNode::default())
     ///     .chain_node(VolumeNode::default());
     /// # }
@@ -158,7 +158,7 @@ pub trait Connect<'a>: Sized {
     /// # use bevy_seedling::prelude::*;
     /// fn head(mut commands: Commands, server: Res<AssetServer>) {
     ///     let chain_input = commands
-    ///         .spawn(LowPasNode::default())
+    ///         .spawn(LowPassNode::default())
     ///         .chain_node(BandPassNode::default())
     ///         .chain_node(VolumeNode::default())
     ///         .head();
