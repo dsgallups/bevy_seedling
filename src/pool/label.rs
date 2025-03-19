@@ -87,6 +87,7 @@ pub type InternedPoolLabel = Interned<dyn PoolLabel>;
 pub struct PoolLabelContainer(InternedPoolLabel);
 
 impl PoolLabelContainer {
+    /// Create a new interned pool label.
     pub fn new<T: PoolLabel>(label: &T) -> Self {
         Self(label.intern())
     }

@@ -127,7 +127,7 @@ impl RegisterNode for bevy_app::App {
         );
         world.register_required_components::<T, Events>();
         world.register_required_components::<T, T::Configuration>();
-        world.register_required_components::<T, pool::auto::AutoRegister<T>>();
+        world.register_required_components::<T, pool::dynamic::AutoRegister<T>>();
 
         self.add_systems(
             Last,
@@ -147,7 +147,7 @@ impl RegisterNode for bevy_app::App {
         let world = self.world_mut();
         world.register_required_components::<T, Events>();
         world.register_required_components::<T, T::Configuration>();
-        world.register_required_components::<T, pool::auto::AutoRegister<T>>();
+        world.register_required_components::<T, pool::dynamic::AutoRegister<T>>();
 
         self.add_systems(Last, acquire_id::<T>.in_set(SeedlingSystems::Acquire))
     }

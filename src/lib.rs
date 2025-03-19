@@ -11,7 +11,7 @@
 //! meaning you'll need to specify quite a few features
 //! manually!
 //!
-//! ```toml
+//! ```
 //! [dependencies]
 //! bevy_seedling = "0.3"
 //! bevy = { version = "0.15", default-features = false, features = [
@@ -61,7 +61,7 @@
 //! }
 //! ```
 //!
-//! After which you can play sounds right away!
+//! Once you've set it all up, playing sounds is easy!
 //!
 //! ```
 //! # use bevy::prelude::*;
@@ -86,8 +86,8 @@
 //! - [Applying effects][prelude::SamplePlayer#applying-effects]
 //!
 //! ### Sampler pools
-//! - [Building a sampler pool][prelude::Pool]
-//! - [Static and dynamic pools][prelude::Pool]
+//! - [Dynamic pools][pool::dynamic]
+//! - [Static pools][prelude::Pool]
 //!
 //! ### Audio routing
 //! - [Routing overview][crate::connect]
@@ -95,87 +95,7 @@
 //!
 //! ### Custom nodes
 //! - [Creating and registering nodes][prelude::RegisterNode]
-//!
-//! ```
-//! # use bevy::prelude::*;
-//! # use bevy_seedling::prelude::*;
-//! fn play_with_settings(mut commands: Commands, server: Res<AssetServer>) {
-//!     commands.spawn((
-//!         SamplePlayer::new(server.load("my_sample.wav")),
-//!         PlaybackSettings::LOOP,
-//!     ));
-//! }
-//! ```
-//!
-//! By default, sample players are queued up in the default sample pool,
-//! [`DefaultPool`][prelude::DefaultPool]. If you'd like to apply effects to your
-//! samples, you can define a new pool with per-sampler effects.
-//!
-//! ```
-//! # use bevy::prelude::*;
-//! # use bevy_seedling::prelude::*;
-//! fn custom_pool(mut commands: Commands, server: Res<AssetServer>) {
-//!     // First, you'll need a label.
-//!     #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
-//!     struct MyPool;
-//!
-//!     // Let's spawn a pool with spatial audio and four samplers.
-//!     Pool::new(MyPool, 4)
-//!         .effect(SpatialBasicNode::default())
-//!         .spawn(&mut commands);
-//!
-//!     // To play a sample in this pool, just spawn a sample
-//!     // player with its label.
-//!     commands.spawn((MyPool, SamplePlayer::new(server.load("my_sample.wav"))));
-//! }
-//! ```
-//!
-//! You can also define free-standing effects chains and
-//! connect multiple pools to it.
-//!
-//! ```
-//! # use bevy::prelude::*;
-//! # use bevy_seedling::prelude::*;
-//! fn chains(mut commands: Commands, server: Res<AssetServer>) {
-//!     // We can also define labels for individual nodes.
-//!     #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
-//!     struct UnderwaterEffects;
-//!
-//!     commands
-//!         .spawn((
-//!             UnderwaterEffects,
-//!             // We'll use a low-pass filter to simulate sounds underwater
-//!             LowPassNode::new(1000.0),
-//!         ))
-//!         // Let's chain it into a volume node so everything's
-//!         // a little quieter.
-//!         .chain_node(VolumeNode {
-//!             volume: Volume::Linear(0.5),
-//!         });
-//!
-//!     // Finally, we'll create a couple sample pools and connect
-//!     // them to our water effects.
-//!     #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
-//!     struct MusicPool;
-//!
-//!     Pool::new(MusicPool, 1)
-//!         .spawn(&mut commands)
-//!         .connect(UnderwaterEffects);
-//!
-//!     #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
-//!     struct SfxPool;
-//!
-//!     Pool::new(SfxPool, 16)
-//!         .spawn(&mut commands)
-//!         .connect(UnderwaterEffects);
-//! }
-//! ```
-//!
-//! ## Custom nodes
-//!
-//! `bevy_seedling` is designed to make authoring custom nodes breeze!
-//! For an introduction, check out the [custom node example](https://github.com/CorvusPrudens/bevy_seedling/blob/master/examples/custom_node.rs)
-//! in the repository.
+//! - [Synchronizing ECS and audio types][prelude::RegisterNode#synchronizing-ecs-and-auto-types]
 //!
 //! ## Feature flags
 //!
@@ -189,7 +109,37 @@
 //! | `flac` | Enable FLAC format and encoding. | No |
 //! | `stream` | Enable CPAL input and output stream nodes. | Yes |
 //!
-//! ## Design
+//! ## Frequently asked questions
+//!
+//! ### Why aren't my mp3 samples making any sound?
+//!
+//! `bevy_seedling` enables a few formats and encodings by default.
+//! If your format isn't included in the [default features][self#feature-flags],
+//! you'll need to enable it in your `Cargo.toml`.
+//!
+//!
+//! ```
+//! [dependencies]
+//! bevy_seedling = { version = "0.3.0", features = ["mp3"] }
+//! ```
+//!
+//! ### Why isn't my custom node doing anything?
+//!
+//! `bevy_seedling` does quite a bit with Firewheel nodes under the hood.
+//! To enable this machinery, you need to [register your audio node][prelude::RegisterNode].
+//!
+//! ```no_run
+//! use bevy::prelude::*;
+//! use bevy_seedling::prelude::*;
+//!
+//! fn main() {
+//!     App::new()
+//!         .add_plugins((DefaultPlugins, SeedlingPlugin::default()))
+//!         .register_node::<MyCustomNode>();
+//! }
+//! ```
+//!
+//! ## Architecture
 //!
 //! `bevy_seedling` provides a thin ECS wrapper over `Firewheel`.
 //!
@@ -215,6 +165,7 @@
 #![allow(clippy::type_complexity)]
 #![expect(clippy::needless_doctest_main)]
 #![warn(missing_debug_implementations)]
+#![warn(missing_docs)]
 
 // Naming trick to facilitate straightforward internal macro usage.
 extern crate self as bevy_seedling;
@@ -251,7 +202,7 @@ pub mod prelude {
         FirewheelNode, RegisterNode,
     };
     pub use crate::pool::{
-        auto::AutoPool,
+        dynamic::DynamicPool,
         label::{DefaultPool, PoolLabel},
         Pool, PoolCommands, PoolDespawn,
     };
@@ -367,7 +318,7 @@ where
         app.insert_resource(context)
             .init_resource::<connect::NodeMap>()
             .init_resource::<node::PendingRemovals>()
-            .insert_resource(pool::auto::DynamicPoolRange(
+            .insert_resource(pool::dynamic::DynamicPoolRange(
                 self.dynamic_pool_range.clone(),
             ))
             .init_asset::<sample::Sample>()

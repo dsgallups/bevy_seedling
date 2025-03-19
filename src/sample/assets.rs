@@ -34,7 +34,9 @@ pub struct SampleLoader {
 /// Errors produced while loading samples.
 #[derive(Debug)]
 pub enum SampleLoaderError {
+    /// An I/O error, such as missing files.
     StdIo(std::io::Error),
+    /// An error directly from `symphonium`.
     Symphonium(String),
 }
 

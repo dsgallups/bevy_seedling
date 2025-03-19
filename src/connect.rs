@@ -24,6 +24,10 @@ pub enum ConnectTarget {
 /// A pending connection between two nodes.
 #[derive(Debug, Clone)]
 pub struct PendingConnection {
+    /// The connection target.
+    ///
+    /// The connection will be made between this entity's output
+    /// and the target's input.
     pub target: ConnectTarget,
     /// An optional [`firewheel`] port mapping.
     ///
@@ -121,20 +125,56 @@ pub trait Connect<'a>: Sized {
         ports: &[(u32, u32)],
     ) -> ConnectCommands<'a>;
 
+    /// Chain a node's output into this node's input.
+    ///
+    /// This allows you to easily build up effects chains.
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::prelude::*;
+    /// # fn head(mut commands: Commands, server: Res<AssetServer>) {
+    /// commands
+    ///     .spawn(LowPasNode::default())
+    ///     .chain_node(BandPassNode::default())
+    ///     .chain_node(VolumeNode::default());
+    /// # }
+    /// ```
     fn chain_node<B: Bundle>(self, node: B) -> ConnectCommands<'a> {
         self.chain_node_with(node, DEFAULT_CONNECTION)
     }
 
+    /// Chain a node with a manually-specified connection.
+    ///
+    /// This connection will be made between the previous node's output
+    /// and this node's input.
     fn chain_node_with<B: Bundle>(self, node: B, ports: &[(u32, u32)]) -> ConnectCommands<'a>;
 
-    // Get the head of this chain.
+    /// Get the head of this chain.
+    ///
+    /// This makes it easy to recover the input of a chain of nodes.
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::prelude::*;
+    /// fn head(mut commands: Commands, server: Res<AssetServer>) {
+    ///     let chain_input = commands
+    ///         .spawn(LowPasNode::default())
+    ///         .chain_node(BandPassNode::default())
+    ///         .chain_node(VolumeNode::default())
+    ///         .head();
+    ///
+    ///     commands
+    ///         .spawn(SamplePlayer::new(server.load("my_sample.wav")))
+    ///         .effect(SendNode::new(Volume::UNITY_GAIN, chain_input));
+    /// }
+    /// ```
     fn head(&self) -> Entity;
 
-    // Get the tail of this chain.
-    //
-    // This will be produce the same value
-    // as [`ConnectCommands::head`] if only one
-    // node has been spawned.
+    /// Get the tail of this chain.
+    ///
+    /// This will be produce the same value
+    /// as [`ConnectCommands::head`] if only one
+    /// node has been spawned.
     fn tail(&self) -> Entity;
 }
 

@@ -18,6 +18,7 @@ use firewheel::{
 pub struct BandPassNode {
     /// The cutoff frequency in hertz.
     pub frequency: Timeline<f32>,
+    /// The filter's *quality*, or bandwidth.
     pub q: Timeline<f32>,
 }
 
@@ -48,8 +49,12 @@ impl BandPassNode {
     }
 }
 
+/// [`BandPassNode`]'s configuration.
 #[derive(Debug, Component, Clone)]
 pub struct BandPassConfig {
+    /// The number of channels to process.
+    ///
+    /// This node's input and output channel count will always match.
     pub channels: NonZeroChannelCount,
 }
 

@@ -4,12 +4,12 @@ use crate::node::ParamFollower;
 use crate::prelude::{AudioContext, Connect, DefaultPool, FirewheelNode, PoolLabel, VolumeNode};
 use crate::sample::{PlaybackSettings, QueuedSample, Sample, SamplePlayer};
 use crate::{node::Events, SeedlingSystems};
-use auto::AutoPoolRegistry;
 use bevy_app::{Last, Plugin, PostUpdate};
 use bevy_asset::Assets;
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
 use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
 use bevy_utils::HashSet;
+use dynamic::DynamicPoolRegistry;
 use firewheel::{
     event::{NodeEventType, SequenceCommand},
     node::AudioNode,
@@ -19,7 +19,7 @@ use firewheel::{
 use std::any::TypeId;
 use std::sync::Arc;
 
-pub mod auto;
+pub mod dynamic;
 pub mod label;
 
 use label::PoolLabelContainer;
@@ -28,7 +28,7 @@ pub(crate) struct SamplePoolPlugin;
 
 impl Plugin for SamplePoolPlugin {
     fn build(&self, app: &mut bevy_app::App) {
-        app.init_resource::<auto::Registries>()
+        app.init_resource::<dynamic::Registries>()
             .add_systems(
                 Last,
                 (
@@ -40,7 +40,7 @@ impl Plugin for SamplePoolPlugin {
                         .after(SeedlingSystems::Queue),
                 ),
             )
-            .add_systems(PostUpdate, auto::update_auto_pools);
+            .add_systems(PostUpdate, dynamic::update_auto_pools);
     }
 }
 
@@ -53,6 +53,12 @@ pub struct Pool<L, C> {
 }
 
 impl<L: PoolLabel + Component + Clone> Pool<L, ()> {
+    /// Construct a new [`Pool`].
+    ///
+    /// A [`Pool`] can be spawned with the same label multiple times,
+    /// but the old samplers will be overwritten by the new ones and
+    /// all samples queued in the pool will be stopped.
+    // TODO: actually make this ^ happen
     pub fn new(label: L, size: usize) -> Self {
         Self {
             label,
@@ -62,9 +68,12 @@ impl<L: PoolLabel + Component + Clone> Pool<L, ()> {
     }
 }
 
+/// Extend tuples.
 pub trait ExtendTuple {
+    /// The extended tuple.
     type Output<T>;
 
+    /// Extend a tuple with `T`.
     fn extend<T>(self, value: T) -> Self::Output<T>;
 }
 
@@ -86,6 +95,25 @@ macro_rules! extend {
 bevy_utils::all_tuples!(extend, 0, 15, A);
 
 impl<L, C: ExtendTuple> Pool<L, C> {
+    /// Insert an effect into the pool.
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::prelude::*;
+    /// fn spawn_pool(mut commands: Commands) {
+    ///     #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+    ///     struct SpatialEffectsPool;
+    ///
+    ///     Pool::new(SpatialEffectsPool, 4)
+    ///         .effect(SpatialBasicNode::default())
+    ///         .effect(LowPassNode::new(500.0))
+    ///         .spawn(&mut commands);
+    /// }
+    /// ```
+    ///
+    /// In the above example, we connect a spatial and low-pass node in series with each sampler
+    /// node in the pool. Effects are arranged in the order of `effect` calls, so the output of
+    /// the spatial node is connected to the input of the low-pass node.
     pub fn effect<T: AudioNode + Clone + Component>(self, node: T) -> Pool<L, C::Output<T>> {
         Pool {
             label: self.label,
@@ -173,6 +201,7 @@ macro_rules! spawn_impl {
         impl<L: PoolLabel + Component + Clone, $($ty),*> Pool<L, ($($ty,)*)>
         where $($ty: Component + Clone),*
         {
+            /// Spawn the pool, including all its nodes and connections.
             #[allow(non_snake_case)]
             pub fn spawn<'a>(
                 self,
@@ -371,7 +400,7 @@ fn assign_work<T: Component>(
                 continue;
             };
 
-            params.set_sample(asset.get(), settings.volume, settings.mode);
+            params.set_sample(asset.get(), settings.volume, settings.repeat_mode);
             let event = sampler_state.sync_params_event(&params, true);
             events.push(event);
 
@@ -421,7 +450,7 @@ fn assign_default(
         (
             With<SamplePlayer>,
             Without<PoolLabelContainer>,
-            Without<AutoPoolRegistry>,
+            Without<DynamicPoolRegistry>,
         ),
     >,
     mut commands: Commands,
@@ -455,6 +484,7 @@ fn assign_default(
 pub struct PoolDespawn<T>(T);
 
 impl<T: PoolLabel + Component> PoolDespawn<T> {
+    /// Construct a new [`PoolDespawn`] with the provided label.
     pub fn new(label: T) -> Self {
         Self(label)
     }

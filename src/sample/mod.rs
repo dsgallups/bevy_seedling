@@ -81,7 +81,7 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// ## Applying effects
 ///
 /// Effects can be applied directly to a sample entity with the
-/// [`AutoPool`][crate::prelude::AutoPool] trait.
+/// [`DynamicPool`][crate::prelude::DynamicPool] trait.
 ///
 /// ```
 /// # use bevy::prelude::*;
@@ -94,13 +94,13 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// }
 /// ```
 ///
-/// This connects spatial and low-pass nodes in series with the sample player.
+/// This connects a spatial and low-pass node in series with the sample player in the above example.
 /// Effects are arranged in the order of `effect` calls, so the output of the spatial node is
 /// connected to the input of the low-pass node.
 ///
 /// When you apply effects to a sample player, the node components are added directly to the
 /// entity as [*remote nodes*][crate::node::ExcludeNode]. That allows you to modulate node
-/// parameters directly on your sampler entity.
+/// parameters directly on your sample player entity.
 ///
 /// ```
 /// # use bevy::prelude::*;
@@ -113,7 +113,7 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// ```
 ///
 /// Applying effects directly to a [`SamplePlayer`] is simple, but it
-/// [has some drawbacks][crate::prelude::AutoPool#drawbacks], so you may
+/// [has some tradeoffs][crate::pool::dynamic#when-to-use-dynamic-pools], so you may
 /// find yourself gravitating towards manually defined [`Pool`][crate::prelude::Pool]s as your
 /// requirements grow.
 #[derive(Debug, Component, Clone)]
@@ -143,8 +143,11 @@ impl SamplePlayer {
 /// Controls the playback settings of a [`SamplePlayer`].
 #[derive(Debug, Component, Clone, Default)]
 pub struct PlaybackSettings {
-    pub mode: RepeatMode,
+    /// Sets the sample's [`RepeatMode`].
+    pub repeat_mode: RepeatMode,
+    /// Determines this sample's behavior on playback completion.
     pub on_complete: OnComplete,
+    /// Sets the volume of the sample.
     pub volume: Volume,
 }
 
@@ -152,7 +155,7 @@ impl PlaybackSettings {
     /// Play the audio source once, despawning
     /// this entity when complete or interrupted.
     pub const ONCE: Self = Self {
-        mode: RepeatMode::PlayOnce,
+        repeat_mode: RepeatMode::PlayOnce,
         volume: Volume::Linear(1.0),
         on_complete: OnComplete::Despawn,
     };
@@ -160,9 +163,23 @@ impl PlaybackSettings {
     /// Repeatedly loop the audio source until
     /// this entity is despawned.
     pub const LOOP: Self = Self {
-        mode: RepeatMode::RepeatEndlessly,
+        repeat_mode: RepeatMode::RepeatEndlessly,
         volume: Volume::Linear(1.0),
         on_complete: OnComplete::Despawn,
+    };
+
+    /// Play the sample once, removing the audio-related components on completion.
+    pub const REMOVE: Self = Self {
+        repeat_mode: RepeatMode::PlayOnce,
+        volume: Volume::Linear(1.0),
+        on_complete: OnComplete::Remove,
+    };
+
+    /// Play the sample once, preserving the components and entity on completion.
+    pub const PRESERVE: Self = Self {
+        repeat_mode: RepeatMode::PlayOnce,
+        volume: Volume::Linear(1.0),
+        on_complete: OnComplete::Preserve,
     };
 }
 
@@ -173,7 +190,7 @@ pub enum OnComplete {
     Preserve,
     /// Remove the [`SamplePlayer`] and related components.
     Remove,
-    /// Depsawn the [`SamplePlayer`] entity.
+    /// Despawn the [`SamplePlayer`] entity.
     #[default]
     Despawn,
 }
