@@ -67,7 +67,16 @@
 //! # use bevy::prelude::*;
 //! # use bevy_seedling::prelude::*;
 //! fn play_sound(mut commands: Commands, server: Res<AssetServer>) {
+//!     // Play a sound!
 //!     commands.spawn(SamplePlayer::new(server.load("my_sample.wav")));
+//!
+//!     // Play a sound... with effects :O
+//!     commands
+//!         .spawn((
+//!             SamplePlayer::new(server.load("my_ambience.wav")),
+//!             PlaybackSettings::LOOP,
+//!         ))
+//!         .effect(LowPasNode::new(500.0));
 //! }
 //! ```
 //!
