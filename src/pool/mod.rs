@@ -128,6 +128,7 @@ pub(crate) struct RegisteredPools(HashSet<TypeId>);
 
 /// Spawn an effects chain, connecting all nodes and
 /// returning the root sampler node.
+#[cfg_attr(debug_assertions, track_caller)]
 fn spawn_chain<L: Component + Clone>(
     bus: Entity,
     defaults: &SamplePoolDefaults,
@@ -158,6 +159,7 @@ fn spawn_chain<L: Component + Clone>(
 }
 
 /// Spawn a sampler pool with an initial size.
+#[cfg_attr(debug_assertions, track_caller)]
 pub(crate) fn spawn_pool<'a, L: PoolLabel + Component + Clone>(
     label: L,
     size: core::ops::RangeInclusive<usize>,
@@ -192,9 +194,12 @@ pub(crate) fn spawn_pool<'a, L: PoolLabel + Component + Clone>(
         ))
         .id();
 
-    let nodes: Vec<_> = (0..*size.start())
-        .map(|_| spawn_chain(bus, &defaults, label.clone(), commands))
-        .collect();
+    let mut nodes = Vec::new();
+    nodes.reserve_exact(*size.start());
+    for _ in 0..*size.start() {
+        let node = spawn_chain(bus, &defaults, label.clone(), commands);
+        nodes.push(node);
+    }
 
     let mut bus = commands.entity(bus);
     bus.insert((SamplerNodes(nodes), defaults));
@@ -209,6 +214,7 @@ macro_rules! spawn_impl {
         {
             /// Spawn the pool, including all its nodes and connections.
             #[allow(non_snake_case)]
+            #[cfg_attr(debug_assertions, track_caller)]
             pub fn spawn<'a>(
                 self,
                 commands: &'a mut Commands,
