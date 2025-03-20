@@ -16,9 +16,7 @@ use os::InnerContext;
 
 mod seedling_context;
 
-pub use seedling_context::{
-    ErasedNode, SeedlingContext, SeedlingContextError, SeedlingContextWrapper,
-};
+pub use seedling_context::{SeedlingContext, SeedlingContextError, SeedlingContextWrapper};
 
 /// A thread-safe wrapper around the underlying Firewheel audio context.
 ///

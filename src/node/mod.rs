@@ -21,7 +21,7 @@ use label::NodeLabels;
 ///
 /// This is used as the baseline for diffing.
 #[derive(Component)]
-struct Baseline<T>(pub(crate) T);
+pub(crate) struct Baseline<T>(pub(crate) T);
 
 /// An event queue.
 ///

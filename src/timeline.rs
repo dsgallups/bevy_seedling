@@ -56,8 +56,10 @@ impl<T> Timeline<T> {
     }
 }
 
+/// [`Timeline`]'s error type.
 #[derive(Debug, Clone)]
 pub enum TimelineError {
+    /// A value overlaps another range in the timeline.
     OverlappingRanges,
 }
 
@@ -150,21 +152,31 @@ impl<T: Ease + Clone> Timeline<T> {
     }
 }
 
+/// A single timeline event.
 #[derive(Debug, Clone)]
 pub enum TimelineEvent<T> {
+    /// An immediate event, which also clears the timeline buffer.
     Immediate(T),
+    /// A deferred event.
     Deferred {
+        /// The target value.
         value: T,
+        /// The time at which this value should be written.
         time: ClockSeconds,
     },
+    /// An animation curve.
     Curve {
+        /// The easing curve for this animation.
         curve: EasingCurve<T>,
+        /// The animation's start time.
         start: ClockSeconds,
+        /// The animation's end time.
         end: ClockSeconds,
     },
 }
 
 impl<T> TimelineEvent<T> {
+    /// This event's start time, if any.
     pub fn start_time(&self) -> Option<ClockSeconds> {
         match self {
             Self::Deferred { time, .. } => Some(*time),
@@ -173,6 +185,10 @@ impl<T> TimelineEvent<T> {
         }
     }
 
+    /// This event's end time, if any.
+    ///
+    /// A [`TimelineEvent::Deferred`] variant will
+    /// provide its start time.
     pub fn end_time(&self) -> Option<ClockSeconds> {
         match self {
             Self::Deferred { time, .. } => Some(*time),
@@ -181,6 +197,7 @@ impl<T> TimelineEvent<T> {
         }
     }
 
+    /// Returns true if the event contains the given time.
     pub fn contains(&self, time: ClockSeconds) -> bool {
         match self {
             Self::Deferred { time: t, .. } => *t == time,
@@ -189,6 +206,7 @@ impl<T> TimelineEvent<T> {
         }
     }
 
+    /// Returns true if the event fully overlaps the given time.
     pub fn overlaps(&self, time: ClockSeconds) -> bool {
         match self {
             Self::Curve { start, end, .. } => time > *start && time < *end,
@@ -198,6 +216,7 @@ impl<T> TimelineEvent<T> {
 }
 
 impl<T: Ease + Clone> TimelineEvent<T> {
+    /// Calculates the value at `time`.
     pub fn get(&self, time: ClockSeconds) -> T {
         match self {
             Self::Immediate(i) => i.clone(),
@@ -211,6 +230,7 @@ impl<T: Ease + Clone> TimelineEvent<T> {
         }
     }
 
+    /// Gets the starting value.
     pub fn start_value(&self) -> T {
         match self {
             Self::Immediate(i) => i.clone(),
@@ -219,6 +239,10 @@ impl<T: Ease + Clone> TimelineEvent<T> {
         }
     }
 
+    /// Gets the ending value.
+    ///
+    /// [`TimelineEvent::Immediate`] and [`TimelineEvent::Deferred`]
+    /// will simply return their single value.
     pub fn end_value(&self) -> T {
         match self {
             Self::Immediate(i) => i.clone(),

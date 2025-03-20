@@ -12,62 +12,9 @@ use firewheel::{
 };
 use smallvec::SmallVec;
 
-pub struct ErasedNode(Box<dyn DynAudioNode>);
-
-impl core::fmt::Debug for ErasedNode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ErasedNode").finish_non_exhaustive()
-    }
-}
-
-impl ErasedNode {
-    pub fn new<T: AudioNode + 'static>(node: T, configuration: Option<T::Configuration>) -> Self {
-        Self(Box::new(Constructor::new(node, configuration)))
-    }
-}
-
-impl DynAudioNode for ErasedNode {
-    fn update(&mut self, cx: firewheel::node::UpdateContext) {
-        self.0.update(cx)
-    }
-
-    fn construct_processor(
-        &self,
-        cx: firewheel::node::ConstructProcessorContext,
-    ) -> Box<dyn firewheel::node::AudioNodeProcessor> {
-        self.0.construct_processor(cx)
-    }
-
-    fn info(&self) -> firewheel::node::AudioNodeInfo {
-        self.0.info()
-    }
-}
-
-#[derive(Debug)]
-pub struct SeedlingContextError(Box<dyn Error + Send + Sync + 'static>);
-
-impl core::fmt::Display for SeedlingContextError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl SeedlingContextError {
-    fn map_update<E: core::error::Error + Send + Sync + 'static>(
-        error: UpdateError<E>,
-    ) -> UpdateError<Self> {
-        match error {
-            UpdateError::GraphCompileError(e) => UpdateError::GraphCompileError(e),
-            UpdateError::MsgChannelFull => UpdateError::MsgChannelFull,
-            UpdateError::StreamStoppedUnexpectedly(e) => {
-                UpdateError::StreamStoppedUnexpectedly(e.map(|e| Self(Box::new(e))))
-            }
-        }
-    }
-}
-
-impl core::error::Error for SeedlingContextError {}
-
+/// A type-erased Firewheel context.
+///
+/// This allows applications to treat all backends identically after construction.
 pub struct SeedlingContext(Box<dyn SeedlingContextWrapper>);
 
 impl core::fmt::Debug for SeedlingContext {
@@ -91,6 +38,7 @@ impl core::ops::DerefMut for SeedlingContext {
 }
 
 impl SeedlingContext {
+    /// Construct a new [`SeedlingContext`].
     pub fn new<B>(context: FirewheelCtx<B>) -> Self
     where
         B: AudioBackend + 'static,
@@ -99,6 +47,7 @@ impl SeedlingContext {
         Self(Box::new(context))
     }
 
+    /// Add a new Firewheel node.
     pub fn add_node<T: AudioNode + 'static>(
         &mut self,
         node: T,
@@ -107,16 +56,28 @@ impl SeedlingContext {
         self.add_node_dyn(ErasedNode::new(node, configuration))
     }
 
+    /// Retrieve a node's state.
+    ///
+    /// If the given ID has no state or the expected type doesn't match,
+    /// this returns `None`.
     pub fn node_state<T: 'static>(&self, node_id: NodeID) -> Option<&T> {
         self.node_state_dyn(node_id).and_then(|s| s.downcast_ref())
     }
 
+    /// Retrieve a mutable reference to a node's state.
+    ///
+    /// If the given ID has no state or the expected type doesn't match,
+    /// this returns `None`.
     pub fn node_state_mut<T: 'static>(&mut self, node_id: NodeID) -> Option<&mut T> {
         self.node_state_mut_dyn(node_id)
             .and_then(|s| s.downcast_mut())
     }
 }
 
+/// A dyn-compatible trait wrapper for a Firewheel context.
+///
+/// This allows applications to treat all backend identically
+/// after construction.
 pub trait SeedlingContextWrapper {
     /// Get a list of the available audio input devices.
     fn available_input_devices(&self) -> Vec<DeviceInfo>;
@@ -480,3 +441,62 @@ where
         <FirewheelCtx<B>>::queue_event_for(self, node_id, event)
     }
 }
+
+/// A fully type-erased audio node.
+pub struct ErasedNode(Box<dyn DynAudioNode>);
+
+impl core::fmt::Debug for ErasedNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ErasedNode").finish_non_exhaustive()
+    }
+}
+
+impl ErasedNode {
+    /// Construct a new [`ErasedNode`].
+    pub fn new<T: AudioNode + 'static>(node: T, configuration: Option<T::Configuration>) -> Self {
+        Self(Box::new(Constructor::new(node, configuration)))
+    }
+}
+
+impl DynAudioNode for ErasedNode {
+    fn update(&mut self, cx: firewheel::node::UpdateContext) {
+        self.0.update(cx)
+    }
+
+    fn construct_processor(
+        &self,
+        cx: firewheel::node::ConstructProcessorContext,
+    ) -> Box<dyn firewheel::node::AudioNodeProcessor> {
+        self.0.construct_processor(cx)
+    }
+
+    fn info(&self) -> firewheel::node::AudioNodeInfo {
+        self.0.info()
+    }
+}
+
+/// A type-erased context error.
+#[derive(Debug)]
+pub struct SeedlingContextError(Box<dyn Error + Send + Sync + 'static>);
+
+impl core::fmt::Display for SeedlingContextError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl SeedlingContextError {
+    fn map_update<E: core::error::Error + Send + Sync + 'static>(
+        error: UpdateError<E>,
+    ) -> UpdateError<Self> {
+        match error {
+            UpdateError::GraphCompileError(e) => UpdateError::GraphCompileError(e),
+            UpdateError::MsgChannelFull => UpdateError::MsgChannelFull,
+            UpdateError::StreamStoppedUnexpectedly(e) => {
+                UpdateError::StreamStoppedUnexpectedly(e.map(|e| Self(Box::new(e))))
+            }
+        }
+    }
+}
+
+impl core::error::Error for SeedlingContextError {}

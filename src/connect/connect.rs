@@ -1,96 +1,10 @@
-//! Node connection utilities.
-
-use crate::node::label::InternedNodeLabel;
-use crate::prelude::{AudioContext, FirewheelNode, MainBus, NodeLabel};
+use super::{ConnectTarget, NodeMap, PendingConnection, DEFAULT_CONNECTION};
+use crate::{context::AudioContext, node::FirewheelNode};
 use bevy_ecs::prelude::*;
 use bevy_log::error_once;
-use bevy_utils::HashMap;
-use firewheel::node::NodeID;
 
 #[cfg(debug_assertions)]
 use core::panic::Location;
-
-/// A target for node connections.
-///
-/// [`ConnectTarget`] can be constructed manually or
-/// used as a part of the [`Connect`] API.
-#[derive(Debug, Clone)]
-pub enum ConnectTarget {
-    /// A global label such as [`MainBus`].
-    Label(InternedNodeLabel),
-    /// An audio entity.
-    Entity(Entity),
-    /// An existing node from the audio graph.
-    Node(NodeID),
-}
-
-/// A pending connection between two nodes.
-#[derive(Debug, Clone)]
-pub struct PendingConnection {
-    /// The connection target.
-    ///
-    /// The connection will be made between this entity's output
-    /// and the target's input.
-    pub target: ConnectTarget,
-
-    /// An optional [`firewheel`] port mapping.
-    ///
-    /// The first tuple element represents the source output,
-    /// and the second tuple element represents the sink input.
-    ///
-    /// If an explicit port mapping is not provided,
-    /// `[(0, 0), (1, 1)]` is used.
-    pub ports: Option<Vec<(u32, u32)>>,
-
-    #[cfg(debug_assertions)]
-    pub(crate) defined_at: &'static Location<'static>,
-}
-
-impl PendingConnection {
-    #[cfg_attr(debug_assertions, track_caller)]
-    pub fn new(target: impl Into<ConnectTarget>, ports: Option<Vec<(u32, u32)>>) -> Self {
-        Self {
-            target: target.into(),
-            ports,
-            #[cfg(debug_assertions)]
-            defined_at: Location::caller(),
-        }
-    }
-
-    fn new_with_location(
-        target: impl Into<ConnectTarget>,
-        ports: Option<Vec<(u32, u32)>>,
-        #[cfg(debug_assertions)] location: &'static Location<'static>,
-    ) -> Self {
-        Self {
-            target: target.into(),
-            ports,
-            #[cfg(debug_assertions)]
-            defined_at: location,
-        }
-    }
-}
-
-impl From<NodeID> for ConnectTarget {
-    fn from(value: NodeID) -> Self {
-        Self::Node(value)
-    }
-}
-
-impl<T> From<T> for ConnectTarget
-where
-    T: NodeLabel,
-{
-    fn from(value: T) -> Self {
-        Self::Label(value.intern())
-    }
-}
-
-impl From<Entity> for ConnectTarget {
-    fn from(value: Entity) -> Self {
-        Self::Entity(value)
-    }
-}
 
 /// The set of all [`PendingConnection`]s for an entity.
 ///
@@ -173,6 +87,7 @@ pub trait Connect<'a>: Sized {
     ///     .chain_node(VolumeNode::default());
     /// # }
     /// ```
+    #[cfg_attr(debug_assertions, track_caller)]
     fn chain_node<B: Bundle>(self, node: B) -> ConnectCommands<'a> {
         self.chain_node_with(node, DEFAULT_CONNECTION)
     }
@@ -181,6 +96,7 @@ pub trait Connect<'a>: Sized {
     ///
     /// This connection will be made between the previous node's output
     /// and this node's input.
+    #[cfg_attr(debug_assertions, track_caller)]
     fn chain_node_with<B: Bundle>(self, node: B, ports: &[(u32, u32)]) -> ConnectCommands<'a>;
 
     /// Get the head of this chain.
@@ -207,13 +123,12 @@ pub trait Connect<'a>: Sized {
     /// Get the tail of this chain.
     ///
     /// This will be produce the same value
-    /// as [`ConnectCommands::head`] if only one
+    /// as [`Connect::head`] if only one
     /// node has been spawned.
     fn tail(&self) -> Entity;
 }
 
 impl<'a> Connect<'a> for EntityCommands<'a> {
-    #[cfg_attr(debug_assertions, track_caller)]
     fn connect_with(
         mut self,
         target: impl Into<ConnectTarget>,
@@ -341,13 +256,11 @@ impl<'a> ConnectCommands<'a> {
 
 impl core::fmt::Debug for ConnectCommands<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ChainConnection")
+        f.debug_struct("ConnectCommands")
             .field("entity", &self.head)
             .finish_non_exhaustive()
     }
 }
-
-const DEFAULT_CONNECTION: &[(u32, u32)] = &[(0, 0), (1, 1)];
 
 // this has turned into a bit of a monster
 pub(crate) fn process_connections(
@@ -367,7 +280,7 @@ pub(crate) fn process_connections(
                         let Some(entity) = node_map.get(&label) else {
                             #[cfg(debug_assertions)]
                             {
-                                let location = connection.defined_at;
+                                let location = connection.origin;
                                 error_once!("failed to connect to node label `{label:?}` at {location}: no associated Firewheel node found");
                             }
                             #[cfg(not(debug_assertions))]
@@ -395,8 +308,8 @@ pub(crate) fn process_connections(
                     Err(_) => {
                         #[cfg(debug_assertions)]
                         {
-                            let location = connection.defined_at;
-                            error_once!("failed to connect to entity `{target_entity:?}` at {location}: no associated Firewheel node found");
+                            let location = connection.origin;
+                            error_once!("failed to connect to entity `{target_entity:?}` at {location}: no Firewheel node found");
                         }
                         #[cfg(not(debug_assertions))]
                         error_once!("failed to connect to entity `{target_entity:?}`: no Firewheel node found");
@@ -415,42 +328,11 @@ pub(crate) fn process_connections(
     });
 }
 
-/// A map that associates [`NodeLabel`]s with audio
-/// graph nodes.
-///
-/// This will be automatically synchronized for
-/// entities with both a [`FirewheelNode`] and [`NodeLabel`]
-/// component.
-#[derive(Default, Debug, Resource)]
-pub struct NodeMap(HashMap<InternedNodeLabel, Entity>);
-
-impl core::ops::Deref for NodeMap {
-    type Target = HashMap<InternedNodeLabel, Entity>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for NodeMap {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-/// Automatically connect nodes without manual connections to the main bus.
-pub(crate) fn auto_connect(
-    nodes: Query<Entity, (With<FirewheelNode>, Without<PendingConnections>)>,
-    mut commands: Commands,
-) {
-    for node in nodes.iter() {
-        commands.entity(node).connect(MainBus);
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use crate::{profiling::ProfilingBackend, SeedlingPlugin};
+    use crate::{
+        context::AudioContext, prelude::MainBus, profiling::ProfilingBackend, SeedlingPlugin,
+    };
 
     use super::*;
     use bevy::prelude::*;

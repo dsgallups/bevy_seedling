@@ -2,21 +2,12 @@
 
 use firewheel::{
     backend::{AudioBackend, DeviceInfo},
-    clock::ClockSeconds,
     processor::FirewheelProcessor,
-    FirewheelCtx, StreamInfo,
+    StreamInfo,
 };
 use std::num::NonZeroU32;
 
-/// A simple audio context that facilitates
-/// focused benchmarking.
-#[allow(missing_debug_implementations)]
-pub struct ProfilingContext {
-    pub context: FirewheelCtx<ProfilingBackend>,
-    time: ClockSeconds,
-    sample_rate_recip: f64,
-}
-
+/// A very simple backend for testing and profiling.
 pub struct ProfilingBackend {
     processor: Option<FirewheelProcessor>,
 }
@@ -30,6 +21,7 @@ impl core::fmt::Debug for ProfilingBackend {
 }
 
 #[derive(Debug)]
+#[allow(missing_docs)]
 pub struct ProfilingError;
 
 impl core::fmt::Display for ProfilingError {
@@ -79,37 +71,5 @@ impl AudioBackend for ProfilingBackend {
 
     fn poll_status(&mut self) -> Result<(), Self::StreamError> {
         Ok(())
-    }
-}
-
-impl ProfilingContext {
-    pub fn new(sample_rate: u32) -> Self {
-        let mut context = FirewheelCtx::new(Default::default());
-
-        context.start_stream(()).unwrap();
-
-        Self {
-            context,
-            time: ClockSeconds(0.),
-            sample_rate_recip: 1. / sample_rate as f64,
-        }
-    }
-
-    #[expect(unused)]
-    pub fn process_interleaved(&mut self, input: &[f32], output: &mut [f32]) {
-        let samples = output.len() / 2;
-
-        todo!("we need some way of processing the underlying graph directly");
-        // self.context.process_interleaved(
-        //     input,
-        //     output,
-        //     2,
-        //     2,
-        //     samples,
-        //     self.time,
-        //     StreamStatus::empty(),
-        // );
-
-        self.time.0 += self.sample_rate_recip * samples as f64;
     }
 }

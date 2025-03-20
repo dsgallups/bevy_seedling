@@ -159,14 +159,6 @@ a few advantages:
 | ------ | --------------- |
 | 0.15   | 0.3             |
 
-## Future work
-
-- Graph operations
-
-  Audio entities currently support only a subset of the underlying
-  Firewheel graph API. In particular, the ability to disconnect nodes will
-  need to be added.
-
 #### License
 
 <sup>

@@ -43,8 +43,10 @@ impl LowPassNode {
     }
 }
 
+/// [`LowPassNode`]'s configuration.
 #[derive(Debug, Component, Clone)]
 pub struct LowPassConfig {
+    /// The number of input and output channels.
     pub channels: NonZeroChannelCount,
 }
 

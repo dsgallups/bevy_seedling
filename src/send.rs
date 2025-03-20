@@ -1,7 +1,8 @@
 //! One-pole, low-pass filter.
 
 use crate::{
-    connect::{ConnectTarget, PendingConnection, PendingConnections},
+    connect::{ConnectTarget, Disconnect, PendingConnection, PendingConnections},
+    node::ParamFollower,
     prelude::MainBus,
 };
 use bevy_ecs::prelude::*;
@@ -19,7 +20,9 @@ use firewheel::{
 /// A one-pole, low-pass filter.
 #[derive(Diff, Patch, Debug, Clone, Component)]
 pub struct SendNode {
-    /// The cutoff frequency in hertz.
+    /// The send volume.
+    ///
+    /// This affects only the send outputs.
     pub send_volume: Volume,
 
     #[diff(skip)]
@@ -66,17 +69,59 @@ pub(crate) fn connect_sends(
     }
 }
 
+// TODO: make this more reactive
+pub(crate) fn update_remote_sends(
+    remote: Query<&SendNode>,
+    mut sends: Query<
+        (
+            Entity,
+            &SendNode,
+            &ParamFollower,
+            &SendConfig,
+            &mut PendingConnections,
+        ),
+        Changed<SendNode>,
+    >,
+    mut commands: Commands,
+) {
+    for (send_entity, send_params, follower, send_config, mut pending) in sends.iter_mut() {
+        let Ok(remote_node) = remote.get(follower.0) else {
+            continue;
+        };
+
+        let old_target = send_params.target.clone();
+        let new_target = remote_node.target.clone();
+
+        if old_target == new_target {
+            continue;
+        }
+
+        let total_channels = send_config.channels.get().get();
+        let ports = (0..total_channels)
+            .map(|c| (c + total_channels, c))
+            .collect();
+
+        let pending_connection = PendingConnection::new(new_target, Some(ports));
+        pending.push(pending_connection);
+
+        commands.entity(send_entity).disconnect(old_target);
+    }
+}
+
 impl SendNode {
-    pub fn new(send_volume: Volume, target: impl Into<ConnectTarget>) -> Self {
+    /// Construct a new [`Send`] that taps out to `send_target`.
+    pub fn new(send_volume: Volume, send_target: impl Into<ConnectTarget>) -> Self {
         Self {
             send_volume,
-            target: target.into(),
+            target: send_target.into(),
         }
     }
 }
 
+/// [`SendNode`]'s configuration.
 #[derive(Debug, Component, Clone)]
 pub struct SendConfig {
+    /// The number of channels in this node's direct output and send output.
     pub channels: NonZeroChannelCount,
 }
 

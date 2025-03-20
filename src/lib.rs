@@ -100,6 +100,7 @@
 //!
 //! ### Audio routing
 //! - [Routing overview][crate::connect]
+//! - [Sends][prelude::SendNode]
 //! - [Routing targets][prelude::ConnectTarget]
 //!
 //! ### Custom nodes
@@ -225,7 +226,7 @@ pub mod prelude {
     //! All `bevy_seedlings`'s important types and traits.
 
     pub use crate::bpf::BandPassNode;
-    pub use crate::connect::{Connect, ConnectTarget};
+    pub use crate::connect::{Connect, ConnectTarget, Disconnect};
     pub use crate::context::AudioContext;
     pub use crate::lpf::LowPassNode;
     pub use crate::node::{
@@ -384,12 +385,17 @@ where
                     spatial::update_2d_emitters,
                     spatial::update_3d_emitters,
                     send::connect_sends,
+                    send::update_remote_sends,
                 )
                     .before(SeedlingSystems::Acquire),
                 connect::auto_connect
                     .before(SeedlingSystems::Connect)
                     .after(SeedlingSystems::Acquire),
-                connect::process_connections.in_set(SeedlingSystems::Connect),
+                (
+                    connect::process_connections,
+                    connect::process_disconnections,
+                )
+                    .in_set(SeedlingSystems::Connect),
                 (
                     node::process_removals,
                     node::flush_events,
