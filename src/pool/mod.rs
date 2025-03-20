@@ -220,13 +220,15 @@ macro_rules! spawn_impl {
                 } = self;
 
                 let defaults = {
-                    let ($($ty,)*) = effects_chain.clone();
+                    let ($($ty,)*) = effects_chain;
+                    #[allow(unused_mut)]
                     let mut defaults = SamplePoolDefaults::default();
 
-                    #[allow(unused)]
-                    defaults.push(move |commands: &mut EntityCommands| {
-                        $(commands.entry::<$ty>().or_insert($ty.clone());)*
-                    });
+                    $(
+                        defaults.push(move |commands: &mut EntityCommands| {
+                            commands.entry::<$ty>().or_insert($ty.clone());
+                        });
+                    )*
 
                     defaults
                 };

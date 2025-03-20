@@ -46,10 +46,7 @@ pub(crate) fn connect_sends(
             .map(|c| (c + total_channels, c))
             .collect();
 
-        let pending_connection = PendingConnection {
-            target,
-            ports: Some(ports),
-        };
+        let pending_connection = PendingConnection::new(target, Some(ports));
 
         match pending {
             Some(mut pending) => {
@@ -62,10 +59,7 @@ pub(crate) fn connect_sends(
 
                 let default_ports = (0..total_channels).map(|c| (c, c)).collect();
 
-                pending.push(PendingConnection {
-                    target: MainBus.into(),
-                    ports: Some(default_ports),
-                });
+                pending.push(PendingConnection::new(MainBus, Some(default_ports)));
                 commands.entity(entity).insert(pending);
             }
         }

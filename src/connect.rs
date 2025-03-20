@@ -3,9 +3,12 @@
 use crate::node::label::InternedNodeLabel;
 use crate::prelude::{AudioContext, FirewheelNode, MainBus, NodeLabel};
 use bevy_ecs::prelude::*;
-use bevy_log::{error_once, warn_once};
+use bevy_log::error_once;
 use bevy_utils::HashMap;
 use firewheel::node::NodeID;
+
+#[cfg(debug_assertions)]
+use core::panic::Location;
 
 /// A target for node connections.
 ///
@@ -29,6 +32,7 @@ pub struct PendingConnection {
     /// The connection will be made between this entity's output
     /// and the target's input.
     pub target: ConnectTarget,
+
     /// An optional [`firewheel`] port mapping.
     ///
     /// The first tuple element represents the source output,
@@ -37,6 +41,34 @@ pub struct PendingConnection {
     /// If an explicit port mapping is not provided,
     /// `[(0, 0), (1, 1)]` is used.
     pub ports: Option<Vec<(u32, u32)>>,
+
+    #[cfg(debug_assertions)]
+    pub(crate) defined_at: &'static Location<'static>,
+}
+
+impl PendingConnection {
+    #[cfg_attr(debug_assertions, track_caller)]
+    pub fn new(target: impl Into<ConnectTarget>, ports: Option<Vec<(u32, u32)>>) -> Self {
+        Self {
+            target: target.into(),
+            ports,
+            #[cfg(debug_assertions)]
+            defined_at: Location::caller(),
+        }
+    }
+
+    fn new_with_location(
+        target: impl Into<ConnectTarget>,
+        ports: Option<Vec<(u32, u32)>>,
+        #[cfg(debug_assertions)] location: &'static Location<'static>,
+    ) -> Self {
+        Self {
+            target: target.into(),
+            ports,
+            #[cfg(debug_assertions)]
+            defined_at: location,
+        }
+    }
 }
 
 impl From<NodeID> for ConnectTarget {
@@ -111,6 +143,7 @@ pub trait Connect<'a>: Sized {
     ///
     /// The connection is deferred, finalizing in the
     /// [`SeedlingSystems::Connect`][crate::SeedlingSystems::Connect] set.
+    #[cfg_attr(debug_assertions, track_caller)]
     fn connect(self, target: impl Into<ConnectTarget>) -> ConnectCommands<'a> {
         self.connect_with(target, DEFAULT_CONNECTION)
     }
@@ -119,6 +152,7 @@ pub trait Connect<'a>: Sized {
     ///
     /// The connection is deferred, finalizing in the
     /// [`SeedlingSystems::Connect`][crate::SeedlingSystems::Connect] set.
+    #[cfg_attr(debug_assertions, track_caller)]
     fn connect_with(
         self,
         target: impl Into<ConnectTarget>,
@@ -179,6 +213,7 @@ pub trait Connect<'a>: Sized {
 }
 
 impl<'a> Connect<'a> for EntityCommands<'a> {
+    #[cfg_attr(debug_assertions, track_caller)]
     fn connect_with(
         mut self,
         target: impl Into<ConnectTarget>,
@@ -187,13 +222,18 @@ impl<'a> Connect<'a> for EntityCommands<'a> {
         let target = target.into();
         let ports = ports.to_vec();
 
+        #[cfg(debug_assertions)]
+        let location = Location::caller();
+
         self.entry::<PendingConnections>()
             .or_default()
             .and_modify(|mut pending| {
-                pending.push(PendingConnection {
+                pending.push(PendingConnection::new_with_location(
                     target,
-                    ports: Some(ports),
-                });
+                    Some(ports),
+                    #[cfg(debug_assertions)]
+                    location,
+                ));
             });
 
         ConnectCommands::new(self)
@@ -218,6 +258,7 @@ impl<'a> Connect<'a> for EntityCommands<'a> {
 }
 
 impl<'a> Connect<'a> for ConnectCommands<'a> {
+    #[cfg_attr(debug_assertions, track_caller)]
     fn connect_with(
         mut self,
         target: impl Into<ConnectTarget>,
@@ -231,14 +272,19 @@ impl<'a> Connect<'a> for ConnectCommands<'a> {
         let target = target.into();
         let ports = ports.to_vec();
 
+        #[cfg(debug_assertions)]
+        let location = Location::caller();
+
         commands
             .entry::<PendingConnections>()
             .or_default()
             .and_modify(|mut pending| {
-                pending.push(PendingConnection {
+                pending.push(PendingConnection::new_with_location(
                     target,
-                    ports: Some(ports),
-                });
+                    Some(ports),
+                    #[cfg(debug_assertions)]
+                    location,
+                ));
             });
 
         self
@@ -319,7 +365,13 @@ pub(crate) fn process_connections(
                     ConnectTarget::Entity(entity) => entity,
                     ConnectTarget::Label(label) => {
                         let Some(entity) = node_map.get(&label) else {
-                            warn_once!("tried to connect audio node to label with no node");
+                            #[cfg(debug_assertions)]
+                            {
+                                let location = connection.defined_at;
+                                error_once!("failed to connect to node label `{label:?}` at {location}: no associated Firewheel node found");
+                            }
+                            #[cfg(not(debug_assertions))]
+                            error_once!("failed to connect to node label `{label:?}`: no associated Firewheel node found");
 
                             // We may need to wait for the intended label to be spawned.
                             return true;
@@ -341,7 +393,14 @@ pub(crate) fn process_connections(
                 let target = match targets.get(target_entity) {
                     Ok(t) => t,
                     Err(_) => {
-                        error_once!("failed to fetch audio node entity {target_entity:?}");
+                        #[cfg(debug_assertions)]
+                        {
+                            let location = connection.defined_at;
+                            error_once!("failed to connect to entity `{target_entity:?}` at {location}: no associated Firewheel node found");
+                        }
+                        #[cfg(not(debug_assertions))]
+                        error_once!("failed to connect to entity `{target_entity:?}`: no Firewheel node found");
+
                         return false;
                     }
                 };
