@@ -137,7 +137,7 @@
 //! `bevy_seedling` does quite a bit with Firewheel nodes under the hood.
 //! To enable this machinery, you need to [register your audio node][prelude::RegisterNode].
 //!
-//! ```skip
+//! ```ignore
 //! use bevy::prelude::*;
 //! use bevy_seedling::prelude::*;
 //!
@@ -147,6 +147,28 @@
 //!         .register_node::<MyCustomNode>();
 //! }
 //! ```
+//!
+//! ### Why are my custom nodes crunchy (underrunning)?
+//!
+//! If you compile your project without optimizations, your custom audio nodes
+//! may perform poorly enough to frequently underrun. You can compensate for
+//! this by moving your audio code into a separate crate, selectively applying
+//! optimizations.
+//!
+//! ```toml
+//! // Cargo.toml
+//! [dependencies]
+//! my_custom_nodes = { path = "my_custom_nodes" }
+//!
+//! [profile.dev.package.my_custom_nodes]
+//! opt-level = 3
+//! ```
+//!
+//! ### Why am I getting "`PlaybackSettings`, `Volume`, etc. is ambiguous" errors?
+//!
+//! `bevy_seedling` re-uses some type names from `bevy_audio`. To avoid ambiguous imports,
+//! you'll need to [prevent `bevy_audio` from being compiled][self#getting-started].
+//! You may need to update your `Cargo.lock` file to ensure `bevy_audio` isn't included.
 //!
 //! ## Architecture
 //!
@@ -287,7 +309,7 @@ pub struct SeedlingPlugin<B: AudioBackend = CpalBackend> {
     /// and will grow depending on demand to the
     /// maximum size. Setting this field to `None`
     /// will disabled dynamic pools entirely.
-    pub dynamic_pool_range: Option<core::ops::Range<usize>>,
+    pub dynamic_pool_range: Option<core::ops::RangeInclusive<usize>>,
 }
 
 impl Default for SeedlingPlugin<CpalBackend> {
@@ -306,7 +328,7 @@ where
             config: Default::default(),
             stream_config: Default::default(),
             default_pool_size: Some(24),
-            dynamic_pool_range: Some(4..16),
+            dynamic_pool_range: Some(4..=16),
         }
     }
 }

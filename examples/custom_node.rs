@@ -109,7 +109,7 @@ impl AudioNodeProcessor for VolumeProcessor {
         proc_info: &ProcInfo,
         events: NodeEventList,
     ) -> ProcessStatus {
-        // This will iterator over this node's events,
+        // This will iterate over this node's events,
         // applying any patches sent from the ECS in a
         // realtime-safe way.
         self.params.patch_list(events);
@@ -121,11 +121,11 @@ impl AudioNodeProcessor for VolumeProcessor {
             return ProcessStatus::ClearAllOutputs;
         }
 
-        // We only need to calculate this once.
+        // We only need to calculate this once per audio block.
         let gain = self.params.volume.amp();
 
         // Here we simply iterate over all samples in every channel and
-        // apply out volume. Firewheel's nodes typically utilize more
+        // apply our volume. Firewheel's nodes typically utilize more
         // optimization, but a node written like this should work well
         // in most scenarios.
         for (input, output) in inputs.iter().zip(outputs.iter_mut()) {

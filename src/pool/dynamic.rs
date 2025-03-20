@@ -1,8 +1,7 @@
 //! Dynamic sampler pools.
 //!
-//! *Sampler pools*] are `bevy_seedling`'s primary mechanism for playing
-//! multiple sounds at once. [`DynamicPool`] allows you to create these pools on-the-fly with
-//! ease.
+//! *Sampler pools* are `bevy_seedling`'s primary mechanism for playing
+//! multiple sounds at once. [`DynamicPool`] allows you to create these pools on-the-fly.
 //!
 //! [`DynamicPool`] is implemented on [`EntityCommands`], so you'll typically apply effects
 //! to an entity after spawning it.
@@ -49,7 +48,7 @@
 //! Note that when no effects are applied, your samples will be queued in the
 //! [`DefaultPool`][crate::prelude::DefaultPool], not a dynamic pool.
 
-use super::{SamplePoolDefaults, SamplePoolNode};
+use super::SamplePoolDefaults;
 use crate::sample::{QueuedSample, SamplePlayer};
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
 use bevy_utils::HashMap;
@@ -84,7 +83,7 @@ pub(super) struct Registries(HashMap<DynamicPoolRegistry, RegistryEntry>);
 ///
 /// When the inner value is `None`, no new dynamic pools will be created.
 #[derive(Resource, Clone, Debug)]
-pub struct DynamicPoolRange(pub Option<core::ops::Range<usize>>);
+pub struct DynamicPoolRange(pub Option<core::ops::RangeInclusive<usize>>);
 
 #[derive(PoolLabel, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(super) struct DynamicPoolId(usize);
@@ -116,28 +115,10 @@ pub(super) fn update_auto_pools(
             None => {
                 let label = DynamicPoolId(registries.0.len());
 
-                let chain_spawner = {
-                    let defaults = defaults.clone();
-
-                    move |commands: &mut Commands| {
-                        defaults
-                            .0
-                            .iter()
-                            .map(|d| {
-                                let mut commands = commands.spawn((label, SamplePoolNode));
-                                d(&mut commands);
-
-                                commands.id()
-                            })
-                            .collect()
-                    }
-                };
-
                 // create the pool
                 super::spawn_pool(
                     label,
-                    dynamic_range.start,
-                    chain_spawner,
+                    dynamic_range.clone(),
                     defaults.clone(),
                     &mut commands,
                 );
@@ -255,5 +236,155 @@ impl<'a> DynamicPool<'a> for DynamicPoolCommands<'a> {
         self.commands.insert(node);
 
         self
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{
+        pool::{NodeRank, SamplerNodes},
+        prelude::*,
+        profiling::ProfilingBackend,
+    };
+    use bevy::prelude::*;
+    use bevy_ecs::system::RunSystemOnce;
+
+    fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
+        let mut app = App::new();
+
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            SeedlingPlugin::<ProfilingBackend> {
+                default_pool_size: None,
+                dynamic_pool_range: Some(4..=16),
+                ..SeedlingPlugin::<ProfilingBackend>::new()
+            },
+            HierarchyPlugin,
+        ))
+        .add_systems(Startup, startup);
+
+        app.finish();
+        app.cleanup();
+        app.update();
+
+        app
+    }
+
+    fn run<F: IntoSystem<(), O, M>, O, M>(app: &mut App, system: F) -> O {
+        let world = app.world_mut();
+        world.run_system_once(system).unwrap()
+    }
+
+    #[test]
+    fn test_dynamic_pool_shape() {
+        let mut app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
+            commands
+                .spawn(SamplePlayer::new(server.load("caw.ogg")))
+                .effect(LowPassNode::default());
+        });
+
+        fn verify_one_pool(pool_root: Query<(&DynamicPoolId, &SamplerNodes), With<NodeRank>>) {
+            let (id, children) = pool_root.single();
+
+            assert_eq!(id.0, 0);
+            assert_eq!(children.len(), 4);
+        }
+
+        run(&mut app, verify_one_pool);
+
+        // We'll spawn another player to ensure we don't create a new pool.
+        run(
+            &mut app,
+            |mut commands: Commands, server: Res<AssetServer>| {
+                commands
+                    .spawn(SamplePlayer::new(server.load("caw.ogg")))
+                    .effect(LowPassNode::default());
+            },
+        );
+
+        app.update();
+
+        run(&mut app, verify_one_pool);
+
+        // Now we'll spawn a different pool.
+        run(
+            &mut app,
+            |mut commands: Commands, server: Res<AssetServer>| {
+                commands
+                    .spawn(SamplePlayer::new(server.load("caw.ogg")))
+                    .effect(BandPassNode::default());
+            },
+        );
+
+        app.update();
+
+        run(
+            &mut app,
+            |pool_root: Query<(&DynamicPoolId, &SamplerNodes), With<NodeRank>>| {
+                assert_eq!(pool_root.iter().count(), 2);
+            },
+        );
+    }
+
+    #[test]
+    fn test_dynamic_pool_bounds() {
+        let mut app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
+            commands
+                .spawn(SamplePlayer::new(server.load("caw.ogg")))
+                .effect(LowPassNode::default());
+        });
+
+        run(
+            &mut app,
+            |pool_root: Query<(&DynamicPoolId, &SamplerNodes), With<NodeRank>>| {
+                let (_, children) = pool_root.single();
+
+                assert_eq!(children.len(), 4);
+            },
+        );
+
+        run(
+            &mut app,
+            |mut commands: Commands, server: Res<AssetServer>| {
+                for _ in 0..5 {
+                    commands
+                        .spawn(SamplePlayer::new(server.load("caw.ogg")))
+                        .effect(LowPassNode::default());
+                }
+            },
+        );
+
+        app.update();
+
+        // wait until the samples are loaded
+        loop {
+            if run(
+                &mut app,
+                |players: Query<&SamplePlayer>, server: Res<AssetServer>| {
+                    let first = players.iter().next().unwrap();
+
+                    server.is_loaded(&first.0)
+                },
+            ) {
+                break;
+            }
+
+            app.update();
+        }
+
+        app.update();
+
+        run(
+            &mut app,
+            |pool_root: Query<(&DynamicPoolId, &SamplerNodes), With<NodeRank>>,
+             players: Query<&SamplePlayer>| {
+                assert_eq!(players.iter().count(), 6);
+
+                let (_, children) = pool_root.single();
+                assert!(children.len() > 4);
+            },
+        );
     }
 }

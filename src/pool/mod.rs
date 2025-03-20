@@ -7,7 +7,7 @@ use crate::{node::Events, SeedlingSystems};
 use bevy_app::{Last, Plugin, PostUpdate};
 use bevy_asset::Assets;
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
-use bevy_hierarchy::{BuildChildren, DespawnRecursiveExt};
+use bevy_hierarchy::DespawnRecursiveExt;
 use bevy_utils::HashSet;
 use dynamic::DynamicPoolRegistry;
 use firewheel::{
@@ -126,14 +126,41 @@ impl<L, C: ExtendTuple> Pool<L, C> {
 #[derive(Resource, Default)]
 pub(crate) struct RegisteredPools(HashSet<TypeId>);
 
-pub(crate) fn spawn_pool<
-    'a,
-    L: PoolLabel + Component + Clone,
-    C: Fn(&mut Commands) -> Vec<Entity>,
->(
+/// Spawn an effects chain, connecting all nodes and
+/// returning the root sampler node.
+fn spawn_chain<L: Component + Clone>(
+    bus: Entity,
+    defaults: &SamplePoolDefaults,
     label: L,
-    size: usize,
-    chain_spawner: C,
+    commands: &mut Commands,
+) -> Entity {
+    let chain = defaults.spawn_chain(label.clone(), commands);
+
+    let source = commands
+        .spawn((
+            SamplerNode::default(),
+            SamplePoolNode,
+            label,
+            EffectsChain(chain.clone()),
+        ))
+        .id();
+
+    let mut chain = chain;
+    chain.push(bus);
+
+    commands.entity(source).connect(chain[0]);
+
+    for pair in chain.windows(2) {
+        commands.entity(pair[0]).connect(pair[1]);
+    }
+
+    source
+}
+
+/// Spawn a sampler pool with an initial size.
+pub(crate) fn spawn_pool<'a, L: PoolLabel + Component + Clone>(
+    label: L,
+    size: core::ops::RangeInclusive<usize>,
     defaults: SamplePoolDefaults,
     commands: &'a mut Commands,
 ) -> EntityCommands<'a> {
@@ -151,6 +178,8 @@ pub(crate) fn spawn_pool<
         }
     });
 
+    commands.despawn_pool(label.clone());
+
     let bus = commands
         .spawn((
             VolumeNode {
@@ -158,40 +187,17 @@ pub(crate) fn spawn_pool<
             },
             SamplePoolNode,
             label.clone(),
-            defaults,
             NodeRank::default(),
+            PoolRange(size.clone()),
         ))
         .id();
 
-    let nodes: Vec<_> = (0..size)
-        .map(|_| {
-            let chain = chain_spawner(commands);
-
-            let source = commands
-                .spawn((
-                    SamplerNode::default(),
-                    SamplePoolNode,
-                    label.clone(),
-                    EffectsChain(chain.clone()),
-                ))
-                .add_children(&chain)
-                .id();
-
-            let mut chain = chain;
-            chain.push(bus);
-
-            commands.entity(source).connect(chain[0]);
-
-            for pair in chain.windows(2) {
-                commands.entity(pair[0]).connect(pair[1]);
-            }
-
-            source
-        })
+    let nodes: Vec<_> = (0..*size.start())
+        .map(|_| spawn_chain(bus, &defaults, label.clone(), commands))
         .collect();
 
     let mut bus = commands.entity(bus);
-    bus.add_children(&nodes);
+    bus.insert((SamplerNodes(nodes), defaults));
 
     bus
 }
@@ -225,21 +231,7 @@ macro_rules! spawn_impl {
                     defaults
                 };
 
-                #[allow(unused)]
-                let chain_spawner = {
-                    let ($($ty,)*) = effects_chain;
-                    let label = label.clone();
-
-                    move |commands: &mut Commands| vec![$(
-                        commands.spawn((
-                            <$ty as ::core::clone::Clone>::clone(&$ty),
-                            SamplePoolNode,
-                            label.clone()
-                        )).id(),
-                    )*]
-                };
-
-                spawn_pool(label, size, chain_spawner, defaults, commands)
+                spawn_pool(label, size..=size, defaults, commands)
             }
         }
     };
@@ -247,11 +239,51 @@ macro_rules! spawn_impl {
 
 bevy_utils::all_tuples!(spawn_impl, 0, 15, A);
 
+/// A collection of each sampler node in the pool.
+#[derive(Component)]
+#[component(on_remove = on_remove_sampler_nodes)]
+struct SamplerNodes(Vec<Entity>);
+
+impl core::ops::Deref for SamplerNodes {
+    type Target = [Entity];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+fn on_remove_sampler_nodes(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
+    let Some(mut nodes) = world.get_mut::<SamplerNodes>(entity) else {
+        return;
+    };
+
+    let nodes = core::mem::take(&mut nodes.0);
+
+    let mut commands = world.commands();
+    for node in nodes {
+        commands.entity(node).try_despawn();
+    }
+}
+
 #[derive(Component)]
 struct SamplePoolNode;
 
 #[derive(Component)]
+#[component(on_remove = on_remove_effects_chain)]
 struct EffectsChain(Vec<Entity>);
+
+fn on_remove_effects_chain(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
+    let Some(mut nodes) = world.get_mut::<EffectsChain>(entity) else {
+        return;
+    };
+
+    let nodes = core::mem::take(&mut nodes.0);
+
+    let mut commands = world.commands();
+    for node in nodes {
+        commands.entity(node).try_despawn();
+    }
+}
 
 /// A collections of functions that insert a node's default value into an entity.
 #[derive(Component, Default, Clone)]
@@ -264,8 +296,29 @@ impl SamplePoolDefaults {
     {
         self.0.push(Arc::new(f));
     }
+
+    pub fn spawn_chain<L: Component + Clone>(
+        &self,
+        label: L,
+        commands: &mut Commands,
+    ) -> Vec<Entity> {
+        self.0
+            .iter()
+            .map(|d| {
+                let mut commands = commands.spawn((label.clone(), SamplePoolNode));
+                d(&mut commands);
+
+                commands.id()
+            })
+            .collect()
+    }
 }
 
+/// Sets the range for the number of pool sampler nodes.
+#[derive(Component, Clone, Debug)]
+pub struct PoolRange(pub core::ops::RangeInclusive<usize>);
+
+/// Sampler node ranking for playback.
 #[derive(Default, Component)]
 struct NodeRank(Vec<(Entity, u64)>);
 
@@ -347,7 +400,7 @@ fn remove_finished(
 
 /// Scan through the set of pending sample players
 /// and assign work to the most appropriate sampler node.
-fn assign_work<T: Component>(
+fn assign_work<T: Component + Clone>(
     mut nodes: Query<
         (
             Entity,
@@ -367,7 +420,15 @@ fn assign_work<T: Component>(
         ),
         (With<QueuedSample>, With<T>),
     >,
-    mut rank: Query<(&mut NodeRank, &SamplePoolDefaults, &PoolLabelContainer), With<T>>,
+    mut pools: Query<(
+        Entity,
+        &mut NodeRank,
+        &SamplePoolDefaults,
+        &T,
+        &PoolLabelContainer,
+        &PoolRange,
+        &mut SamplerNodes,
+    )>,
     assets: Res<Assets<Sample>>,
     mut commands: Commands,
     mut context: ResMut<AudioContext>,
@@ -378,15 +439,29 @@ fn assign_work<T: Component>(
                 continue;
             };
 
-            let Some((mut rank, defaults)) = rank
-                .iter_mut()
-                .find_map(|(rank, defaults, l)| (l == label).then_some((rank, defaults)))
+            let Some((pool_entity, mut rank, defaults, pool_label, _, pool_range, mut pool_nodes)) =
+                pools.iter_mut().find(|pool| pool.4 == label)
             else {
                 continue;
             };
 
             // get the best candidate
             let Some((node_entity, _)) = rank.0.first() else {
+                // Try to grow the pool if it's reached max capacity.
+                // TODO: find a decent way to do this eagerly.
+                let current_size = pool_nodes.len();
+                let max_size = *pool_range.0.end();
+
+                if current_size < max_size {
+                    let new_size = (current_size * 2).min(max_size);
+
+                    for _ in 0..new_size - current_size {
+                        let new_sampler =
+                            spawn_chain(pool_entity, defaults, pool_label.clone(), &mut commands);
+                        pool_nodes.0.push(new_sampler);
+                    }
+                }
+
                 continue;
             };
 
@@ -524,5 +599,97 @@ pub trait PoolCommands {
 impl PoolCommands for Commands<'_, '_> {
     fn despawn_pool<T: PoolLabel + Component>(&mut self, label: T) {
         self.queue(PoolDespawn::new(label));
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{pool::NodeRank, prelude::*, profiling::ProfilingBackend};
+    use bevy::prelude::*;
+    use bevy_ecs::system::RunSystemOnce;
+
+    fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
+        let mut app = App::new();
+
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            SeedlingPlugin::<ProfilingBackend> {
+                default_pool_size: None,
+                ..SeedlingPlugin::<ProfilingBackend>::new()
+            },
+            HierarchyPlugin,
+        ))
+        .add_systems(Startup, startup);
+
+        app.finish();
+        app.cleanup();
+        app.update();
+
+        app
+    }
+
+    fn run<F: IntoSystem<(), O, M>, O, M>(app: &mut App, system: F) -> O {
+        let world = app.world_mut();
+        world.run_system_once(system).unwrap()
+    }
+
+    #[test]
+    fn test_remove_static() {
+        #[derive(PoolLabel, Clone, Debug, PartialEq, Eq, Hash)]
+        struct TestPool;
+
+        let mut app = prepare_app(|mut commands: Commands| {
+            Pool::new(TestPool, 4)
+                .effect(LowPassNode::default())
+                .spawn(&mut commands);
+        });
+
+        run(&mut app, |pool_nodes: Query<&FirewheelNode>| {
+            // 2 * 4 (sampler and low pass nodes) + 1 (pool volume) + 1 (global volume)
+            assert_eq!(pool_nodes.iter().count(), 10);
+        });
+
+        run(&mut app, |mut commands: Commands| {
+            commands.despawn_pool(TestPool);
+        });
+
+        app.update();
+
+        run(&mut app, |pool_nodes: Query<&FirewheelNode>| {
+            // 1 (global volume)
+            assert_eq!(pool_nodes.iter().count(), 1);
+        });
+    }
+
+    #[test]
+    fn test_remove_dynamic() {
+        let mut app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
+            commands
+                .spawn(SamplePlayer::new(server.load("caw.ogg")))
+                .effect(LowPassNode::default());
+        });
+
+        run(&mut app, |pool_nodes: Query<&FirewheelNode>| {
+            // 2 * 4 (sampler and low pass nodes) + 1 (pool volume) + 1 (global volume)
+            assert_eq!(pool_nodes.iter().count(), 10);
+        });
+
+        run(
+            &mut app,
+            |q: Query<Entity, With<NodeRank>>, mut commands: Commands| {
+                let pool = q.single();
+
+                commands.entity(pool).despawn();
+            },
+        );
+
+        app.update();
+
+        run(&mut app, |pool_nodes: Query<&FirewheelNode>| {
+            // 1 (global volume)
+            assert_eq!(pool_nodes.iter().count(), 1);
+        });
     }
 }
