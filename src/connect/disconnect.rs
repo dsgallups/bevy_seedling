@@ -34,7 +34,7 @@ pub trait Disconnect<'a>: Sized {
     /// # use bevy::prelude::*;
     /// # use bevy_seedling::prelude::*;
     /// # fn system(mut commands: Commands) {
-    /// // Connect a node to the MainBus.
+    /// // For any node connection...
     /// let node = commands
     ///     .spawn(VolumeNode {
     ///         volume: Volume::Linear(0.5),
@@ -42,12 +42,8 @@ pub trait Disconnect<'a>: Sized {
     ///     .connect(MainBus)
     ///     .head();
     ///
-    /// // Connect another node to the one we just spawned.
-    /// commands
-    ///     .spawn(VolumeNode {
-    ///         volume: Volume::Linear(0.25),
-    ///     })
-    ///     .connect(node);
+    /// // We can process a corresponding disconnection.
+    /// commands.entity(node).disconnect(MainBus);
     /// # }
     /// ```
     ///
