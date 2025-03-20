@@ -99,9 +99,10 @@
 //! - [Static pools][prelude::Pool]
 //!
 //! ### Audio routing
-//! - [Routing overview][crate::connect]
-//! - [Sends][prelude::SendNode]
+//! - [Connecting nodes][crate::connect::Connect]
+//! - [Disconnecting nodes][crate::connect::Disconnect]
 //! - [Routing targets][prelude::ConnectTarget]
+//! - [Sends][prelude::SendNode]
 //!
 //! ### Custom nodes
 //! - [Creating and registering nodes][prelude::RegisterNode]

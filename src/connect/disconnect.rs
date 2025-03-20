@@ -49,7 +49,7 @@ pub trait Disconnect<'a>: Sized {
     ///
     /// By default, this provides a port disconnection of `[(0, 0), (1, 1)]`,
     /// which represents a simple stereo disconnection.
-    /// To provide a specific port mapping, use [`connect_with`][Disconnect::disconnect_with].
+    /// To provide a specific port mapping, use [`disconnect_with`][Disconnect::disconnect_with].
     ///
     /// The disconnection is deferred, finalizing in the
     /// [`SeedlingSystems::Connect`][crate::SeedlingSystems::Connect] set.
