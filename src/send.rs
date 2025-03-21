@@ -1,7 +1,7 @@
 //! One-pole, low-pass filter.
 
 use crate::{
-    connect::{ConnectTarget, Disconnect, PendingConnection, PendingConnections},
+    edge::{Disconnect, EdgeTarget, PendingConnections, PendingEdge},
     node::ParamFollower,
     prelude::MainBus,
 };
@@ -26,7 +26,7 @@ pub struct SendNode {
     pub send_volume: Volume,
 
     #[diff(skip)]
-    pub(crate) target: ConnectTarget,
+    pub(crate) target: EdgeTarget,
 }
 
 pub(crate) fn connect_sends(
@@ -49,7 +49,7 @@ pub(crate) fn connect_sends(
             .map(|c| (c + total_channels, c))
             .collect();
 
-        let pending_connection = PendingConnection::new(target, Some(ports));
+        let pending_connection = PendingEdge::new(target, Some(ports));
 
         match pending {
             Some(mut pending) => {
@@ -62,7 +62,7 @@ pub(crate) fn connect_sends(
 
                 let default_ports = (0..total_channels).map(|c| (c, c)).collect();
 
-                pending.push(PendingConnection::new(MainBus, Some(default_ports)));
+                pending.push(PendingEdge::new(MainBus, Some(default_ports)));
                 commands.entity(entity).insert(pending);
             }
         }
@@ -101,7 +101,7 @@ pub(crate) fn update_remote_sends(
             .map(|c| (c + total_channels, c))
             .collect();
 
-        let pending_connection = PendingConnection::new(new_target, Some(ports));
+        let pending_connection = PendingEdge::new(new_target, Some(ports));
         pending.push(pending_connection);
 
         commands.entity(send_entity).disconnect(old_target);
@@ -110,7 +110,7 @@ pub(crate) fn update_remote_sends(
 
 impl SendNode {
     /// Construct a new [`Send`] that taps out to `send_target`.
-    pub fn new(send_volume: Volume, send_target: impl Into<ConnectTarget>) -> Self {
+    pub fn new(send_volume: Volume, send_target: impl Into<EdgeTarget>) -> Self {
         Self {
             send_volume,
             target: send_target.into(),

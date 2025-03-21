@@ -98,10 +98,10 @@
 //! - [Dynamic pools][pool::dynamic]
 //! - [Static pools][prelude::Pool]
 //!
-//! ### Audio routing
-//! - [Connecting nodes][crate::connect::Connect]
-//! - [Disconnecting nodes][crate::connect::Disconnect]
-//! - [Routing targets][prelude::ConnectTarget]
+//! ### Routing audio
+//! - [Connecting nodes][crate::edge::Connect]
+//! - [Disconnecting nodes][crate::edge::Disconnect]
+//! - [Routing targets][prelude::EdgeTarget]
 //! - [Sends][prelude::SendNode]
 //!
 //! ### Custom nodes
@@ -209,8 +209,8 @@ use bevy_ecs::prelude::*;
 use firewheel::{backend::AudioBackend, CpalBackend};
 
 pub mod bpf;
-pub mod connect;
 pub mod context;
+pub mod edge;
 pub mod fixed_vec;
 pub mod lpf;
 pub mod node;
@@ -227,8 +227,8 @@ pub mod prelude {
     //! All `bevy_seedlings`'s important types and traits.
 
     pub use crate::bpf::BandPassNode;
-    pub use crate::connect::{Connect, ConnectTarget, Disconnect};
     pub use crate::context::AudioContext;
+    pub use crate::edge::{Connect, Disconnect, EdgeTarget};
     pub use crate::lpf::LowPassNode;
     pub use crate::node::{
         label::{MainBus, NodeLabel},
@@ -349,7 +349,7 @@ where
         let sample_pool_size = self.default_pool_size;
 
         app.insert_resource(context)
-            .init_resource::<connect::NodeMap>()
+            .init_resource::<edge::NodeMap>()
             .init_resource::<node::PendingRemovals>()
             .insert_resource(pool::dynamic::DynamicPoolRange(
                 self.dynamic_pool_range.clone(),
@@ -389,13 +389,10 @@ where
                     send::update_remote_sends,
                 )
                     .before(SeedlingSystems::Acquire),
-                connect::auto_connect
+                edge::auto_connect
                     .before(SeedlingSystems::Connect)
                     .after(SeedlingSystems::Acquire),
-                (
-                    connect::process_connections,
-                    connect::process_disconnections,
-                )
+                (edge::process_connections, edge::process_disconnections)
                     .in_set(SeedlingSystems::Connect),
                 (
                     node::process_removals,

@@ -6,7 +6,7 @@
 //!
 //! Any node that doesn't provide an explicit connection when spawned
 //! will be automatically connected to [MainBus].
-use crate::connect::NodeMap;
+use crate::edge::NodeMap;
 use crate::prelude::{AudioContext, Connect};
 use bevy_ecs::{component::ComponentId, intern::Interned, prelude::*, world::DeferredWorld};
 use firewheel::{nodes::volume::VolumeNode, Volume};

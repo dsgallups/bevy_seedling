@@ -56,9 +56,21 @@ use core::marker::PhantomData;
 use firewheel::node::AudioNode;
 use seedling_macros::PoolLabel;
 
-#[derive(Component, Clone, Default, Debug, PartialEq, Eq, Hash)]
+#[derive(Component, Clone, Debug, Eq)]
 pub(crate) struct DynamicPoolRegistry {
     effects: Vec<ComponentId>,
+}
+
+impl PartialEq for DynamicPoolRegistry {
+    fn eq(&self, other: &Self) -> bool {
+        self.effects == other.effects
+    }
+}
+
+impl core::hash::Hash for DynamicPoolRegistry {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.effects.hash(state)
+    }
 }
 
 impl DynamicPoolRegistry {
@@ -210,7 +222,13 @@ impl<'a> DynamicPool<'a> for EntityCommands<'a> {
             }
         });
 
-        self.insert((DynamicPoolRegistry::default(), defaults, node));
+        self.insert((
+            DynamicPoolRegistry {
+                effects: Default::default(),
+            },
+            defaults,
+            node,
+        ));
 
         DynamicPoolCommands { commands: self }
     }

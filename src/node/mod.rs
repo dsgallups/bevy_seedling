@@ -1,6 +1,6 @@
 //! Audio node registration and management.
 
-use crate::connect::NodeMap;
+use crate::edge::NodeMap;
 use crate::pool;
 use crate::{prelude::AudioContext, SeedlingSystems};
 use bevy_app::Last;

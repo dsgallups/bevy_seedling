@@ -18,10 +18,10 @@ pub use disconnect::*;
 
 /// A target for node connections.
 ///
-/// [`ConnectTarget`] can be constructed manually or
+/// [`EdgeTarget`] can be constructed manually or
 /// used as a part of the [`Connect`] and [`Disconnect`] APIs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConnectTarget {
+pub enum EdgeTarget {
     /// A global label such as [`MainBus`].
     Label(InternedNodeLabel),
     /// An audio entity.
@@ -30,15 +30,15 @@ pub enum ConnectTarget {
     Node(NodeID),
 }
 
-/// A pending connection between two nodes.
+/// A pending edge between two nodes.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct PendingConnection {
-    /// The connection target.
+pub struct PendingEdge {
+    /// The edge target.
     ///
     /// The connection will be made between this entity's output
     /// and the target's input.
-    pub target: ConnectTarget,
+    pub target: EdgeTarget,
 
     /// An optional [`firewheel`] port mapping.
     ///
@@ -53,10 +53,10 @@ pub struct PendingConnection {
     pub(crate) origin: &'static Location<'static>,
 }
 
-impl PendingConnection {
-    /// Construct a new [`PendingConnection`].
+impl PendingEdge {
+    /// Construct a new [`PendingEdge`].
     #[cfg_attr(debug_assertions, track_caller)]
-    pub fn new(target: impl Into<ConnectTarget>, ports: Option<Vec<(u32, u32)>>) -> Self {
+    pub fn new(target: impl Into<EdgeTarget>, ports: Option<Vec<(u32, u32)>>) -> Self {
         Self {
             target: target.into(),
             ports,
@@ -67,7 +67,7 @@ impl PendingConnection {
 
     /// An internal constructor for passing context through closures.
     fn new_with_location(
-        target: impl Into<ConnectTarget>,
+        target: impl Into<EdgeTarget>,
         ports: Option<Vec<(u32, u32)>>,
         #[cfg(debug_assertions)] location: &'static Location<'static>,
     ) -> Self {
@@ -80,13 +80,13 @@ impl PendingConnection {
     }
 }
 
-impl From<NodeID> for ConnectTarget {
+impl From<NodeID> for EdgeTarget {
     fn from(value: NodeID) -> Self {
         Self::Node(value)
     }
 }
 
-impl<T> From<T> for ConnectTarget
+impl<T> From<T> for EdgeTarget
 where
     T: NodeLabel,
 {
@@ -95,7 +95,7 @@ where
     }
 }
 
-impl From<Entity> for ConnectTarget {
+impl From<Entity> for EdgeTarget {
     fn from(value: Entity) -> Self {
         Self::Entity(value)
     }

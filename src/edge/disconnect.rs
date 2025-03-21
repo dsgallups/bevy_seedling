@@ -1,4 +1,4 @@
-use super::{ConnectTarget, NodeMap, PendingConnection, DEFAULT_CONNECTION};
+use super::{EdgeTarget, NodeMap, PendingEdge, DEFAULT_CONNECTION};
 use crate::{context::AudioContext, node::FirewheelNode};
 use bevy_ecs::prelude::*;
 use bevy_log::error_once;
@@ -12,11 +12,11 @@ use core::panic::Location;
 /// audio graph in the [`SeedlingSystems::Connect`][crate::SeedlingSystems::Connect]
 /// set.
 #[derive(Debug, Default, Component)]
-pub struct PendingDisconnections(Vec<PendingConnection>);
+pub struct PendingDisconnections(Vec<PendingEdge>);
 
 impl PendingDisconnections {
     /// Push a new pending disconnection.
-    pub fn push(&mut self, disconnection: PendingConnection) {
+    pub fn push(&mut self, disconnection: PendingEdge) {
         self.0.push(disconnection)
     }
 }
@@ -54,7 +54,7 @@ pub trait Disconnect<'a>: Sized {
     /// The disconnection is deferred, finalizing in the
     /// [`SeedlingSystems::Connect`][crate::SeedlingSystems::Connect] set.
     #[cfg_attr(debug_assertions, track_caller)]
-    fn disconnect(self, target: impl Into<ConnectTarget>) -> DisconnectCommands<'a> {
+    fn disconnect(self, target: impl Into<EdgeTarget>) -> DisconnectCommands<'a> {
         self.disconnect_with(target, DEFAULT_CONNECTION)
     }
 
@@ -65,7 +65,7 @@ pub trait Disconnect<'a>: Sized {
     #[cfg_attr(debug_assertions, track_caller)]
     fn disconnect_with(
         self,
-        target: impl Into<ConnectTarget>,
+        target: impl Into<EdgeTarget>,
         ports: &[(u32, u32)],
     ) -> DisconnectCommands<'a>;
 }
@@ -73,7 +73,7 @@ pub trait Disconnect<'a>: Sized {
 impl<'a> Disconnect<'a> for EntityCommands<'a> {
     fn disconnect_with(
         mut self,
-        target: impl Into<ConnectTarget>,
+        target: impl Into<EdgeTarget>,
         ports: &[(u32, u32)],
     ) -> DisconnectCommands<'a> {
         let target = target.into();
@@ -85,7 +85,7 @@ impl<'a> Disconnect<'a> for EntityCommands<'a> {
         self.entry::<PendingDisconnections>()
             .or_default()
             .and_modify(|mut pending| {
-                pending.push(PendingConnection::new_with_location(
+                pending.push(PendingEdge::new_with_location(
                     target,
                     Some(ports),
                     #[cfg(debug_assertions)]
@@ -101,7 +101,7 @@ impl<'a> Disconnect<'a> for DisconnectCommands<'a> {
     #[cfg_attr(debug_assertions, track_caller)]
     fn disconnect_with(
         mut self,
-        target: impl Into<ConnectTarget>,
+        target: impl Into<EdgeTarget>,
         ports: &[(u32, u32)],
     ) -> DisconnectCommands<'a> {
         let tail = self.head;
@@ -119,7 +119,7 @@ impl<'a> Disconnect<'a> for DisconnectCommands<'a> {
             .entry::<PendingDisconnections>()
             .or_default()
             .and_modify(|mut pending| {
-                pending.push(PendingConnection::new_with_location(
+                pending.push(PendingEdge::new_with_location(
                     target,
                     Some(ports),
                     #[cfg(debug_assertions)]
@@ -166,8 +166,8 @@ pub(crate) fn process_disconnections(
                 let ports = disconnections.ports.as_deref().unwrap_or(DEFAULT_CONNECTION);
 
                 let target_entity = match disconnections.target {
-                    ConnectTarget::Entity(entity) => entity,
-                    ConnectTarget::Label(label) => {
+                    EdgeTarget::Entity(entity) => entity,
+                    EdgeTarget::Label(label) => {
                         let Some(entity) = node_map.get(&label) else {
                             #[cfg(debug_assertions)]
                             {
@@ -183,7 +183,7 @@ pub(crate) fn process_disconnections(
 
                         *entity
                     }
-                    ConnectTarget::Node(dest_node) => {
+                    EdgeTarget::Node(dest_node) => {
                         // no questions asked, simply disconnect
                         context.disconnect(source_node.0, dest_node, ports);
 
@@ -218,7 +218,7 @@ pub(crate) fn process_disconnections(
 #[cfg(test)]
 mod test {
     use crate::{
-        connect::Connect, context::AudioContext, prelude::MainBus, profiling::ProfilingBackend,
+        context::AudioContext, edge::Connect, prelude::MainBus, profiling::ProfilingBackend,
         SeedlingPlugin,
     };
 
