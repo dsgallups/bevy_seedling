@@ -23,10 +23,33 @@ impl PendingDisconnections {
 
 /// An [`EntityCommands`] extension trait for disconnecting node entities.
 ///
-/// These methods provide only source -> sink disconnections. The source
-/// is the receiver and the sink is the provided target.
+/// Like with [`Connect`][crate::prelude::Connect], this trait accepts
+/// both [`Entity`] and [`NodeLabel`] as edge targets.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn system(mut commands: Commands) {
+/// #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct TargetLabel;
+///
+/// // For some target node...
+/// let target_node = commands.spawn((TargetLabel, VolumeNode::default())).id();
+///
+/// let node_a = commands.spawn(VolumeNode::default()).connect(target_node);
+/// let node_b = commands.spawn(VolumeNode::default()).connect(target_node);
+///
+/// // We can disconnect from it with either a label...
+/// commands.entity(node_a).disconnect(TargetLabel);
+/// // or its `Entity`.
+/// commands.entity(node_b).disconnect(target_node);
+/// ```
+///
+/// Disconnections are processed once per frame, immediately after
+/// connections.
 ///
 /// [`EntityCommands`]: bevy_ecs::prelude::EntityCommands
+/// [`NodeLabel`]: crate::prelude::NodeLabel
 pub trait Disconnect<'a>: Sized {
     /// Queue a disconnection from this entity to the target.
     ///

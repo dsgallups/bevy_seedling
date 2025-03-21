@@ -101,7 +101,6 @@
 //! ### Routing audio
 //! - [Connecting nodes][crate::edge::Connect]
 //! - [Disconnecting nodes][crate::edge::Disconnect]
-//! - [Routing targets][prelude::EdgeTarget]
 //! - [Sends][prelude::SendNode]
 //!
 //! ### Custom nodes
@@ -393,6 +392,7 @@ where
                     .before(SeedlingSystems::Connect)
                     .after(SeedlingSystems::Acquire),
                 (edge::process_connections, edge::process_disconnections)
+                    .chain()
                     .in_set(SeedlingSystems::Connect),
                 (
                     node::process_removals,
