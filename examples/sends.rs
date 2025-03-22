@@ -14,12 +14,21 @@ fn main() {
         .add_systems(
             Startup,
             |server: Res<AssetServer>, mut commands: Commands| {
-                // TODO: use reverb here so you can actually hear the effect
-                let send = commands.spawn(LowPassNode::new(500.0)).id();
+                // Let's consider this our effects send.
+                let send = commands
+                    .spawn(FreeverbNode {
+                        room_size: 0.9,
+                        width: 0.75,
+                        damping: 0.5,
+                    })
+                    .id();
 
+                // We can insert a send anywhere, including directly on a
+                // sample player.
                 commands
                     .spawn(SamplePlayer::new(server.load("caw.ogg")))
-                    .effect(SendNode::new(Volume::Linear(1.0), send));
+                    // Here we send some of the signal to our effects.
+                    .effect(SendNode::new(Volume::Linear(0.75), send));
             },
         )
         .run();

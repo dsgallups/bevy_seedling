@@ -214,15 +214,13 @@ use bevy_asset::AssetApp;
 use bevy_ecs::prelude::*;
 use firewheel::{backend::AudioBackend, CpalBackend};
 
-pub mod bpf;
 pub mod context;
 pub mod edge;
 pub mod fixed_vec;
-pub mod lpf;
 pub mod node;
+pub mod nodes;
 pub mod pool;
 pub mod sample;
-pub mod send;
 pub mod spatial;
 pub mod timeline;
 
@@ -232,13 +230,17 @@ pub mod profiling;
 pub mod prelude {
     //! All `bevy_seedlings`'s important types and traits.
 
-    pub use crate::bpf::BandPassNode;
     pub use crate::context::AudioContext;
     pub use crate::edge::{Connect, Disconnect, EdgeTarget};
-    pub use crate::lpf::LowPassNode;
     pub use crate::node::{
         label::{MainBus, NodeLabel},
         FirewheelNode, RegisterNode,
+    };
+    pub use crate::nodes::{
+        bpf::{BandPassConfig, BandPassNode},
+        freeverb::FreeverbNode,
+        lpf::{LowPassConfig, LowPassNode},
+        send::{SendConfig, SendNode},
     };
     pub use crate::pool::{
         builder::{Pool, PoolBuilder},
@@ -246,7 +248,6 @@ pub mod prelude {
         PoolCommands, PoolDespawn,
     };
     pub use crate::sample::{OnComplete, PlaybackSettings, SamplePlayer};
-    pub use crate::send::SendNode;
     pub use crate::spatial::{SpatialListener2D, SpatialListener3D};
     pub use crate::SeedlingPlugin;
 
@@ -362,9 +363,6 @@ where
             ))
             .init_asset::<sample::Sample>()
             .register_asset_loader(sample::SampleLoader { sample_rate })
-            .register_node::<lpf::LowPassNode>()
-            .register_node::<bpf::BandPassNode>()
-            .register_node::<send::SendNode>()
             .register_node::<VolumeNode>()
             .register_node::<VolumePanNode>()
             .register_node::<SpatialBasicNode>()
@@ -388,12 +386,7 @@ where
         .add_systems(
             Last,
             (
-                (
-                    spatial::update_2d_emitters,
-                    spatial::update_3d_emitters,
-                    send::connect_sends,
-                    send::update_remote_sends,
-                )
+                (spatial::update_2d_emitters, spatial::update_3d_emitters)
                     .before(SeedlingSystems::Acquire),
                 edge::auto_connect
                     .before(SeedlingSystems::Connect)
@@ -422,6 +415,6 @@ where
             ),
         );
 
-        app.add_plugins(pool::SamplePoolPlugin);
+        app.add_plugins((pool::SamplePoolPlugin, nodes::SeedlingNodesPlugin));
     }
 }
