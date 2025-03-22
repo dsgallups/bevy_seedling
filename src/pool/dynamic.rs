@@ -1,6 +1,6 @@
 //! Dynamic sampler pools.
 //!
-//! *Sampler pools* are `bevy_seedling`'s primary mechanism for playing
+//! *Sample pools* are `bevy_seedling`'s primary mechanism for playing
 //! multiple sounds at once. [`PoolBuilder`] allows you to create these pools on-the-fly.
 //!
 //! [`PoolBuilder`] is implemented on [`EntityCommands`], so you'll typically apply effects

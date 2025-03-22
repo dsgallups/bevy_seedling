@@ -17,7 +17,29 @@ use firewheel::{
     Volume,
 };
 
-/// A one-pole, low-pass filter.
+/// A convenient node for routing to sends.
+///
+/// [`SendNode`] has two outputs: one for passing audio along
+/// untouched, and another to route to arbitrary sends.
+/// This is especially useful for dynamic pools, where you
+/// otherwise have no routing control.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// // Assuming this points to some expensive effects chain.
+/// #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct ExpensiveChain;
+///
+/// fn dynamic_send(mut commands: Commands, server: Res<AssetServer>) {
+///     commands
+///         .spawn(SamplePlayer::new(server.load("my_sample.wav")))
+///         .effect(SendNode::new(Volume::UNITY_GAIN, ExpensiveChain));
+/// }
+/// ```
+///
+/// The signal simply passing through [`SendNode`] is untouched, while the
+/// send output has [`SendNode::send_volume`] applied.
 #[derive(Diff, Patch, Debug, Clone, Component)]
 pub struct SendNode {
     /// The send volume.
@@ -160,6 +182,7 @@ impl AudioNode for SendNode {
     }
 }
 
+// TODO: smooth the gain
 struct SendProcessor {
     params: SendNode,
     gain: f32,

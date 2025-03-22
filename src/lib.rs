@@ -97,6 +97,9 @@
 //! ### Sampler pools
 //! - [Dynamic pools][pool::dynamic]
 //! - [Static pools][prelude::Pool]
+//!   - [Constructing pools][prelude::Pool#constructing-pools]
+//!   - [Playing samples in a pool][prelude::Pool#playing-samples-in-a-pool]
+//!   - [Pool architecture][prelude::Pool#architecture]
 //!
 //! ### Routing audio
 //! - [Connecting nodes][crate::edge::Connect]
@@ -104,8 +107,8 @@
 //! - [Sends][prelude::SendNode]
 //!
 //! ### Custom nodes
-//! - [Creating and registering nodes][prelude::RegisterNode]
-//! - [Synchronizing ECS and audio types][prelude::RegisterNode#synchronizing-ecs-and-auto-types]
+//! - [Creating and registering nodes][prelude::RegisterNode#creating-and-registering-nodes]
+//! - [Synchronizing ECS and audio types][prelude::RegisterNode#synchronizing-ecs-and-audio-types]
 //!
 //! ## Feature flags
 //!
@@ -136,16 +139,20 @@
 //! ### Why isn't my custom node doing anything?
 //!
 //! `bevy_seedling` does quite a bit with Firewheel nodes under the hood.
-//! To enable this machinery, you need to [register your audio node][prelude::RegisterNode].
+//! To enable this machinery, you need to
+//! [register your audio node][prelude::RegisterNode#creating-and-registering-nodes].
 //!
 //! ```ignore
 //! use bevy::prelude::*;
 //! use bevy_seedling::prelude::*;
 //!
+//! // Let's assume the relevant traits are implemented.
+//! struct CustomNode;
+//!
 //! fn main() {
 //!     App::new()
 //!         .add_plugins((DefaultPlugins, SeedlingPlugin::default()))
-//!         .register_node::<MyCustomNode>();
+//!         .register_simple_node::<CustomNode>();
 //! }
 //! ```
 //!

@@ -37,6 +37,15 @@ pub use seedling_macros::PoolLabel;
 
 bevy_ecs::define_label!(
     /// A label for differentiating sample pools.
+    ///
+    /// When deriving [`PoolLabel`], you'll need to make sure your type implements
+    /// a few additional traits.
+    ///
+    /// ```
+    /// # use bevy_seedling::prelude::*;
+    /// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+    /// struct MyPool;
+    /// ```
     PoolLabel,
     POOL_LABEL_INTERNER
 );

@@ -47,12 +47,26 @@ impl PendingConnections {
 /// # }
 /// ```
 ///
-/// When the connections are finalized at the end of the frame, the output
+/// In the above example, when the connections are finalized at the end of the frame, the output
 /// of the low-pass node will be connected to the input of the volume node:
 ///
-/// ```bash
-/// LowPassNode -> VolumeNode
+/// ```text
+/// ┌───────┐
+/// │LowPass│
+/// └┬──────┘
+/// ┌▽─────────┐
+/// │VolumeNode│
+/// └┬─────────┘
+/// ┌▽──────┐
+/// │MainBus│
+/// └───────┘
 /// ```
+///
+/// Note how the [`VolumeNode`] is implicitly routed to the [`MainBus`];
+/// this is true for _any_ node that has no specified routing.
+/// This should keep your connections just a little more terse!
+///
+/// [`MainBus`]: crate::prelude::MainBus
 ///
 /// ## Connecting via [`NodeLabel`]
 ///
@@ -130,18 +144,12 @@ pub trait Connect<'a>: Sized {
     /// # fn system(mut commands: Commands) {
     /// // Connect a node to the MainBus.
     /// let node = commands
-    ///     .spawn(VolumeNode {
-    ///         volume: Volume::Linear(0.5),
-    ///     })
+    ///     .spawn(VolumeNode::default())
     ///     .connect(MainBus)
     ///     .head();
     ///
     /// // Connect another node to the one we just spawned.
-    /// commands
-    ///     .spawn(VolumeNode {
-    ///         volume: Volume::Linear(0.25),
-    ///     })
-    ///     .connect(node);
+    /// commands.spawn(VolumeNode::default()).connect(node);
     /// # }
     /// ```
     ///
