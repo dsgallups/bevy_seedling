@@ -64,8 +64,6 @@ fn main() {
 Once you've set it all up, playing sounds is easy!
 
 ```rust
-# use bevy::prelude::*;
-# use bevy_seedling::prelude::*;
 fn play_sound(mut commands: Commands, server: Res<AssetServer>) {
     // Play a sound!
     commands.spawn(SamplePlayer::new(server.load("my_sample.wav")));
