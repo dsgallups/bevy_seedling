@@ -152,6 +152,7 @@ pub trait Connect<'a>: Sized {
     /// The connection is deferred, finalizing in the
     /// [`SeedlingSystems::Connect`][crate::SeedlingSystems::Connect] set.
     #[cfg_attr(debug_assertions, track_caller)]
+    #[inline]
     fn connect(self, target: impl Into<EdgeTarget>) -> ConnectCommands<'a> {
         self.connect_with(target, DEFAULT_CONNECTION)
     }
@@ -182,6 +183,7 @@ pub trait Connect<'a>: Sized {
     /// # }
     /// ```
     #[cfg_attr(debug_assertions, track_caller)]
+    #[inline]
     fn chain_node<B: Bundle>(self, node: B) -> ConnectCommands<'a> {
         self.chain_node_with(node, DEFAULT_CONNECTION)
     }
@@ -212,6 +214,7 @@ pub trait Connect<'a>: Sized {
     ///         .effect(SendNode::new(Volume::UNITY_GAIN, chain_input));
     /// }
     /// ```
+    #[must_use]
     fn head(&self) -> Entity;
 
     /// Get the tail of this chain.
@@ -219,6 +222,7 @@ pub trait Connect<'a>: Sized {
     /// This will be produce the same value
     /// as [`Connect::head`] if only one
     /// node has been spawned.
+    #[must_use]
     fn tail(&self) -> Entity;
 }
 
@@ -257,10 +261,12 @@ impl<'a> Connect<'a> for EntityCommands<'a> {
         new_connection
     }
 
+    #[inline(always)]
     fn head(&self) -> Entity {
         self.id()
     }
 
+    #[inline(always)]
     fn tail(&self) -> Entity {
         self.id()
     }
@@ -308,10 +314,12 @@ impl<'a> Connect<'a> for ConnectCommands<'a> {
         new_connection
     }
 
+    #[inline(always)]
     fn head(&self) -> Entity {
         <Self>::head(self)
     }
 
+    #[inline(always)]
     fn tail(&self) -> Entity {
         <Self>::tail(self)
     }

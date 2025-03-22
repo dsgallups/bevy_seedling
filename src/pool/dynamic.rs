@@ -145,6 +145,9 @@ pub(super) fn update_auto_pools(
     }
 }
 
+// NOTE: I'd prefer not to use this since there could be a decorrelation
+// between this and the defaults, but it's a touch tricky to get at the
+// `ComponentId` without some world access.
 #[derive(Component)]
 #[component(on_insert = Self::on_insert)]
 pub(crate) struct AutoRegister<T: Component>(PhantomData<T>);

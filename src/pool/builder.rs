@@ -62,9 +62,14 @@ pub struct Pool<L> {
 impl<L: PoolLabel + Component + Clone> Pool<L> {
     /// Construct a new [`Pool`].
     ///
+    /// Pools are not spawned and propagated to the audio graph
+    /// until [`Pool::spawn`] is called.
+    ///
     /// A [`Pool`] can be spawned with the same label multiple times,
     /// but the old samplers will be overwritten by the new ones and
     /// all samples queued in the pool will be stopped.
+    #[inline(always)]
+    #[must_use]
     pub fn new(label: L, size: usize) -> Self {
         Self {
             label,
@@ -76,6 +81,7 @@ impl<L: PoolLabel + Component + Clone> Pool<L> {
 
 impl<L: PoolLabel + Component + Clone> Pool<L> {
     /// Spawn the pool, including all its nodes and connections.
+    #[inline(always)]
     pub fn spawn<'a>(self, commands: &'a mut Commands) -> EntityCommands<'a> {
         let Self {
             label,
@@ -90,6 +96,7 @@ impl<L: PoolLabel + Component + Clone> Pool<L> {
 impl<L> PoolBuilder for Pool<L> {
     type Output = Self;
 
+    #[inline(always)]
     fn effect<T: AudioNode + Component + Clone>(mut self, node: T) -> Self::Output {
         self.defaults.push(node);
 
