@@ -65,7 +65,7 @@ pub trait PoolBuilder {
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_seedling::prelude::*;
-/// // Note that you'll need a few addtional traits to support `PoolLabel`
+/// // Note that you'll need a few additional traits to support `PoolLabel`
 /// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
 /// struct SimplePool;
 ///
@@ -93,7 +93,7 @@ pub trait PoolBuilder {
 /// ```
 ///
 /// The `spawn` method returns an [`EntityCommands`], meaning you can easily
-/// route the entire pool to arbitary destinations.
+/// route the entire pool to arbitrary destinations.
 ///
 /// ```
 /// # use bevy::prelude::*;
