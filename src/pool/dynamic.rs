@@ -1,9 +1,9 @@
 //! Dynamic sampler pools.
 //!
 //! *Sampler pools* are `bevy_seedling`'s primary mechanism for playing
-//! multiple sounds at once. [`DynamicPool`] allows you to create these pools on-the-fly.
+//! multiple sounds at once. [`PoolBuilder`] allows you to create these pools on-the-fly.
 //!
-//! [`DynamicPool`] is implemented on [`EntityCommands`], so you'll typically apply effects
+//! [`PoolBuilder`] is implemented on [`EntityCommands`], so you'll typically apply effects
 //! to an entity after spawning it.
 //!
 //! ```
@@ -48,7 +48,7 @@
 //! Note that when no effects are applied, your samples will be queued in the
 //! [`DefaultPool`][crate::prelude::DefaultPool], not a dynamic pool.
 
-use super::SamplePoolDefaults;
+use super::{builder::PoolBuilder, SamplePoolDefaults};
 use crate::sample::{QueuedSample, SamplePlayer};
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
 use bevy_utils::HashMap;
@@ -171,7 +171,7 @@ impl<T: Component> AutoRegister<T> {
 
 /// A wrapper around [`EntityCommands`] for applying audio effects.
 ///
-/// For more information, see [`DynamicPool`].
+/// For more information, see [the module docs][self].
 pub struct DynamicPoolCommands<'a> {
     commands: EntityCommands<'a>,
 }
@@ -183,44 +183,13 @@ impl core::fmt::Debug for DynamicPoolCommands<'_> {
     }
 }
 
-/// The primary trait for creating dynamic pools.
-///
-/// For more information, see the [module docs][self].
-pub trait DynamicPool<'a> {
-    /// The output, typically `Self`.
-    type Output;
-
-    /// Apply an effect to a [`SamplePlayer`] entity.
-    ///
-    /// ```
-    /// # use bevy::prelude::*;
-    /// # use bevy_seedling::prelude::*;
-    /// fn effects(mut commands: Commands, server: Res<AssetServer>) {
-    ///     commands
-    ///         .spawn(SamplePlayer::new(server.load("my_sample.wav")))
-    ///         .effect(SpatialBasicNode::default())
-    ///         .effect(LowPassNode::new(500.0));
-    /// }
-    /// ```
-    ///
-    /// In the above example, we connect a spatial and low-pass node in series with the sample player.
-    /// Effects are arranged in the order of `effect` calls, so the output of the spatial node is
-    /// connected to the input of the low-pass node.
-    fn effect<T: AudioNode + Component + Clone>(self, node: T) -> Self::Output;
-}
-
-impl<'a> DynamicPool<'a> for EntityCommands<'a> {
+impl<'a> PoolBuilder for EntityCommands<'a> {
     type Output = DynamicPoolCommands<'a>;
 
     fn effect<T: AudioNode + Component + Clone>(mut self, node: T) -> Self::Output {
         let mut defaults = SamplePoolDefaults::default();
 
-        defaults.push({
-            let node = node.clone();
-            move |commands: &mut EntityCommands| {
-                commands.insert(node.clone());
-            }
-        });
+        defaults.push(node.clone());
 
         self.insert((
             DynamicPoolRegistry {
@@ -234,7 +203,7 @@ impl<'a> DynamicPool<'a> for EntityCommands<'a> {
     }
 }
 
-impl<'a> DynamicPool<'a> for DynamicPoolCommands<'a> {
+impl<'a> PoolBuilder for DynamicPoolCommands<'a> {
     type Output = DynamicPoolCommands<'a>;
 
     fn effect<T: AudioNode + Component + Clone>(mut self, node: T) -> Self::Output {
@@ -243,12 +212,8 @@ impl<'a> DynamicPool<'a> for DynamicPoolCommands<'a> {
             .or_default()
             .and_modify({
                 let node = node.clone();
-                |mut defaults| {
-                    defaults.push({
-                        move |commands: &mut EntityCommands| {
-                            commands.insert(node.clone());
-                        }
-                    });
+                move |mut defaults| {
+                    defaults.push(node);
                 }
             });
         self.commands.insert(node);

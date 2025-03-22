@@ -81,7 +81,7 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// ## Applying effects
 ///
 /// Effects can be applied directly to a sample entity with the
-/// [`DynamicPool`][crate::prelude::DynamicPool] trait.
+/// [`PoolBuilder`][crate::prelude::PoolBuilder] trait.
 ///
 /// ```
 /// # use bevy::prelude::*;
@@ -94,7 +94,7 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// }
 /// ```
 ///
-/// This connects a spatial and low-pass node in series with the sample player in the above example.
+/// In the above example, we connect a spatial and low-pass node in series with the sample player.
 /// Effects are arranged in the order of `effect` calls, so the output of the spatial node is
 /// connected to the input of the low-pass node.
 ///
@@ -135,6 +135,8 @@ impl SamplePlayer {
     ///     commands.spawn(SamplePlayer::new(server.load("my_sample.wav")));
     /// }
     /// ```
+    ///
+    /// This immediately queues up the sample for playback.
     pub fn new(handle: Handle<Sample>) -> Self {
         Self(handle)
     }

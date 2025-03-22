@@ -12,13 +12,13 @@ use bevy_utils::HashSet;
 use dynamic::DynamicPoolRegistry;
 use firewheel::{
     event::{NodeEventType, SequenceCommand},
-    node::AudioNode,
     nodes::sampler::{SamplerNode, SamplerState},
     Volume,
 };
 use std::any::TypeId;
 use std::sync::Arc;
 
+pub mod builder;
 pub mod dynamic;
 pub mod label;
 
@@ -44,88 +44,6 @@ impl Plugin for SamplePoolPlugin {
     }
 }
 
-/// A sampler pool builder.
-#[derive(Debug)]
-pub struct Pool<L, C> {
-    label: L,
-    size: usize,
-    effects_chain: C,
-}
-
-impl<L: PoolLabel + Component + Clone> Pool<L, ()> {
-    /// Construct a new [`Pool`].
-    ///
-    /// A [`Pool`] can be spawned with the same label multiple times,
-    /// but the old samplers will be overwritten by the new ones and
-    /// all samples queued in the pool will be stopped.
-    // TODO: actually make this ^ happen
-    pub fn new(label: L, size: usize) -> Self {
-        Self {
-            label,
-            size,
-            effects_chain: (),
-        }
-    }
-}
-
-/// Extend tuples.
-pub trait ExtendTuple {
-    /// The extended tuple.
-    type Output<T>;
-
-    /// Extend a tuple with `T`.
-    fn extend<T>(self, value: T) -> Self::Output<T>;
-}
-
-macro_rules! extend {
-    ($($A:ident),*) => {
-        impl<$($A),*> ExtendTuple for ($($A,)*) {
-            type Output<Z> = ($($A,)* Z,);
-
-            #[allow(non_snake_case)]
-            fn extend<Z>(self, value: Z) -> Self::Output<Z> {
-                let ($($A,)*) = self;
-
-                ($($A,)* value,)
-            }
-        }
-    };
-}
-
-bevy_utils::all_tuples!(extend, 0, 15, A);
-
-impl<L, C: ExtendTuple> Pool<L, C> {
-    /// Insert an effect into the pool.
-    ///
-    /// ```
-    /// # use bevy::prelude::*;
-    /// # use bevy_seedling::prelude::*;
-    /// fn spawn_pool(mut commands: Commands) {
-    ///     #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
-    ///     struct SpatialEffectsPool;
-    ///
-    ///     Pool::new(SpatialEffectsPool, 4)
-    ///         .effect(SpatialBasicNode::default())
-    ///         .effect(LowPassNode::new(500.0))
-    ///         .spawn(&mut commands);
-    /// }
-    /// ```
-    ///
-    /// In the above example, we connect a spatial and low-pass node in series with each sampler
-    /// node in the pool. Effects are arranged in the order of `effect` calls, so the output of
-    /// the spatial node is connected to the input of the low-pass node.
-    pub fn effect<T: AudioNode + Clone + Component>(self, node: T) -> Pool<L, C::Output<T>> {
-        Pool {
-            label: self.label,
-            size: self.size,
-            effects_chain: self.effects_chain.extend(node),
-        }
-    }
-}
-
-#[derive(Resource, Default)]
-pub(crate) struct RegisteredPools(HashSet<TypeId>);
-
 /// Spawn an effects chain, connecting all nodes and
 /// returning the root sampler node.
 #[cfg_attr(debug_assertions, track_caller)]
@@ -135,7 +53,7 @@ fn spawn_chain<L: Component + Clone>(
     label: L,
     commands: &mut Commands,
 ) -> Entity {
-    let chain = defaults.spawn_chain(label.clone(), commands);
+    let chain = defaults.spawn_nodes(label.clone(), commands);
 
     let source = commands
         .spawn((
@@ -158,9 +76,14 @@ fn spawn_chain<L: Component + Clone>(
     source
 }
 
+/// A resource to keep track of which label types
+/// have already been registered.
+#[derive(Resource, Default)]
+pub(crate) struct RegisteredPools(HashSet<TypeId>);
+
 /// Spawn a sampler pool with an initial size.
 #[cfg_attr(debug_assertions, track_caller)]
-pub(crate) fn spawn_pool<'a, L: PoolLabel + Component + Clone>(
+fn spawn_pool<'a, L: PoolLabel + Component + Clone>(
     label: L,
     size: core::ops::RangeInclusive<usize>,
     defaults: SamplePoolDefaults,
@@ -206,46 +129,6 @@ pub(crate) fn spawn_pool<'a, L: PoolLabel + Component + Clone>(
 
     bus
 }
-
-macro_rules! spawn_impl {
-    ($($ty:ident),*) => {
-        impl<L: PoolLabel + Component + Clone, $($ty),*> Pool<L, ($($ty,)*)>
-        where $($ty: Component + Clone),*
-        {
-            /// Spawn the pool, including all its nodes and connections.
-            #[allow(non_snake_case)]
-            #[cfg_attr(debug_assertions, track_caller)]
-            pub fn spawn<'a>(
-                self,
-                commands: &'a mut Commands,
-            ) -> EntityCommands<'a> {
-                let Self {
-                    label,
-                    size,
-                    effects_chain,
-                } = self;
-
-                let defaults = {
-                    let ($($ty,)*) = effects_chain;
-                    #[allow(unused_mut)]
-                    let mut defaults = SamplePoolDefaults::default();
-
-                    $(
-                        defaults.push(move |commands: &mut EntityCommands| {
-                            commands.entry::<$ty>().or_insert($ty.clone());
-                        });
-                    )*
-
-                    defaults
-                };
-
-                spawn_pool(label, size..=size, defaults, commands)
-            }
-        }
-    };
-}
-
-bevy_utils::all_tuples!(spawn_impl, 0, 15, A);
 
 /// A collection of each sampler node in the pool.
 #[derive(Component)]
@@ -297,15 +180,22 @@ fn on_remove_effects_chain(mut world: DeferredWorld, entity: Entity, _: Componen
 #[derive(Component, Default, Clone)]
 pub(crate) struct SamplePoolDefaults(Vec<Arc<dyn Fn(&mut EntityCommands) + Send + Sync + 'static>>);
 
+impl core::fmt::Debug for SamplePoolDefaults {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("SamplePoolDefaults").finish_non_exhaustive()
+    }
+}
+
 impl SamplePoolDefaults {
-    pub fn push<F>(&mut self, f: F)
-    where
-        F: Fn(&mut EntityCommands) + Send + Sync + 'static,
-    {
-        self.0.push(Arc::new(f));
+    /// Push a default node value.
+    pub fn push<T: Component + Clone>(&mut self, node: T) {
+        self.0.push(Arc::new(move |commands: &mut EntityCommands| {
+            commands.entry::<T>().or_insert_with(|| node.clone());
+        }));
     }
 
-    pub fn spawn_chain<L: Component + Clone>(
+    /// Spawn a set of unconnected audio nodes.
+    pub fn spawn_nodes<L: Component + Clone>(
         &self,
         label: L,
         commands: &mut Commands,
@@ -324,7 +214,7 @@ impl SamplePoolDefaults {
 
 /// Sets the range for the number of pool sampler nodes.
 #[derive(Component, Clone, Debug)]
-pub struct PoolRange(pub core::ops::RangeInclusive<usize>);
+struct PoolRange(pub core::ops::RangeInclusive<usize>);
 
 /// Sampler node ranking for playback.
 #[derive(Default, Component)]

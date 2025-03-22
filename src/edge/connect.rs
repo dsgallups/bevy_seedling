@@ -23,9 +23,11 @@ impl PendingConnections {
 
 /// An [`EntityCommands`] extension trait for connecting Firewheel nodes.
 ///
-/// Firewheel features a node-graph audio architecture. Audio processors represent
-/// graph _nodes_, and the connections between them are graph _edges_.
+/// Firewheel features a node-graph audio architecture. Audio processors like [`VolumeNode`] represent
+/// graph _nodes_, and the connections between processors are graph _edges_.
 /// `bevy_seedling` exposes this directly, so you can connect nodes however you like.
+///
+/// [`VolumeNode`]: crate::prelude::VolumeNode
 ///
 /// There are two main ways to connect nodes: with [`Entity`], and with [`NodeLabel`].
 ///
@@ -55,7 +57,7 @@ impl PendingConnections {
 /// ## Connecting via [`NodeLabel`]
 ///
 /// An entity with a component deriving [`NodeLabel`] is also a valid connection target.
-/// Since types can have global, static visibility, node labels are especially useful
+/// Since Rust types can have global, static visibility, node labels are especially useful
 /// for common connections points like busses or effects chains.
 ///
 /// ```

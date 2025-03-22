@@ -36,17 +36,27 @@ impl PendingDisconnections {
 /// // For some target node...
 /// let target_node = commands.spawn((TargetLabel, VolumeNode::default())).id();
 ///
-/// let node_a = commands.spawn(VolumeNode::default()).connect(target_node);
-/// let node_b = commands.spawn(VolumeNode::default()).connect(target_node);
+/// // We can connect and disconnect from it with either a label...
+/// let node_a = commands
+///     .spawn(VolumeNode::default())
+///     .connect(TargetLabel)
+///     .head();
 ///
-/// // We can disconnect from it with either a label...
 /// commands.entity(node_a).disconnect(TargetLabel);
+///
 /// // or its `Entity`.
+/// let node_b = commands
+///     .spawn(VolumeNode::default())
+///     .connect(target_node)
+///     .head();
+///
 /// commands.entity(node_b).disconnect(target_node);
+/// # }
 /// ```
 ///
-/// Disconnections are processed once per frame, immediately after
-/// connections.
+/// Disconnections are deferred, finalizing in the
+/// [`SeedlingSystems::Connect`][crate::SeedlingSystems::Connect] set immediately
+/// after connections.
 ///
 /// [`EntityCommands`]: bevy_ecs::prelude::EntityCommands
 /// [`NodeLabel`]: crate::prelude::NodeLabel

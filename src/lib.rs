@@ -234,9 +234,9 @@ pub mod prelude {
         FirewheelNode, RegisterNode,
     };
     pub use crate::pool::{
-        dynamic::DynamicPool,
+        builder::{Pool, PoolBuilder},
         label::{DefaultPool, PoolLabel},
-        Pool, PoolCommands, PoolDespawn,
+        PoolCommands, PoolDespawn,
     };
     pub use crate::sample::{OnComplete, PlaybackSettings, SamplePlayer};
     pub use crate::send::SendNode;
