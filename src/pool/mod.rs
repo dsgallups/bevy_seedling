@@ -2,7 +2,7 @@
 
 use crate::node::ParamFollower;
 use crate::prelude::{AudioContext, Connect, DefaultPool, FirewheelNode, PoolLabel, VolumeNode};
-use crate::sample::{PlaybackSettings, QueuedSample, Sample, SamplePlayer};
+use crate::sample::{OnComplete, PlaybackSettings, QueuedSample, Sample, SamplePlayer};
 use crate::{node::Events, SeedlingSystems};
 use bevy_app::{Last, Plugin, PostUpdate};
 use bevy_asset::Assets;
@@ -49,7 +49,7 @@ impl Plugin for SamplePoolPlugin {
 #[cfg_attr(debug_assertions, track_caller)]
 fn spawn_chain<L: Component + Clone>(
     bus: Entity,
-    defaults: &SamplePoolDefaults,
+    defaults: &SamplePoolTypes,
     label: L,
     commands: &mut Commands,
 ) -> Entity {
@@ -61,6 +61,7 @@ fn spawn_chain<L: Component + Clone>(
             SamplePoolNode,
             label,
             EffectsChain(chain.clone()),
+            PoolRoot(bus),
         ))
         .id();
 
@@ -86,7 +87,7 @@ pub(crate) struct RegisteredPools(HashSet<TypeId>);
 fn spawn_pool<'a, L: PoolLabel + Component + Clone>(
     label: L,
     size: core::ops::RangeInclusive<usize>,
-    defaults: SamplePoolDefaults,
+    defaults: SamplePoolTypes,
     commands: &'a mut Commands,
 ) -> EntityCommands<'a> {
     commands.queue(|world: &mut World| {
@@ -129,6 +130,10 @@ fn spawn_pool<'a, L: PoolLabel + Component + Clone>(
 
     bus
 }
+
+/// The root pool node, analogous to `Parent`.
+#[derive(Component)]
+struct PoolRoot(Entity);
 
 /// A collection of each sampler node in the pool.
 #[derive(Component)]
@@ -176,22 +181,40 @@ fn on_remove_effects_chain(mut world: DeferredWorld, entity: Entity, _: Componen
     }
 }
 
-/// A collections of functions that insert a node's default value into an entity.
-#[derive(Component, Default, Clone)]
-pub(crate) struct SamplePoolDefaults(Vec<Arc<dyn Fn(&mut EntityCommands) + Send + Sync + 'static>>);
+trait SamplePoolType {
+    /// Insert the pool's default value if the component isn't already present.
+    fn insert_default(&self, commands: &mut EntityCommands);
 
-impl core::fmt::Debug for SamplePoolDefaults {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("SamplePoolDefaults").finish_non_exhaustive()
+    /// Remove this type and all required types from an entity.
+    fn remove(&self, commands: &mut EntityCommands);
+}
+
+impl<T: Component + Clone> SamplePoolType for T {
+    fn insert_default(&self, commands: &mut EntityCommands) {
+        commands.entry::<T>().or_insert_with(|| self.clone());
+    }
+
+    fn remove(&self, commands: &mut EntityCommands) {
+        commands.remove_with_requires::<T>();
+        // TODO: this might panic for non-diffing nodes
+        commands.remove_with_requires::<crate::node::Baseline<T>>();
     }
 }
 
-impl SamplePoolDefaults {
+/// A collections of types that manage insertion and removal of remote nodes.
+#[derive(Component, Default, Clone)]
+struct SamplePoolTypes(Vec<Arc<dyn SamplePoolType + Send + Sync + 'static>>);
+
+impl core::fmt::Debug for SamplePoolTypes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("SamplePoolTypes").finish_non_exhaustive()
+    }
+}
+
+impl SamplePoolTypes {
     /// Push a default node value.
     pub fn push<T: Component + Clone>(&mut self, node: T) {
-        self.0.push(Arc::new(move |commands: &mut EntityCommands| {
-            commands.entry::<T>().or_insert_with(|| node.clone());
-        }));
+        self.0.push(Arc::new(node));
     }
 
     /// Spawn a set of unconnected audio nodes.
@@ -202,13 +225,20 @@ impl SamplePoolDefaults {
     ) -> Vec<Entity> {
         self.0
             .iter()
-            .map(|d| {
+            .map(|ty| {
                 let mut commands = commands.spawn((label.clone(), SamplePoolNode));
-                d(&mut commands);
+                ty.insert_default(&mut commands);
 
                 commands.id()
             })
             .collect()
+    }
+
+    /// Remove nodes.
+    pub fn remove_nodes(&self, commands: &mut EntityCommands) {
+        for ty in &self.0 {
+            ty.remove(commands);
+        }
     }
 }
 
@@ -233,7 +263,7 @@ fn rank_nodes<T: Component>(
 
         context.with(|c| {
             for (e, params, node, node_label) in q.iter() {
-                if node_label != label {
+                if node_label.label != label.label {
                     continue;
                 }
 
@@ -253,31 +283,30 @@ fn rank_nodes<T: Component>(
 }
 
 #[derive(Component, Clone, Copy)]
-#[component(on_remove = on_remove_active)]
 struct ActiveSample {
     sample_entity: Entity,
-    despawn: bool,
 }
 
-fn on_remove_active(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
-    let active = *world.entity(entity).components::<&ActiveSample>();
-
-    if active.despawn {
-        if let Some(commands) = world.commands().get_entity(active.sample_entity) {
-            commands.despawn_recursive();
-        }
-    }
-}
-
-/// Automatically remove or despawn sampler players when their
+/// Automatically remove or despawn sample players when their
 /// sample has finished playing.
 fn remove_finished(
-    nodes: Query<(Entity, &EffectsChain, &FirewheelNode), (With<ActiveSample>, With<SamplerNode>)>,
+    nodes: Query<
+        (
+            Entity,
+            &EffectsChain,
+            &FirewheelNode,
+            &ActiveSample,
+            &PoolRoot,
+        ),
+        With<SamplerNode>,
+    >,
+    samples: Query<&PlaybackSettings>,
+    roots: Query<&SamplePoolTypes>,
     mut commands: Commands,
     mut context: ResMut<AudioContext>,
 ) {
     context.with(|context| {
-        for (entity, effects_chain, node) in nodes.iter() {
+        for (entity, effects_chain, node, active, pool_root) in nodes.iter() {
             let Some(state) = context.node_state::<SamplerState>(node.0) else {
                 continue;
             };
@@ -290,6 +319,31 @@ fn remove_finished(
 
                 for effect in effects_chain.0.iter() {
                     commands.entity(*effect).remove::<ParamFollower>();
+                }
+
+                let Ok(settings) = samples.get(active.sample_entity) else {
+                    continue;
+                };
+
+                match settings.on_complete {
+                    OnComplete::Preserve => {}
+                    OnComplete::Remove => {
+                        let Ok(root) = roots.get(pool_root.0) else {
+                            continue;
+                        };
+
+                        let mut entity_commands = commands.entity(active.sample_entity);
+                        root.remove_nodes(&mut entity_commands);
+                        entity_commands.remove_with_requires::<(
+                            SamplePoolTypes,
+                            SamplePlayer,
+                            PoolLabelContainer,
+                            DynamicPoolRegistry,
+                        )>();
+                    }
+                    OnComplete::Despawn => {
+                        commands.entity(active.sample_entity).despawn_recursive();
+                    }
                 }
             }
         }
@@ -321,7 +375,7 @@ fn assign_work<T: Component + Clone>(
     mut pools: Query<(
         Entity,
         &mut NodeRank,
-        &SamplePoolDefaults,
+        &SamplePoolTypes,
         &T,
         &PoolLabelContainer,
         &PoolRange,
@@ -338,7 +392,7 @@ fn assign_work<T: Component + Clone>(
             };
 
             let Some((pool_entity, mut rank, defaults, pool_label, _, pool_range, mut pool_nodes)) =
-                pools.iter_mut().find(|pool| pool.4 == label)
+                pools.iter_mut().find(|pool| pool.4.label == label.label)
             else {
                 continue;
             };
@@ -383,15 +437,14 @@ fn assign_work<T: Component + Clone>(
             }
 
             // Insert default pool parameters if not present.
-            for item in defaults.0.iter() {
-                item(&mut commands.entity(sample));
+            for ty in defaults.0.iter() {
+                ty.insert_default(&mut commands.entity(sample));
             }
 
             rank.0.remove(0);
             commands.entity(sample).remove::<QueuedSample>();
             commands.entity(node_entity).insert(ActiveSample {
                 sample_entity: sample,
-                despawn: true,
             });
         }
     });
@@ -475,9 +528,9 @@ impl<T: PoolLabel + Component> Command for PoolDespawn<T> {
 
         let mut commands = world.commands();
 
-        let interned = PoolLabelContainer::new(&self.0);
+        let interned = self.0.intern();
         for (root, label) in roots {
-            if label == interned {
+            if label.label == interned {
                 commands.entity(root).despawn_recursive();
             }
         }
@@ -534,7 +587,7 @@ mod test {
     }
 
     #[test]
-    fn test_remove_static() {
+    fn test_despawn_static() {
         #[derive(PoolLabel, Clone, Debug, PartialEq, Eq, Hash)]
         struct TestPool;
 
@@ -562,7 +615,7 @@ mod test {
     }
 
     #[test]
-    fn test_remove_dynamic() {
+    fn test_despawn_dynamic() {
         let mut app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
             commands
                 .spawn(SamplePlayer::new(server.load("caw.ogg")))
@@ -589,5 +642,89 @@ mod test {
             // 1 (global volume)
             assert_eq!(pool_nodes.iter().count(), 1);
         });
+    }
+
+    #[derive(Component)]
+    struct EmptyComponent;
+
+    #[test]
+    fn test_remove() {
+        let mut app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
+            // We'll play a short sample
+            commands
+                .spawn((
+                    SamplePlayer::new(server.load("sine_440hz_1ms.wav")),
+                    EmptyComponent,
+                    PlaybackSettings::REMOVE,
+                ))
+                .effect(LowPassNode::default());
+        });
+
+        // Then wait until the sample player is removed.
+        loop {
+            let players = run(
+                &mut app,
+                |q: Query<Entity, (With<SamplePlayer>, With<EmptyComponent>)>| q.iter().len(),
+            );
+
+            if players == 0 {
+                break;
+            }
+
+            app.update();
+        }
+
+        // Once removed, we'll verify that _all_ audio-related components are removed.
+        let world = app.world_mut();
+        let mut q = world.query_filtered::<EntityRef, With<EmptyComponent>>();
+        let entity = q.single(world);
+
+        let archetype = entity.archetype();
+
+        assert_eq!(archetype.components().count(), 1);
+        assert!(entity.contains::<EmptyComponent>());
+    }
+
+    #[test]
+    fn test_remove_pool() {
+        #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+        struct BespokeLabel;
+
+        let mut app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
+            Pool::new(BespokeLabel, 4)
+                .effect(LowPassNode::default())
+                .spawn(&mut commands);
+
+            commands.spawn((
+                BespokeLabel,
+                SamplePlayer::new(server.load("sine_440hz_1ms.wav")),
+                EmptyComponent,
+                PlaybackSettings::REMOVE,
+            ));
+        });
+
+        // Then wait until the sample player is removed.
+        loop {
+            let players = run(
+                &mut app,
+                |q: Query<Entity, (With<SamplePlayer>, With<EmptyComponent>)>| q.iter().len(),
+            );
+
+            if players == 0 {
+                break;
+            }
+
+            app.update();
+        }
+
+        // Once removed, we'll verify that _all_ audio-related components are removed.
+        let world = app.world_mut();
+        let mut q = world.query_filtered::<EntityRef, With<EmptyComponent>>();
+        let entity = q.single(world);
+
+        let archetype = entity.archetype();
+
+        assert_eq!(archetype.components().count(), 1);
+        assert!(entity.contains::<EmptyComponent>());
     }
 }

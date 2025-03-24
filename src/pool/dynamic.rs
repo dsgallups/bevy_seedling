@@ -48,7 +48,7 @@
 //! Note that when no effects are applied, your samples will be queued in the
 //! [`DefaultPool`][crate::prelude::DefaultPool], not a dynamic pool.
 
-use super::{builder::PoolBuilder, SamplePoolDefaults};
+use super::{builder::PoolBuilder, SamplePoolTypes};
 use crate::sample::{QueuedSample, SamplePlayer};
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
 use bevy_utils::HashMap;
@@ -104,7 +104,7 @@ pub(super) struct DynamicPoolId(usize);
 /// and assign work to the most appropriate sampler node.
 pub(super) fn update_auto_pools(
     queued_samples: Query<
-        (Entity, &DynamicPoolRegistry, &SamplePoolDefaults),
+        (Entity, &DynamicPoolRegistry, &SamplePoolTypes),
         (
             With<QueuedSample>,
             With<SamplePlayer>,
@@ -190,7 +190,7 @@ impl<'a> PoolBuilder for EntityCommands<'a> {
     type Output = DynamicPoolCommands<'a>;
 
     fn effect<T: AudioNode + Component + Clone>(mut self, node: T) -> Self::Output {
-        let mut defaults = SamplePoolDefaults::default();
+        let mut defaults = SamplePoolTypes::default();
 
         defaults.push(node.clone());
 
@@ -211,7 +211,7 @@ impl<'a> PoolBuilder for DynamicPoolCommands<'a> {
 
     fn effect<T: AudioNode + Component + Clone>(mut self, node: T) -> Self::Output {
         self.commands
-            .entry::<SamplePoolDefaults>()
+            .entry::<SamplePoolTypes>()
             .or_default()
             .and_modify({
                 let node = node.clone();

@@ -1,6 +1,6 @@
 //! Pool builder trait and struct.
 
-use super::SamplePoolDefaults;
+use super::SamplePoolTypes;
 use crate::prelude::PoolLabel;
 use bevy_ecs::prelude::*;
 use firewheel::node::AudioNode;
@@ -228,7 +228,7 @@ pub trait PoolBuilder {
 pub struct Pool<L> {
     label: L,
     size: usize,
-    defaults: SamplePoolDefaults,
+    defaults: SamplePoolTypes,
 }
 
 impl<L: PoolLabel + Component + Clone> Pool<L> {

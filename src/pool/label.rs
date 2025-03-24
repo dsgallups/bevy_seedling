@@ -31,7 +31,7 @@
 //! }
 //! ```
 
-use bevy_ecs::{intern::Interned, prelude::*};
+use bevy_ecs::{component::ComponentId, intern::Interned, prelude::*, world::DeferredWorld};
 
 pub use seedling_macros::PoolLabel;
 
@@ -91,13 +91,27 @@ pub struct DefaultPool;
 pub type InternedPoolLabel = Interned<dyn PoolLabel>;
 
 /// A type-erased pool label container.
-#[derive(Component, Debug, PartialEq, Eq, Clone)]
-#[allow(dead_code)]
-pub struct PoolLabelContainer(InternedPoolLabel);
+#[derive(Component, Debug, Clone)]
+#[component(on_remove = Self::on_remove)]
+pub struct PoolLabelContainer {
+    pub(crate) label: InternedPoolLabel,
+    label_id: ComponentId,
+}
 
 impl PoolLabelContainer {
     /// Create a new interned pool label.
-    pub fn new<T: PoolLabel>(label: &T) -> Self {
-        Self(label.intern())
+    pub fn new<T: PoolLabel>(label: &T, id: ComponentId) -> Self {
+        Self {
+            label: label.intern(),
+            label_id: id,
+        }
+    }
+
+    fn on_remove(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
+        let id = world
+            .entity(entity)
+            .components::<&PoolLabelContainer>()
+            .label_id;
+        world.commands().entity(entity).remove_by_id(id);
     }
 }
