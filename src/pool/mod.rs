@@ -648,7 +648,7 @@ mod test {
     struct EmptyComponent;
 
     #[test]
-    fn test_remove() {
+    fn test_remove_in_dynamic() {
         let mut app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
             // We'll play a short sample
             commands
@@ -686,7 +686,7 @@ mod test {
     }
 
     #[test]
-    fn test_remove_pool() {
+    fn test_remove_in_pool() {
         #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
         struct BespokeLabel;
 

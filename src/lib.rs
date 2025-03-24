@@ -178,6 +178,11 @@
 //! you'll need to [prevent `bevy_audio` from being compiled][self#getting-started].
 //! You may need to update your `Cargo.lock` file to ensure `bevy_audio` isn't included.
 //!
+//! It's also possible one of your third-part Bevy dependencies depends directly
+//! on the `bevy` crate without disabling default features, causing `bevy_audio` to be
+//! transitively enabled. In this case, encourage the crate authors to depend on
+//! sub-crates (like `bevy_ecs`) or disable Bevy's default features!
+//!
 //! ## Architecture
 //!
 //! `bevy_seedling` provides a thin ECS wrapper over `Firewheel`.
