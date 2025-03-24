@@ -39,7 +39,7 @@ bevy_hierarchy = "0.15"
 bevy_asset = "0.15"
 bevy_math = "0.15"
 bevy_transform = "0.15"
-firewheel = { path = "firewheel", features = ["bevy", "spatial_basic_node"] }
+firewheel = { version = "0.3", features = ["bevy", "spatial_basic_node"] }
 symphonium = { version = "0.4", default-features = false, features = [
   "opt-simd",
   "fft-resampler",
@@ -51,7 +51,7 @@ arrayvec = "0.7"
 seedling_macros = { path = "./seedling_macros", version = "0.1.0" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-firewheel = { path = "firewheel", features = ["wasm-bindgen"] }
+firewheel = { version = "0.3", features = ["wasm-bindgen"] }
 
 [dev-dependencies]
 bevy = { version = "0.15", default-features = false, features = [
