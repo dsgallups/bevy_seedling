@@ -77,10 +77,30 @@ bevy_ecs::define_label!(
 /// reach the output.
 ///
 /// If no connections are specified for an entity
-/// with a [FirewheelNode][crate::prelude::FirewheelNode] component, the
+/// with a [`FirewheelNode`][crate::prelude::FirewheelNode] component, the
 /// node will automatically be routed to this bus.
+/// For example, if you spawn a [`VolumeNode`]:
 ///
-/// [MainBus] is a stereo volume node. To adjust the
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn spawn(mut commands: Commands) {
+/// commands.spawn(VolumeNode::default());
+/// # }
+/// ```
+///
+/// it'll produce a graph like
+///
+/// ```text
+/// ┌──────┐
+/// │Volume│
+/// └┬─────┘
+/// ┌▽──────┐
+/// │MainBus│
+/// └───────┘
+/// ```
+///
+/// [`MainBus`] is a stereo volume node. To adjust the
 /// global volume, you can query for a volume node's parameters
 /// filtered on this label.
 /// ```

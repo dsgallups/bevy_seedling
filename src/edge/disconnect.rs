@@ -60,7 +60,7 @@ impl PendingDisconnections {
 ///
 /// [`EntityCommands`]: bevy_ecs::prelude::EntityCommands
 /// [`NodeLabel`]: crate::prelude::NodeLabel
-pub trait Disconnect<'a>: Sized {
+pub trait Disconnect: Sized {
     /// Queue a disconnection from this entity to the target.
     ///
     /// ```
@@ -69,9 +69,7 @@ pub trait Disconnect<'a>: Sized {
     /// # fn system(mut commands: Commands) {
     /// // For any node connection...
     /// let node = commands
-    ///     .spawn(VolumeNode {
-    ///         volume: Volume::Linear(0.5),
-    ///     })
+    ///     .spawn(VolumeNode::default())
     ///     .connect(MainBus)
     ///     .head();
     ///
@@ -87,7 +85,7 @@ pub trait Disconnect<'a>: Sized {
     /// The disconnection is deferred, finalizing in the
     /// [`SeedlingSystems::Connect`][crate::SeedlingSystems::Connect] set.
     #[cfg_attr(debug_assertions, track_caller)]
-    fn disconnect(self, target: impl Into<EdgeTarget>) -> DisconnectCommands<'a> {
+    fn disconnect(self, target: impl Into<EdgeTarget>) -> Self {
         self.disconnect_with(target, DEFAULT_CONNECTION)
     }
 
@@ -96,19 +94,11 @@ pub trait Disconnect<'a>: Sized {
     /// The disconnection is deferred, finalizing in the
     /// [`SeedlingSystems::Connect`][crate::SeedlingSystems::Connect] set.
     #[cfg_attr(debug_assertions, track_caller)]
-    fn disconnect_with(
-        self,
-        target: impl Into<EdgeTarget>,
-        ports: &[(u32, u32)],
-    ) -> DisconnectCommands<'a>;
+    fn disconnect_with(self, target: impl Into<EdgeTarget>, ports: &[(u32, u32)]) -> Self;
 }
 
-impl<'a> Disconnect<'a> for EntityCommands<'a> {
-    fn disconnect_with(
-        mut self,
-        target: impl Into<EdgeTarget>,
-        ports: &[(u32, u32)],
-    ) -> DisconnectCommands<'a> {
+impl<'a> Disconnect for EntityCommands<'a> {
+    fn disconnect_with(mut self, target: impl Into<EdgeTarget>, ports: &[(u32, u32)]) -> Self {
         let target = target.into();
         let ports = ports.to_vec();
 
@@ -126,64 +116,7 @@ impl<'a> Disconnect<'a> for EntityCommands<'a> {
                 ));
             });
 
-        DisconnectCommands::new(self)
-    }
-}
-
-impl<'a> Disconnect<'a> for DisconnectCommands<'a> {
-    #[cfg_attr(debug_assertions, track_caller)]
-    fn disconnect_with(
-        mut self,
-        target: impl Into<EdgeTarget>,
-        ports: &[(u32, u32)],
-    ) -> DisconnectCommands<'a> {
-        let tail = self.head;
-
-        let mut commands = self.commands.commands();
-        let mut commands = commands.entity(tail);
-
-        let target = target.into();
-        let ports = ports.to_vec();
-
-        #[cfg(debug_assertions)]
-        let location = Location::caller();
-
-        commands
-            .entry::<PendingDisconnections>()
-            .or_default()
-            .and_modify(|mut pending| {
-                pending.push(PendingEdge::new_with_location(
-                    target,
-                    Some(ports),
-                    #[cfg(debug_assertions)]
-                    location,
-                ));
-            });
-
         self
-    }
-}
-
-/// A set of commands for disconnecting nodes.
-pub struct DisconnectCommands<'a> {
-    commands: EntityCommands<'a>,
-    head: Entity,
-}
-
-impl<'a> DisconnectCommands<'a> {
-    pub(crate) fn new(commands: EntityCommands<'a>) -> Self {
-        Self {
-            head: commands.id(),
-            commands,
-        }
-    }
-}
-
-impl core::fmt::Debug for DisconnectCommands<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DisconnectCommands")
-            .field("entity", &self.head)
-            .finish_non_exhaustive()
     }
 }
 

@@ -84,6 +84,25 @@ bevy_ecs::define_label!(
 ///         .run();
 /// }
 /// ```
+///
+/// You can also simply re-route the default pool.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// fn reroute_default_pool(
+///     pool: Query<Entity, (With<DefaultPool>, With<VolumeNode>)>,
+///     mut commands: Commands,
+/// ) {
+///     // Let's splice in a send to a reverb node.
+///     let reverb = commands.spawn(FreeverbNode::default()).id();
+///
+///     commands
+///         .entity(pool.single())
+///         .disconnect(MainBus)
+///         .chain_node(SendNode::new(Volume::Decibels(-12.0), reverb));
+/// }
+/// ```
 #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DefaultPool;
 

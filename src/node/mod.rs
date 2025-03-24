@@ -224,11 +224,9 @@ impl RegisterNode for bevy_app::App {
 
 /// An ECS handle for an audio node.
 ///
-/// [`FirewheelNode`] may not necessarily be available immediately
-/// upon spawning audio entities; [`FirewheelNode`]s are acquired
-/// during the [`SeedlingSystems::Acquire`] set. Node
-/// acquisition will also be deferred if the audio context
-/// is disabled.
+/// Firewheel nodes [registered with `bevy_seedling`][crate::prelude::RegisterNode]
+/// will automatically acquire a [`FirewheelNode`] during the [`SeedlingSystems::Acquire`] set
+/// in the [`Last`] schedule.
 ///
 /// When this component is removed, the underlying
 /// audio node is removed from the graph.

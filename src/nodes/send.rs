@@ -1,4 +1,4 @@
-//! One-pole, low-pass filter.
+//! A convenient node for routing to sends.
 
 use crate::{
     edge::{Disconnect, EdgeTarget, PendingConnections, PendingEdge},

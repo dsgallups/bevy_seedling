@@ -100,11 +100,13 @@
 //!   - [Constructing pools][prelude::Pool#constructing-pools]
 //!   - [Playing samples in a pool][prelude::Pool#playing-samples-in-a-pool]
 //!   - [Pool architecture][prelude::Pool#architecture]
+//! - [The default pool][prelude::DefaultPool]
 //!
 //! ### Routing audio
 //! - [Connecting nodes][crate::edge::Connect]
 //! - [Disconnecting nodes][crate::edge::Disconnect]
 //! - [Sends][prelude::SendNode]
+//! - [The main bus][prelude::MainBus]
 //!
 //! ### Custom nodes
 //! - [Creating and registering nodes][prelude::RegisterNode#creating-and-registering-nodes]
@@ -253,7 +255,9 @@ pub mod prelude {
         PoolCommands, PoolDespawn,
     };
     pub use crate::sample::{OnComplete, PlaybackSettings, SamplePlayer};
-    pub use crate::spatial::{SpatialListener2D, SpatialListener3D};
+    pub use crate::spatial::{
+        DefaultSpatialScale, SpatialListener2D, SpatialListener3D, SpatialScale,
+    };
     pub use crate::SeedlingPlugin;
 
     pub use firewheel::{
@@ -363,6 +367,7 @@ where
         app.insert_resource(context)
             .init_resource::<edge::NodeMap>()
             .init_resource::<node::PendingRemovals>()
+            .init_resource::<spatial::DefaultSpatialScale>()
             .insert_resource(pool::dynamic::DynamicPoolRange(
                 self.dynamic_pool_range.clone(),
             ))
