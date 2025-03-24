@@ -33,7 +33,7 @@
 
 use bevy_ecs::{component::ComponentId, intern::Interned, prelude::*, world::DeferredWorld};
 
-pub use seedling_macros::PoolLabel;
+pub use bevy_seedling_macros::PoolLabel;
 
 bevy_ecs::define_label!(
     /// A label for differentiating sample pools.

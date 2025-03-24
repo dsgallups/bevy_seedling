@@ -46,7 +46,7 @@ use smallvec::SmallVec;
 /// [`NodeLabel`] manually.
 ///
 /// [`Component`]: bevy_ecs::component::Component
-pub use seedling_macros::NodeLabel;
+pub use bevy_seedling_macros::NodeLabel;
 
 bevy_ecs::define_label!(
     /// A label for addressing audio nodes.

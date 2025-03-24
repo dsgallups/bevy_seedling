@@ -51,10 +51,10 @@
 use super::{builder::PoolBuilder, SamplePoolTypes};
 use crate::sample::{QueuedSample, SamplePlayer};
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
+use bevy_seedling_macros::PoolLabel;
 use bevy_utils::HashMap;
 use core::marker::PhantomData;
 use firewheel::node::AudioNode;
-use seedling_macros::PoolLabel;
 
 #[derive(Component, Clone, Debug, Eq)]
 pub(crate) struct DynamicPoolRegistry {
