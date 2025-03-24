@@ -3,22 +3,18 @@
 use firewheel::{
     backend::{AudioBackend, DeviceInfo},
     clock::ClockSeconds,
+    node::StreamStatus,
     processor::FirewheelProcessor,
-    FirewheelCtx, StreamInfo,
+    StreamInfo,
 };
-use std::num::NonZeroU32;
+use std::{
+    num::NonZeroU32,
+    sync::mpsc::{self, TryRecvError},
+};
 
-/// A simple audio context that facilitates
-/// focused benchmarking.
-#[allow(missing_debug_implementations)]
-pub struct ProfilingContext {
-    pub context: FirewheelCtx<ProfilingBackend>,
-    time: ClockSeconds,
-    sample_rate_recip: f64,
-}
-
+/// A very simple backend for testing and profiling.
 pub struct ProfilingBackend {
-    processor: Option<FirewheelProcessor>,
+    processor: mpsc::Sender<FirewheelProcessor>,
 }
 
 impl core::fmt::Debug for ProfilingBackend {
@@ -30,6 +26,7 @@ impl core::fmt::Debug for ProfilingBackend {
 }
 
 #[derive(Debug)]
+#[allow(missing_docs)]
 pub struct ProfilingError;
 
 impl core::fmt::Display for ProfilingError {
@@ -51,65 +48,79 @@ impl AudioBackend for ProfilingBackend {
     }
 
     fn available_output_devices() -> Vec<DeviceInfo> {
-        vec![]
+        vec![DeviceInfo {
+            name: "default output".into(),
+            num_channels: 2,
+            is_default: true,
+        }]
     }
 
     fn start_stream(_: Self::Config) -> Result<(Self, StreamInfo), Self::StartStreamError> {
         let sample_rate = NonZeroU32::new(48000).unwrap();
+        let (sender, receiver) = mpsc::channel();
+
+        const BLOCK_SIZE: usize = 128;
+        const CHANNELS: usize = 2;
+
+        std::thread::spawn(move || {
+            let mut processor = None;
+
+            let mut seconds = ClockSeconds(0.0);
+
+            let block_duration = BLOCK_SIZE as f64 / sample_rate.get() as f64;
+            let input = [0f32; BLOCK_SIZE * CHANNELS];
+            let mut output = [0f32; BLOCK_SIZE * CHANNELS];
+
+            loop {
+                match &mut processor {
+                    None => {
+                        let new_processor: FirewheelProcessor = receiver.recv().unwrap();
+                        processor = Some(new_processor);
+                    }
+                    Some(processor) => {
+                        processor.process_interleaved(
+                            &input,
+                            &mut output,
+                            CHANNELS,
+                            CHANNELS,
+                            BLOCK_SIZE,
+                            seconds,
+                            StreamStatus::empty(),
+                        );
+                        std::thread::sleep(std::time::Duration::from_secs_f64(block_duration));
+                        seconds.0 += block_duration;
+
+                        match receiver.try_recv() {
+                            Ok(new_processor) => *processor = new_processor,
+                            Err(TryRecvError::Empty) => {}
+                            Err(TryRecvError::Disconnected) => break,
+                        }
+                    }
+                }
+            }
+        });
 
         Ok((
-            Self { processor: None },
+            Self { processor: sender },
             StreamInfo {
                 sample_rate,
                 sample_rate_recip: 1.0 / sample_rate.get() as f64,
-                max_block_frames: NonZeroU32::new(128).unwrap(),
+                max_block_frames: NonZeroU32::new(BLOCK_SIZE as u32).unwrap(),
                 num_stream_in_channels: 0,
                 num_stream_out_channels: 2,
                 declick_frames: NonZeroU32::new(16).unwrap(),
                 input_device_name: None,
-                output_device_name: None,
+                output_device_name: Some("default output".into()),
                 input_to_output_latency_seconds: 0.0,
             },
         ))
     }
 
     fn set_processor(&mut self, processor: FirewheelProcessor) {
-        self.processor = Some(processor);
+        self.processor.send(processor).unwrap();
     }
 
     fn poll_status(&mut self) -> Result<(), Self::StreamError> {
         Ok(())
-    }
-}
-
-impl ProfilingContext {
-    pub fn new(sample_rate: u32) -> Self {
-        let mut context = FirewheelCtx::new(Default::default());
-
-        context.start_stream(()).unwrap();
-
-        Self {
-            context,
-            time: ClockSeconds(0.),
-            sample_rate_recip: 1. / sample_rate as f64,
-        }
-    }
-
-    #[expect(unused)]
-    pub fn process_interleaved(&mut self, input: &[f32], output: &mut [f32]) {
-        let samples = output.len() / 2;
-
-        todo!("we need some way of processing the underlying graph directly");
-        // self.context.process_interleaved(
-        //     input,
-        //     output,
-        //     2,
-        //     2,
-        //     samples,
-        //     self.time,
-        //     StreamStatus::empty(),
-        // );
-
-        self.time.0 += self.sample_rate_recip * samples as f64;
     }
 }

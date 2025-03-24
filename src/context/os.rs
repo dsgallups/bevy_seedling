@@ -1,22 +1,30 @@
-use firewheel::{FirewheelConfig, FirewheelContext};
+use super::SeedlingContext;
+use firewheel::{backend::AudioBackend, FirewheelConfig, FirewheelCtx};
 use std::sync::mpsc;
 
 /// A thread-safe wrapper around the underlying Firewheel audio context.
 #[derive(Debug)]
 pub struct InnerContext(mpsc::Sender<ThreadLocalCall>);
 
-type ThreadLocalCall = Box<dyn FnOnce(&mut FirewheelContext) + Send + 'static>;
+type ThreadLocalCall = Box<dyn FnOnce(&mut SeedlingContext) + Send + 'static>;
 
 impl InnerContext {
     // Spawn the audio process and control thread.
     #[inline(always)]
-    pub fn new(settings: FirewheelConfig) -> Self {
+    pub fn new<B>(settings: FirewheelConfig, stream_settings: B::Config) -> Self
+    where
+        B: AudioBackend + 'static,
+        B::Config: Send + 'static,
+        B::StreamError: Send + Sync + 'static,
+    {
         let (bev_to_audio_tx, bev_to_audio_rx) = mpsc::channel::<ThreadLocalCall>();
         std::thread::spawn(move || {
-            let mut context = FirewheelContext::new(settings);
+            let mut context = FirewheelCtx::<B>::new(settings);
             context
-                .start_stream(Default::default())
+                .start_stream(stream_settings)
                 .expect("failed to activate the audio context");
+
+            let mut context = SeedlingContext::new(context);
 
             while let Ok(func) = bev_to_audio_rx.recv() {
                 (func)(&mut context);
@@ -38,11 +46,11 @@ impl InnerContext {
     #[inline(always)]
     pub fn with<F, O>(&mut self, f: F) -> O
     where
-        F: FnOnce(&mut FirewheelContext) -> O + Send,
+        F: FnOnce(&mut SeedlingContext) -> O + Send,
         O: Send + 'static,
     {
         let (send, receive) = mpsc::sync_channel(1);
-        let func: Box<dyn FnOnce(&mut FirewheelContext) + Send> = Box::new(move |ctx| {
+        let func: Box<dyn FnOnce(&mut SeedlingContext) + Send> = Box::new(move |ctx| {
             let result = f(ctx);
             send.send(result).unwrap();
         });
@@ -53,8 +61,8 @@ impl InnerContext {
         // so we can pretend it has a static lifetime.
         let func = unsafe {
             core::mem::transmute::<
-                Box<dyn FnOnce(&mut FirewheelContext) + Send>,
-                Box<dyn FnOnce(&mut FirewheelContext) + Send + 'static>,
+                Box<dyn FnOnce(&mut SeedlingContext) + Send>,
+                Box<dyn FnOnce(&mut SeedlingContext) + Send + 'static>,
             >(func)
         };
 

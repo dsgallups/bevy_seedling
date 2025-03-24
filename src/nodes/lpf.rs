@@ -1,50 +1,56 @@
-//! A simple band-pass filter.
+//! One-pole, low-pass filter.
 
 use crate::timeline::Timeline;
 use bevy_ecs::prelude::*;
 use firewheel::{
-    channel_config::ChannelConfig,
-    core::{channel_config::NonZeroChannelCount, clock::ClockSeconds, node::ProcInfo},
+    channel_config::{ChannelConfig, NonZeroChannelCount},
+    clock::ClockSeconds,
     diff::{Diff, Patch},
     event::NodeEventList,
     node::{
         AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, ProcBuffers,
-        ProcessStatus,
+        ProcInfo, ProcessStatus,
     },
 };
 
-/// A simple low-pass filter.
+/// A one-pole, low-pass filter.
 #[derive(Diff, Patch, Debug, Clone, Component)]
-pub struct BandPassNode {
+pub struct LowPassNode {
     /// The cutoff frequency in hertz.
     pub frequency: Timeline<f32>,
-    pub q: Timeline<f32>,
 }
 
-impl BandPassNode {
-    /// Create a new [`BandPassNode`] with an initial cutoff frequency and quality.
+impl Default for LowPassNode {
+    fn default() -> Self {
+        Self::new(1000.)
+    }
+}
+
+impl LowPassNode {
+    /// Create a new [`LowPassNode`] with an initial cutoff frequency.
     ///
     /// ```
-    /// # use bevy_seedling::{*, bpf::BandPassNode};
+    /// # use bevy_seedling::prelude::*;
     /// # use bevy::prelude::*;
     /// # fn system(mut commands: Commands) {
-    /// commands.spawn(BandPassNode::new(1000.0, 1.0));
+    /// commands.spawn(LowPassNode::new(1000.0));
     /// # }
     /// ```
-    pub fn new(frequency: f32, q: f32) -> Self {
+    pub fn new(frequency: f32) -> Self {
         Self {
             frequency: Timeline::new(frequency),
-            q: Timeline::new(q),
         }
     }
 }
 
+/// [`LowPassNode`]'s configuration.
 #[derive(Debug, Component, Clone)]
-pub struct BandPassConfig {
+pub struct LowPassConfig {
+    /// The number of input and output channels.
     pub channels: NonZeroChannelCount,
 }
 
-impl Default for BandPassConfig {
+impl Default for LowPassConfig {
     fn default() -> Self {
         Self {
             channels: NonZeroChannelCount::STEREO,
@@ -52,12 +58,12 @@ impl Default for BandPassConfig {
     }
 }
 
-impl AudioNode for BandPassNode {
-    type Configuration = BandPassConfig;
+impl AudioNode for LowPassNode {
+    type Configuration = LowPassConfig;
 
     fn info(&self, config: &Self::Configuration) -> AudioNodeInfo {
         AudioNodeInfo::new()
-            .debug_name("band-pass filter")
+            .debug_name("low-pass filter")
             .channel_config(ChannelConfig {
                 num_inputs: config.channels.get(),
                 num_outputs: config.channels.get(),
@@ -70,13 +76,12 @@ impl AudioNode for BandPassNode {
         config: &Self::Configuration,
         cx: ConstructProcessorContext,
     ) -> impl AudioNodeProcessor {
-        BandPassProcessor {
+        LowPassProcessor {
             params: self.clone(),
             channels: vec![
-                Bpf::new(
+                Lpf::new(
                     cx.stream_info.sample_rate.get() as f32,
-                    self.frequency.get(),
-                    self.q.get()
+                    self.frequency.get()
                 );
                 config.channels.get().get() as usize
             ],
@@ -85,62 +90,53 @@ impl AudioNode for BandPassNode {
 }
 
 #[derive(Clone)]
-struct Bpf {
-    sample_rate: f32,
-    q: f32,
-    x: (f32, f32),
-    center_freq: f32,
+struct Lpf {
+    freq: f32,
+    prev_out: f32,
+    fixed_coeff: f32,
+    coeff: f32,
 }
 
-impl Bpf {
-    pub fn new(sample_rate: f32, center_freq: f32, q: f32) -> Self {
-        Self {
-            sample_rate,
-            x: (0., 0.),
-            q: q.max(0f32),
-            center_freq: center_freq.clamp(0., 7e3),
+impl Lpf {
+    fn new(sample_rate: f32, frequency: f32) -> Self {
+        let fixed_coeff = core::f32::consts::TAU / sample_rate;
+
+        let mut filter = Self {
+            freq: 0.,
+            prev_out: 0.,
+            fixed_coeff,
+            coeff: 0.,
+        };
+
+        filter.set_frequency(frequency);
+
+        filter
+    }
+
+    /// sets the cutoff frequency, recalculating the required coeff
+    pub fn set_frequency(&mut self, freq: f32) {
+        if freq != self.freq {
+            self.coeff = (freq * self.fixed_coeff).clamp(0.0, 1.0);
+            self.freq = freq;
         }
     }
 
-    pub fn process(&mut self, audio: f32) -> f32 {
-        use core::f32::consts;
-
-        let omega = self.center_freq * consts::TAU / self.sample_rate;
-
-        let one_minus_r = if self.q < 0.001 { 1. } else { omega / self.q }.min(1.);
-
-        let r = 1. - one_minus_r;
-
-        let q_cos = if (-consts::FRAC_PI_2..=consts::FRAC_PI_2).contains(&omega) {
-            let g = omega * omega;
-
-            ((g.powi(3) * (-1.0 / 720.0) + g * g * (1.0 / 24.0)) - g * 0.5) + 1.
-        } else {
-            0.
-        };
-
-        let coefficient_1 = 2. * q_cos * r;
-        let coefficient_2 = -r * r;
-        let gain = 2. * one_minus_r * (one_minus_r + r * omega);
-
-        let last = self.x.0;
-        let previous = self.x.1;
-
-        let bp = audio + coefficient_1 * last + coefficient_2 * previous;
-
-        self.x.1 = self.x.0;
-        self.x.0 = bp;
-
-        gain * bp
+    /// processes a single sample of audio through the filter
+    pub fn process(&mut self, input: f32) -> f32 {
+        // Recalculate frequency coefficient if it has changed.
+        let fb = 1.0 - self.coeff;
+        let output = self.coeff * input + fb * self.prev_out;
+        self.prev_out = output;
+        output
     }
 }
 
-struct BandPassProcessor {
-    params: BandPassNode,
-    channels: Vec<Bpf>,
+struct LowPassProcessor {
+    params: LowPassNode,
+    channels: Vec<Lpf>,
 }
 
-impl AudioNodeProcessor for BandPassProcessor {
+impl AudioNodeProcessor for LowPassProcessor {
     fn process(
         &mut self,
         ProcBuffers {
@@ -151,6 +147,11 @@ impl AudioNodeProcessor for BandPassProcessor {
     ) -> ProcessStatus {
         self.params.patch_list(events);
 
+        // Actually this won't _technically_ be true, since
+        // the filter may cary over a bit of energy from
+        // when the inputs were just active.
+        //
+        // Allowing a bit of settling time would resolve this.
         if proc_info.in_silence_mask.all_channels_silent(inputs.len()) {
             // All inputs are silent.
             return ProcessStatus::ClearAllOutputs;
@@ -164,11 +165,9 @@ impl AudioNodeProcessor for BandPassProcessor {
                 let seconds = seconds + ClockSeconds(sample as f64 * frame_time);
                 self.params.frequency.tick(seconds);
                 let frequency = self.params.frequency.get();
-                let q = self.params.q.get();
 
                 for channel in self.channels.iter_mut() {
-                    channel.center_freq = frequency;
-                    channel.q = q;
+                    channel.set_frequency(frequency);
                 }
             }
 

@@ -34,7 +34,9 @@ pub struct SampleLoader {
 /// Errors produced while loading samples.
 #[derive(Debug)]
 pub enum SampleLoaderError {
+    /// An I/O error, such as missing files.
     StdIo(std::io::Error),
+    /// An error directly from `symphonium`.
     Symphonium(String),
 }
 
@@ -94,6 +96,17 @@ impl AssetLoader for SampleLoader {
     }
 
     fn extensions(&self) -> &[&str] {
-        &["wav"]
+        &[
+            #[cfg(feature = "wav")]
+            "wav",
+            #[cfg(feature = "ogg")]
+            "ogg",
+            #[cfg(feature = "mp3")]
+            "mp3",
+            #[cfg(feature = "flac")]
+            "flac",
+            #[cfg(feature = "mkv")]
+            "mkv",
+        ]
     }
 }

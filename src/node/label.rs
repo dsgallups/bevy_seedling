@@ -6,7 +6,7 @@
 //!
 //! Any node that doesn't provide an explicit connection when spawned
 //! will be automatically connected to [MainBus].
-use crate::connect::NodeMap;
+use crate::edge::NodeMap;
 use crate::prelude::{AudioContext, Connect};
 use bevy_ecs::{component::ComponentId, intern::Interned, prelude::*, world::DeferredWorld};
 use firewheel::{nodes::volume::VolumeNode, Volume};
@@ -24,12 +24,17 @@ use smallvec::SmallVec;
 /// struct EffectsChain;
 ///
 /// fn system(server: Res<AssetServer>, mut commands: Commands) {
-///     commands.spawn((VolumeNode { volume: Volume::Linear(0.25) }, EffectsChain));
+///     commands.spawn((
+///         VolumeNode {
+///             volume: Volume::Linear(0.25),
+///         },
+///         EffectsChain,
+///     ));
 ///
 ///     // Now, any node can simply use `EffectsChain`
 ///     // as a connection target.
 ///     commands
-///         .spawn(SamplePlayer::new(server.load("sound.wav")))
+///         .spawn(SamplePlayer::new(server.load("my_sample.wav")))
 ///         .connect(EffectsChain);
 /// }
 /// ```
@@ -58,7 +63,7 @@ bevy_ecs::define_label!(
     ///     commands.spawn((VolumeNode { volume: Volume::Linear(0.25) }, EffectsChain));
     ///
     ///     commands
-    ///         .spawn(SamplePlayer::new(server.load("sound.wav")))
+    ///         .spawn(SamplePlayer::new(server.load("my_sample.wav")))
     ///         .connect(EffectsChain);
     /// }
     /// ```
@@ -72,10 +77,30 @@ bevy_ecs::define_label!(
 /// reach the output.
 ///
 /// If no connections are specified for an entity
-/// with a [FirewheelNode][crate::prelude::FirewheelNode] component, the
+/// with a [`FirewheelNode`][crate::prelude::FirewheelNode] component, the
 /// node will automatically be routed to this bus.
+/// For example, if you spawn a [`VolumeNode`]:
 ///
-/// [MainBus] is a stereo volume node. To adjust the
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn spawn(mut commands: Commands) {
+/// commands.spawn(VolumeNode::default());
+/// # }
+/// ```
+///
+/// it'll produce a graph like
+///
+/// ```text
+/// ┌──────┐
+/// │Volume│
+/// └┬─────┘
+/// ┌▽──────┐
+/// │MainBus│
+/// └───────┘
+/// ```
+///
+/// [`MainBus`] is a stereo volume node. To adjust the
 /// global volume, you can query for a volume node's parameters
 /// filtered on this label.
 /// ```

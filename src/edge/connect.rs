@@ -1,82 +1,140 @@
-//! Node connection utilities.
-
-use crate::node::label::InternedNodeLabel;
-use crate::prelude::{AudioContext, FirewheelNode, MainBus, NodeLabel};
+use super::{EdgeTarget, NodeMap, PendingEdge, DEFAULT_CONNECTION};
+use crate::{context::AudioContext, node::FirewheelNode};
 use bevy_ecs::prelude::*;
-use bevy_log::{error_once, warn_once};
-use bevy_utils::HashMap;
-use firewheel::node::NodeID;
+use bevy_log::error_once;
 
-/// A target for node connections.
-///
-/// [`ConnectTarget`] can be constructed manually or
-/// used as a part of the [`Connect`] API.
-#[derive(Debug, Clone)]
-pub enum ConnectTarget {
-    /// A global label such as [`MainBus`].
-    Label(InternedNodeLabel),
-    /// An audio entity.
-    Entity(Entity),
-    /// An existing node from the audio graph.
-    Node(NodeID),
-}
+#[cfg(debug_assertions)]
+use core::panic::Location;
 
-/// A pending connection between two nodes.
-#[derive(Debug, Clone)]
-pub struct PendingConnection {
-    pub target: ConnectTarget,
-    /// An optional [`firewheel`] port mapping.
-    ///
-    /// The first tuple element represents the source output,
-    /// and the second tuple element represents the sink input.
-    ///
-    /// If an explicit port mapping is not provided,
-    /// `[(0, 0), (1, 1)]` is used.
-    pub ports: Option<Vec<(u32, u32)>>,
-}
-
-impl From<NodeID> for ConnectTarget {
-    fn from(value: NodeID) -> Self {
-        Self::Node(value)
-    }
-}
-
-impl<T> From<T> for ConnectTarget
-where
-    T: NodeLabel,
-{
-    fn from(value: T) -> Self {
-        Self::Label(value.intern())
-    }
-}
-
-impl From<Entity> for ConnectTarget {
-    fn from(value: Entity) -> Self {
-        Self::Entity(value)
-    }
-}
-
-/// The set of all [`PendingConnection`]s for an entity.
+/// The set of all pending connections for an entity.
 ///
 /// These connections are drained and synchronized with the
 /// audio graph in the [`SeedlingSystems::Connect`][crate::SeedlingSystems::Connect]
 /// set.
 #[derive(Debug, Default, Component)]
-pub struct PendingConnections(Vec<PendingConnection>);
+pub struct PendingConnections(Vec<PendingEdge>);
 
 impl PendingConnections {
     /// Push a new pending connection.
-    pub fn push(&mut self, connection: PendingConnection) {
+    pub fn push(&mut self, connection: PendingEdge) {
         self.0.push(connection)
     }
 }
 
-/// An [`EntityCommands`] extension trait for connecting node entities.
+/// An [`EntityCommands`] extension trait for connecting Firewheel nodes.
 ///
-/// These methods provide only source -> sink connections. The source
-/// is the receiver and the sink is the provided target.
+/// Firewheel features a node-graph audio architecture. Audio processors like [`VolumeNode`] represent
+/// graph _nodes_, and the connections between processors are graph _edges_.
+/// `bevy_seedling` exposes this directly, so you can connect nodes however you like.
+///
+/// [`VolumeNode`]: crate::prelude::VolumeNode
+///
+/// There are two main ways to connect nodes: with [`Entity`], and with [`NodeLabel`].
+///
+/// ## Connecting nodes via [`Entity`]
+///
+/// Any entity with a registered [`FirewheelNode`] is a valid connection target.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn system(mut commands: Commands) {
+/// // Spawn a Firewheel node.
+/// let node_entity = commands.spawn(VolumeNode::default()).id();
+///
+/// // Connect another node to it.
+/// commands.spawn(LowPassNode::default()).connect(node_entity);
+/// # }
+/// ```
+///
+/// In the above example, when the connections are finalized at the end of the frame, the output
+/// of the low-pass node will be connected to the input of the volume node:
+///
+/// ```text
+/// ┌───────┐
+/// │LowPass│
+/// └┬──────┘
+/// ┌▽─────────┐
+/// │VolumeNode│
+/// └┬─────────┘
+/// ┌▽──────┐
+/// │MainBus│
+/// └───────┘
+/// ```
+///
+/// Note how the [`VolumeNode`] is implicitly routed to the [`MainBus`];
+/// this is true for _any_ node that has no specified routing.
+/// This should keep your connections just a little more terse!
+///
+/// [`MainBus`]: crate::prelude::MainBus
+///
+/// ## Connecting via [`NodeLabel`]
+///
+/// An entity with a component deriving [`NodeLabel`] is also a valid connection target.
+/// Since Rust types can have global, static visibility, node labels are especially useful
+/// for common connections points like busses or effects chains.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// // Each type that derives `NodeLabel` also needs a few additional traits.
+/// #[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct EffectsChain;
+///
+/// fn spawn_chain(mut commands: Commands) {
+///     // Once spawned with this label, any other node can connect
+///     // to this one without knowing its exact `Entity`.
+///     commands.spawn((EffectsChain, LowPassNode::default()));
+/// }
+///
+/// fn add_to_chain(mut commands: Commands) {
+///     // Let's add even more processing!
+///     //
+///     // Keep in mind this new connection point is only
+///     // visible within this system, since we don't spawn
+///     // `BandPassNode` with any labels.
+///     let additional_processing = commands
+///         .spawn(BandPassNode::default())
+///         .connect(EffectsChain);
+/// }
+/// ```
+///
+/// ## Chaining nodes
+///
+/// You'll often find yourself connecting several nodes one after another
+/// in a chain. [`Connect`] provides an API to ease this process.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn system(mut commands: Commands) {
+/// commands
+///     .spawn(VolumeNode::default())
+///     .chain_node(LowPassNode::default())
+///     .chain_node(SpatialBasicNode::default());
+/// # }
+/// ```
+///
+/// When spawning nodes this way, you may want to recover the [`Entity`] of the first node
+/// in the chain. [`Connect::head`] provides this information, regardless of how
+/// long your chain is.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn system(mut commands: Commands) {
+/// let chain_head = commands
+///     .spawn(VolumeNode::default())
+///     .chain_node(LowPassNode::default())
+///     .chain_node(SpatialBasicNode::default())
+///     .head();
+///
+/// commands.spawn(BandPassNode::default()).connect(chain_head);
+/// # }
+/// ```
 ///
 /// [`EntityCommands`]: bevy_ecs::prelude::EntityCommands
+/// [`NodeLabel`]: crate::prelude::NodeLabel
 pub trait Connect<'a>: Sized {
     /// Queue a connection from this entity to the target.
     ///
@@ -86,14 +144,12 @@ pub trait Connect<'a>: Sized {
     /// # fn system(mut commands: Commands) {
     /// // Connect a node to the MainBus.
     /// let node = commands
-    ///     .spawn(VolumeNode { volume: Volume::Linear(0.5) })
+    ///     .spawn(VolumeNode::default())
     ///     .connect(MainBus)
     ///     .head();
     ///
     /// // Connect another node to the one we just spawned.
-    /// commands
-    ///     .spawn(VolumeNode { volume: Volume::Linear(0.25) })
-    ///     .connect(node);
+    /// commands.spawn(VolumeNode::default()).connect(node);
     /// # }
     /// ```
     ///
@@ -103,7 +159,9 @@ pub trait Connect<'a>: Sized {
     ///
     /// The connection is deferred, finalizing in the
     /// [`SeedlingSystems::Connect`][crate::SeedlingSystems::Connect] set.
-    fn connect(self, target: impl Into<ConnectTarget>) -> ConnectCommands<'a> {
+    #[cfg_attr(debug_assertions, track_caller)]
+    #[inline]
+    fn connect(self, target: impl Into<EdgeTarget>) -> ConnectCommands<'a> {
         self.connect_with(target, DEFAULT_CONNECTION)
     }
 
@@ -111,45 +169,92 @@ pub trait Connect<'a>: Sized {
     ///
     /// The connection is deferred, finalizing in the
     /// [`SeedlingSystems::Connect`][crate::SeedlingSystems::Connect] set.
+    #[cfg_attr(debug_assertions, track_caller)]
     fn connect_with(
         self,
-        target: impl Into<ConnectTarget>,
+        target: impl Into<EdgeTarget>,
         ports: &[(u32, u32)],
     ) -> ConnectCommands<'a>;
 
+    /// Chain a node's output into this node's input.
+    ///
+    /// This allows you to easily build up effects chains.
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::prelude::*;
+    /// # fn head(mut commands: Commands, server: Res<AssetServer>) {
+    /// commands
+    ///     .spawn(LowPassNode::default())
+    ///     .chain_node(BandPassNode::default())
+    ///     .chain_node(VolumeNode::default());
+    /// # }
+    /// ```
+    #[cfg_attr(debug_assertions, track_caller)]
+    #[inline]
     fn chain_node<B: Bundle>(self, node: B) -> ConnectCommands<'a> {
         self.chain_node_with(node, DEFAULT_CONNECTION)
     }
 
+    /// Chain a node with a manually-specified connection.
+    ///
+    /// This connection will be made between the previous node's output
+    /// and this node's input.
+    #[cfg_attr(debug_assertions, track_caller)]
     fn chain_node_with<B: Bundle>(self, node: B, ports: &[(u32, u32)]) -> ConnectCommands<'a>;
 
-    // Get the head of this chain.
+    /// Get the head of this chain.
+    ///
+    /// This makes it easy to recover the input of a chain of nodes.
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::prelude::*;
+    /// fn head(mut commands: Commands, server: Res<AssetServer>) {
+    ///     let chain_input = commands
+    ///         .spawn(LowPassNode::default())
+    ///         .chain_node(BandPassNode::default())
+    ///         .chain_node(VolumeNode::default())
+    ///         .head();
+    ///
+    ///     commands
+    ///         .spawn(SamplePlayer::new(server.load("my_sample.wav")))
+    ///         .effect(SendNode::new(Volume::UNITY_GAIN, chain_input));
+    /// }
+    /// ```
+    #[must_use]
     fn head(&self) -> Entity;
 
-    // Get the tail of this chain.
-    //
-    // This will be produce the same value
-    // as [`ConnectCommands::head`] if only one
-    // node has been spawned.
+    /// Get the tail of this chain.
+    ///
+    /// This will be produce the same value
+    /// as [`Connect::head`] if only one
+    /// node has been spawned.
+    #[must_use]
     fn tail(&self) -> Entity;
 }
 
 impl<'a> Connect<'a> for EntityCommands<'a> {
     fn connect_with(
         mut self,
-        target: impl Into<ConnectTarget>,
+        target: impl Into<EdgeTarget>,
         ports: &[(u32, u32)],
     ) -> ConnectCommands<'a> {
         let target = target.into();
         let ports = ports.to_vec();
 
+        #[cfg(debug_assertions)]
+        let location = Location::caller();
+
         self.entry::<PendingConnections>()
             .or_default()
             .and_modify(|mut pending| {
-                pending.push(PendingConnection {
+                pending.push(PendingEdge::new_with_location(
                     target,
-                    ports: Some(ports),
-                });
+                    Some(ports),
+                    #[cfg(debug_assertions)]
+                    location,
+                ));
             });
 
         ConnectCommands::new(self)
@@ -164,19 +269,22 @@ impl<'a> Connect<'a> for EntityCommands<'a> {
         new_connection
     }
 
+    #[inline(always)]
     fn head(&self) -> Entity {
         self.id()
     }
 
+    #[inline(always)]
     fn tail(&self) -> Entity {
         self.id()
     }
 }
 
 impl<'a> Connect<'a> for ConnectCommands<'a> {
+    #[cfg_attr(debug_assertions, track_caller)]
     fn connect_with(
         mut self,
-        target: impl Into<ConnectTarget>,
+        target: impl Into<EdgeTarget>,
         ports: &[(u32, u32)],
     ) -> ConnectCommands<'a> {
         let tail = self.tail();
@@ -187,14 +295,19 @@ impl<'a> Connect<'a> for ConnectCommands<'a> {
         let target = target.into();
         let ports = ports.to_vec();
 
+        #[cfg(debug_assertions)]
+        let location = Location::caller();
+
         commands
             .entry::<PendingConnections>()
             .or_default()
             .and_modify(|mut pending| {
-                pending.push(PendingConnection {
+                pending.push(PendingEdge::new_with_location(
                     target,
-                    ports: Some(ports),
-                });
+                    Some(ports),
+                    #[cfg(debug_assertions)]
+                    location,
+                ));
             });
 
         self
@@ -209,10 +322,12 @@ impl<'a> Connect<'a> for ConnectCommands<'a> {
         new_connection
     }
 
+    #[inline(always)]
     fn head(&self) -> Entity {
         <Self>::head(self)
     }
 
+    #[inline(always)]
     fn tail(&self) -> Entity {
         <Self>::tail(self)
     }
@@ -251,13 +366,11 @@ impl<'a> ConnectCommands<'a> {
 
 impl core::fmt::Debug for ConnectCommands<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ChainConnection")
+        f.debug_struct("ConnectCommands")
             .field("entity", &self.head)
             .finish_non_exhaustive()
     }
 }
-
-const DEFAULT_CONNECTION: &[(u32, u32)] = &[(0, 0), (1, 1)];
 
 // this has turned into a bit of a monster
 pub(crate) fn process_connections(
@@ -272,10 +385,16 @@ pub(crate) fn process_connections(
                 let ports = connection.ports.as_deref().unwrap_or(DEFAULT_CONNECTION);
 
                 let target_entity = match connection.target {
-                    ConnectTarget::Entity(entity) => entity,
-                    ConnectTarget::Label(label) => {
+                    EdgeTarget::Entity(entity) => entity,
+                    EdgeTarget::Label(label) => {
                         let Some(entity) = node_map.get(&label) else {
-                            warn_once!("tried to connect audio node to label with no node");
+                            #[cfg(debug_assertions)]
+                            {
+                                let location = connection.origin;
+                                error_once!("failed to connect to node label `{label:?}` at {location}: no associated Firewheel node found");
+                            }
+                            #[cfg(not(debug_assertions))]
+                            error_once!("failed to connect to node label `{label:?}`: no associated Firewheel node found");
 
                             // We may need to wait for the intended label to be spawned.
                             return true;
@@ -283,7 +402,7 @@ pub(crate) fn process_connections(
 
                         *entity
                     }
-                    ConnectTarget::Node(dest_node) => {
+                    EdgeTarget::Node(dest_node) => {
                         // no questions asked, simply connect
                         if let Err(e) = context.connect(source_node.0, dest_node, ports, false) {
                             error_once!("failed to connect audio node to target: {e}");
@@ -297,7 +416,14 @@ pub(crate) fn process_connections(
                 let target = match targets.get(target_entity) {
                     Ok(t) => t,
                     Err(_) => {
-                        error_once!("failed to fetch audio node entity {target_entity:?}");
+                        #[cfg(debug_assertions)]
+                        {
+                            let location = connection.origin;
+                            error_once!("failed to connect to entity `{target_entity:?}` at {location}: no Firewheel node found");
+                        }
+                        #[cfg(not(debug_assertions))]
+                        error_once!("failed to connect to entity `{target_entity:?}`: no Firewheel node found");
+
                         return false;
                     }
                 };
@@ -312,42 +438,11 @@ pub(crate) fn process_connections(
     });
 }
 
-/// A map that associates [`NodeLabel`]s with audio
-/// graph nodes.
-///
-/// This will be automatically synchronized for
-/// entities with both a [`FirewheelNode`] and [`NodeLabel`]
-/// component.
-#[derive(Default, Debug, Resource)]
-pub struct NodeMap(HashMap<InternedNodeLabel, Entity>);
-
-impl core::ops::Deref for NodeMap {
-    type Target = HashMap<InternedNodeLabel, Entity>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for NodeMap {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-/// Automatically connect nodes without manual connections to the main bus.
-pub(crate) fn auto_connect(
-    nodes: Query<Entity, (With<FirewheelNode>, Without<PendingConnections>)>,
-    mut commands: Commands,
-) {
-    for node in nodes.iter() {
-        commands.entity(node).connect(MainBus);
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use crate::SeedlingPlugin;
+    use crate::{
+        context::AudioContext, prelude::MainBus, profiling::ProfilingBackend, SeedlingPlugin,
+    };
 
     use super::*;
     use bevy::prelude::*;
@@ -367,9 +462,9 @@ mod test {
         app.add_plugins((
             MinimalPlugins,
             AssetPlugin::default(),
-            SeedlingPlugin {
-                sample_pool_size: None,
-                ..Default::default()
+            SeedlingPlugin::<ProfilingBackend> {
+                default_pool_size: None,
+                ..SeedlingPlugin::<ProfilingBackend>::new()
             },
         ))
         .add_systems(Startup, startup);
@@ -402,12 +497,18 @@ mod test {
 
                     context.with(|context| {
                         // input node, output node, One, Two, and MainBus
-                        assert_eq!(context.nodes().count(), 5);
+                        assert_eq!(context.nodes().len(), 5);
 
-                        let outgoing_edges_one: Vec<_> =
-                            context.edges().filter(|e| e.src_node == one.0).collect();
-                        let outgoing_edges_two: Vec<_> =
-                            context.edges().filter(|e| e.src_node == two.0).collect();
+                        let outgoing_edges_one: Vec<_> = context
+                            .edges()
+                            .into_iter()
+                            .filter(|e| e.src_node == one.0)
+                            .collect();
+                        let outgoing_edges_two: Vec<_> = context
+                            .edges()
+                            .into_iter()
+                            .filter(|e| e.src_node == two.0)
+                            .collect();
 
                         assert_eq!(outgoing_edges_one.len(), 2);
                         assert_eq!(outgoing_edges_two.len(), 2);
@@ -444,10 +545,13 @@ mod test {
 
                     context.with(|context| {
                         // input node, output node, One, Two, Three, and MainBus
-                        assert_eq!(context.nodes().count(), 6);
+                        assert_eq!(context.nodes().len(), 6);
 
-                        let outgoing_edges_three: Vec<_> =
-                            context.edges().filter(|e| e.src_node == three.0).collect();
+                        let outgoing_edges_three: Vec<_> = context
+                            .edges()
+                            .into_iter()
+                            .filter(|e| e.src_node == three.0)
+                            .collect();
 
                         assert_eq!(
                             outgoing_edges_three

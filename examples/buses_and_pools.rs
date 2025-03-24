@@ -22,23 +22,18 @@ fn main() {
             Startup,
             |server: Res<AssetServer>, mut commands: Commands| {
                 // Here we create a volume node that acts as the entry to
-                // our effects bus and we connect it to the effects.
+                // our effects bus.
                 //
                 // When we spawn it with the `EffectsBus` label, any node
                 // can use this type to connect to this node anywhere in
                 // the code.
                 commands
-                    .spawn((
-                        VolumeNode {
-                            volume: Volume::UNITY_GAIN,
-                        },
-                        EffectsBus,
-                    ))
+                    .spawn((VolumeNode::default(), EffectsBus))
                     // Any arbitrary effects chain can go here, but
-                    // let's just insert a low-pass filter.
+                    // let's just insert a reverb node.
                     //
                     // This node is implicitly connected to the `MainBus`.
-                    .chain_node(LowPassNode::new(10000.));
+                    .chain_node(FreeverbNode::default());
 
                 // Let's create a new sample player pool and route it to our effects bus.
                 Pool::new(EffectsPool, 4)
@@ -47,7 +42,7 @@ fn main() {
 
                 // Finally, let's play a sample through the chain.
                 commands.spawn((
-                    SamplePlayer::new(server.load("snd_wobbler.wav")),
+                    SamplePlayer::new(server.load("caw.ogg")),
                     PlaybackSettings::LOOP,
                     EffectsPool,
                 ));
