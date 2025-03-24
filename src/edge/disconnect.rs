@@ -97,7 +97,7 @@ pub trait Disconnect: Sized {
     fn disconnect_with(self, target: impl Into<EdgeTarget>, ports: &[(u32, u32)]) -> Self;
 }
 
-impl<'a> Disconnect for EntityCommands<'a> {
+impl Disconnect for EntityCommands<'_> {
     fn disconnect_with(mut self, target: impl Into<EdgeTarget>, ports: &[(u32, u32)]) -> Self {
         let target = target.into();
         let ports = ports.to_vec();
