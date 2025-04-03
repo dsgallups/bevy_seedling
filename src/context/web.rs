@@ -1,5 +1,6 @@
+use crate::context::SeedlingContext;
 use core::cell::RefCell;
-use firewheel::{FirewheelConfig, FirewheelContext};
+use firewheel::{backend::AudioBackend, FirewheelConfig, FirewheelCtx};
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
@@ -13,10 +14,15 @@ pub struct InnerContext(());
 impl InnerContext {
     /// Spawn the audio process and control thread.
     #[inline(always)]
-    pub fn new(settings: FirewheelConfig) -> Self {
-        let mut context = FirewheelContext::new(settings);
+    pub fn new<B>(settings: FirewheelConfig, stream_settings: B::Config) -> Self
+    where
+        B: AudioBackend + 'static,
+        B::Config: Send + 'static,
+        B::StreamError: Send + Sync + 'static,
+    {
+        let mut context = FirewheelCtx::<B>::new(settings);
         context
-            .start_stream(Default::default())
+            .start_stream(stream_settings)
             .expect("failed to activate the audio context");
 
         CONTEXT.set(SeedlingContext::new(context));
@@ -28,7 +34,7 @@ impl InnerContext {
     #[inline(always)]
     pub fn with<F, O>(&mut self, f: F) -> O
     where
-        F: FnOnce(&mut FirewheelContext) -> O + Send,
+        F: FnOnce(&mut SeedlingContext) -> O + Send,
         O: Send + 'static,
     {
         CONTEXT.with(|c| f(&mut c.borrow_mut()))
