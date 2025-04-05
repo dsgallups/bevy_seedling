@@ -143,9 +143,9 @@ impl AudioNodeProcessor for LowPassProcessor {
             inputs, outputs, ..
         }: ProcBuffers,
         proc_info: &ProcInfo,
-        events: NodeEventList,
+        mut events: NodeEventList,
     ) -> ProcessStatus {
-        self.params.patch_list(events);
+        events.for_each_patch::<LowPassNode>(|p| self.params.apply(p));
 
         // Actually this won't _technically_ be true, since
         // the filter may cary over a bit of energy from

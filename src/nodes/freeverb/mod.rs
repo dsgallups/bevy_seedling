@@ -89,9 +89,15 @@ impl AudioNodeProcessor for FreeverbProcessor {
             inputs, outputs, ..
         }: ProcBuffers,
         proc_info: &ProcInfo,
-        events: NodeEventList,
+        mut events: NodeEventList,
     ) -> ProcessStatus {
-        if self.params.patch_list(events) {
+        let mut changed = false;
+        events.for_each_patch::<FreeverbNode>(|p| {
+            changed = true;
+            self.params.apply(p);
+        });
+
+        if changed {
             self.params.apply_params(&mut self.freeverb);
         }
 

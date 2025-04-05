@@ -273,14 +273,16 @@ impl<T: Clone + Send + Sync + 'static> Diff for Timeline<T> {
 }
 
 impl<T: Ease + Clone + 'static> Patch for Timeline<T> {
-    fn patch(&mut self, data: &ParamData, _: &[u32]) -> Result<(), PatchError> {
+    type Patch = TimelineEvent<T>;
+
+    fn patch(data: &ParamData, _: &[u32]) -> Result<Self::Patch, PatchError> {
         let value: &TimelineEvent<T> = data.downcast_ref().ok_or(PatchError::InvalidData)?;
 
-        // There's not much error handling that can be
-        // done in the audio thread.
-        let _ = self.push(value.clone());
+        Ok(value.clone())
+    }
 
-        Ok(())
+    fn apply(&mut self, patch: Self::Patch) {
+        let _ = self.push(patch);
     }
 }
 

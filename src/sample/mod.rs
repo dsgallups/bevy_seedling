@@ -4,7 +4,10 @@ use crate::node::ExcludeNode;
 use crate::prelude::Volume;
 use bevy_asset::Handle;
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
-use firewheel::nodes::sampler::RepeatMode;
+use firewheel::{
+    diff::Notify,
+    nodes::sampler::{PlaybackState, Playhead, RepeatMode, SamplerState},
+};
 
 mod assets;
 
@@ -119,7 +122,10 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 #[derive(Debug, Component, Clone)]
 #[require(PlaybackSettings, ExcludeNode)]
 #[component(on_insert = on_insert_sample)]
-pub struct SamplePlayer(pub(crate) Handle<Sample>);
+pub struct SamplePlayer {
+    pub(crate) sample: Handle<Sample>,
+    player: Option<Player>,
+}
 
 fn on_insert_sample(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
     world.commands().entity(entity).insert(QueuedSample);
@@ -138,7 +144,48 @@ impl SamplePlayer {
     ///
     /// This immediately queues up the sample for playback.
     pub fn new(handle: Handle<Sample>) -> Self {
-        Self(handle)
+        Self {
+            sample: handle,
+            player: None,
+        }
+    }
+
+    /// Returns whether this sample is currently playing.
+    pub fn is_playing(&self) -> bool {
+        self.player
+            .as_ref()
+            .map(|p| !p.state.stopped())
+            .unwrap_or_default()
+    }
+
+    /// Returns the current playhead in frames.
+    ///
+    /// If this sample player has not yet been assigned to a pool,
+    /// this returns `None`.
+    pub fn playhead_frames(&self) -> Option<u64> {
+        self.player.as_ref().map(|p| p.state.playhead_frames())
+    }
+
+    pub(crate) fn set_sampler(&mut self, entity: Entity, state: SamplerState) {
+        self.player = Some(Player { state, entity });
+    }
+
+    pub(crate) fn clear_sampler(&mut self) {
+        self.player = None;
+    }
+}
+
+#[derive(Clone)]
+struct Player {
+    state: SamplerState,
+    entity: Entity,
+}
+
+impl core::fmt::Debug for Player {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Player")
+            .field("entity", &self.entity)
+            .finish_non_exhaustive()
     }
 }
 
@@ -147,10 +194,26 @@ impl SamplePlayer {
 pub struct PlaybackSettings {
     /// Sets the sample's [`RepeatMode`].
     pub repeat_mode: RepeatMode,
+
     /// Determines this sample's behavior on playback completion.
     pub on_complete: OnComplete,
+
     /// Sets the volume of the sample.
     pub volume: Volume,
+
+    /// Sets the playback state.
+    ///
+    /// This field provides only one-way communication with the
+    /// audio processor. To get whether the sample is playing,
+    /// see [`SamplePlayer::is_playing`].
+    pub playback: Notify<PlaybackState>,
+
+    /// Sets the playhead.
+    ///
+    /// This field provides only one-way communication with the
+    /// audio processor. To get the current value of the playhead,
+    /// see [`SamplePlayer::playhead_frames`].
+    pub playhead: Notify<Playhead>,
 }
 
 impl PlaybackSettings {
@@ -160,6 +223,8 @@ impl PlaybackSettings {
         repeat_mode: RepeatMode::PlayOnce,
         volume: Volume::Linear(1.0),
         on_complete: OnComplete::Despawn,
+        playback: Notify::new(PlaybackState::Play { delay: None }),
+        playhead: Notify::new(Playhead::Frames(0)),
     };
 
     /// Repeatedly loop the audio source until
@@ -168,6 +233,8 @@ impl PlaybackSettings {
         repeat_mode: RepeatMode::RepeatEndlessly,
         volume: Volume::Linear(1.0),
         on_complete: OnComplete::Despawn,
+        playback: Notify::new(PlaybackState::Play { delay: None }),
+        playhead: Notify::new(Playhead::Frames(0)),
     };
 
     /// Play the sample once, removing the audio-related components on completion.
@@ -175,6 +242,8 @@ impl PlaybackSettings {
         repeat_mode: RepeatMode::PlayOnce,
         volume: Volume::Linear(1.0),
         on_complete: OnComplete::Remove,
+        playback: Notify::new(PlaybackState::Play { delay: None }),
+        playhead: Notify::new(Playhead::Frames(0)),
     };
 
     /// Play the sample once, preserving the components and entity on completion.
@@ -182,6 +251,8 @@ impl PlaybackSettings {
         repeat_mode: RepeatMode::PlayOnce,
         volume: Volume::Linear(1.0),
         on_complete: OnComplete::Preserve,
+        playback: Notify::new(PlaybackState::Play { delay: None }),
+        playhead: Notify::new(Playhead::Frames(0)),
     };
 }
 

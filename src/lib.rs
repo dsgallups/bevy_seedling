@@ -376,8 +376,7 @@ where
             .register_node::<VolumeNode>()
             .register_node::<VolumePanNode>()
             .register_node::<SpatialBasicNode>()
-            .register_simple_node::<StereoToMonoNode>()
-            .register_simple_node::<SamplerNode>();
+            .register_simple_node::<StereoToMonoNode>();
 
         #[cfg(feature = "stream")]
         app.register_simple_node::<StreamReaderNode>()

@@ -54,6 +54,25 @@ impl Events {
     }
 }
 
+fn apply_patch<T: Patch>(value: &mut T, event: &NodeEventType) {
+    let NodeEventType::Param { data, path } = event else {
+        return;
+    };
+
+    match T::patch(data, path) {
+        Ok(patch) => {
+            value.apply(patch);
+        }
+        Err(e) => {
+            bevy_log::error!(
+                "Failed to apply patch for {}: {:?}",
+                core::any::type_name::<T>(),
+                e
+            );
+        }
+    }
+}
+
 fn generate_param_events<T: Diff + Patch + Component + Clone>(
     mut nodes: Query<(&T, &mut Baseline<T>, &mut Events), (Changed<T>, Without<ExcludeNode>)>,
 ) {
@@ -66,7 +85,7 @@ fn generate_param_events<T: Diff + Patch + Component + Clone>(
 
         // Patch the baseline.
         for event in &events.0[starting_len..] {
-            baseline.0.patch_event(event);
+            apply_patch(&mut baseline.0, event);
         }
     }
 }
@@ -371,7 +390,7 @@ pub(crate) fn param_follower<T: Diff + Patch + Component>(
         source.diff(&params, PathBuilder::default(), &mut event_queue);
 
         for event in event_queue.drain(..) {
-            params.patch_event(&event);
+            apply_patch(params.as_mut(), &event);
         }
     }
 }

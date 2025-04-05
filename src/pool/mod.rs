@@ -1,17 +1,17 @@
 //! Sampler pools, which represent primary sampler player mechanism.
 
-use crate::node::ParamFollower;
+use crate::node::{ParamFollower, RegisterNode};
 use crate::prelude::{AudioContext, Connect, DefaultPool, FirewheelNode, PoolLabel, VolumeNode};
 use crate::sample::{OnComplete, PlaybackSettings, QueuedSample, Sample, SamplePlayer};
-use crate::{node::Events, SeedlingSystems};
+use crate::SeedlingSystems;
 use bevy_app::{Last, Plugin, PostUpdate};
 use bevy_asset::Assets;
 use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
 use bevy_hierarchy::DespawnRecursiveExt;
 use bevy_utils::HashSet;
 use dynamic::DynamicPoolRegistry;
+use firewheel::nodes::sampler::PlaybackState;
 use firewheel::{
-    event::{NodeEventType, SequenceCommand},
     nodes::sampler::{SamplerNode, SamplerState},
     Volume,
 };
@@ -32,7 +32,7 @@ impl Plugin for SamplePoolPlugin {
             .add_systems(
                 Last,
                 (
-                    (remove_finished, assign_default)
+                    (remove_finished, assign_default, retrieve_state)
                         .before(SeedlingSystems::Queue)
                         .after(SeedlingSystems::Acquire),
                     monitor_active
@@ -40,8 +40,33 @@ impl Plugin for SamplePoolPlugin {
                         .after(SeedlingSystems::Queue),
                 ),
             )
-            .add_systems(PostUpdate, dynamic::update_auto_pools);
+            .add_systems(PostUpdate, dynamic::update_auto_pools)
+            .register_node::<SamplerNode>();
     }
+}
+
+#[derive(Component)]
+struct SamplerStateWrapper(SamplerState);
+
+fn retrieve_state(
+    q: Query<(Entity, &FirewheelNode), (With<SamplerNode>, Without<SamplerStateWrapper>)>,
+    mut commands: Commands,
+    mut context: ResMut<AudioContext>,
+) {
+    if q.iter().len() == 0 {
+        return;
+    }
+
+    context.with(|ctx| {
+        for (entity, node_id) in q.iter() {
+            let Some(state) = ctx.node_state::<SamplerState>(node_id.0) else {
+                continue;
+            };
+            commands
+                .entity(entity)
+                .insert(SamplerStateWrapper(state.clone()));
+        }
+    });
 }
 
 /// Spawn an effects chain, connecting all nodes and
@@ -293,6 +318,7 @@ fn remove_finished(
     nodes: Query<
         (
             Entity,
+            &SamplerNode,
             &EffectsChain,
             &FirewheelNode,
             &ActiveSample,
@@ -300,33 +326,36 @@ fn remove_finished(
         ),
         With<SamplerNode>,
     >,
-    samples: Query<&PlaybackSettings>,
+    mut samples: Query<(&mut SamplePlayer, &PlaybackSettings)>,
     roots: Query<&SamplePoolTypes>,
     mut commands: Commands,
     mut context: ResMut<AudioContext>,
 ) {
     context.with(|context| {
-        for (entity, effects_chain, node, active, pool_root) in nodes.iter() {
+        for (entity, sampler_node, effects_chain, node, active, pool_root) in nodes.iter() {
             let Some(state) = context.node_state::<SamplerState>(node.0) else {
                 continue;
             };
 
-            let state = state.playback_state();
+            let stopped = state.stopped();
 
-            // TODO: this will remove samples when paused
-            if !state.is_playing() {
+            // The sample completed playback in one-shot mode.
+            if stopped && matches!(*sampler_node.playback, PlaybackState::Play { .. }) {
                 commands.entity(entity).remove::<ActiveSample>();
 
                 for effect in effects_chain.0.iter() {
                     commands.entity(*effect).remove::<ParamFollower>();
                 }
 
-                let Ok(settings) = samples.get(active.sample_entity) else {
+                let Ok((mut sample_player, settings)) = samples.get_mut(active.sample_entity)
+                else {
                     continue;
                 };
 
                 match settings.on_complete {
-                    OnComplete::Preserve => {}
+                    OnComplete::Preserve => {
+                        sample_player.clear_sampler();
+                    }
                     OnComplete::Remove => {
                         let Ok(root) = roots.get(pool_root.0) else {
                             continue;
@@ -357,16 +386,15 @@ fn assign_work<T: Component + Clone>(
         (
             Entity,
             &mut SamplerNode,
-            &mut Events,
             &EffectsChain,
-            &FirewheelNode,
+            &SamplerStateWrapper,
         ),
         (With<SamplePoolNode>, With<T>),
     >,
-    queued_samples: Query<
+    mut queued_samples: Query<
         (
             Entity,
-            &SamplePlayer,
+            &mut SamplePlayer,
             &PlaybackSettings,
             &PoolLabelContainer,
         ),
@@ -383,82 +411,73 @@ fn assign_work<T: Component + Clone>(
     )>,
     assets: Res<Assets<Sample>>,
     mut commands: Commands,
-    mut context: ResMut<AudioContext>,
 ) {
-    context.with(|context| {
-        for (sample, player, settings, label) in queued_samples.iter() {
-            let Some(asset) = assets.get(&player.0) else {
-                continue;
-            };
+    for (sample, mut player, settings, label) in queued_samples.iter_mut() {
+        let Some(asset) = assets.get(&player.sample) else {
+            continue;
+        };
 
-            let Some((pool_entity, mut rank, defaults, pool_label, _, pool_range, mut pool_nodes)) =
-                pools.iter_mut().find(|pool| pool.4.label == label.label)
-            else {
-                continue;
-            };
+        let Some((pool_entity, mut rank, defaults, pool_label, _, pool_range, mut pool_nodes)) =
+            pools.iter_mut().find(|pool| pool.4.label == label.label)
+        else {
+            continue;
+        };
 
-            // get the best candidate
-            let Some((node_entity, _)) = rank.0.first() else {
-                // Try to grow the pool if it's reached max capacity.
-                // TODO: find a decent way to do this eagerly.
-                let current_size = pool_nodes.len();
-                let max_size = *pool_range.0.end();
+        // get the best candidate
+        let Some((node_entity, _)) = rank.0.first() else {
+            // Try to grow the pool if it's reached max capacity.
+            // TODO: find a decent way to do this eagerly.
+            let current_size = pool_nodes.len();
+            let max_size = *pool_range.0.end();
 
-                if current_size < max_size {
-                    let new_size = (current_size * 2).min(max_size);
+            if current_size < max_size {
+                let new_size = (current_size * 2).min(max_size);
 
-                    for _ in 0..new_size - current_size {
-                        let new_sampler =
-                            spawn_chain(pool_entity, defaults, pool_label.clone(), &mut commands);
-                        pool_nodes.0.push(new_sampler);
-                    }
+                for _ in 0..new_size - current_size {
+                    let new_sampler =
+                        spawn_chain(pool_entity, defaults, pool_label.clone(), &mut commands);
+                    pool_nodes.0.push(new_sampler);
                 }
-
-                continue;
-            };
-
-            let Ok((node_entity, mut params, mut events, effects_chain, sampler_id)) =
-                nodes.get_mut(*node_entity)
-            else {
-                continue;
-            };
-
-            let Some(sampler_state) = context.node_state::<SamplerState>(sampler_id.0) else {
-                continue;
-            };
-
-            params.set_sample(asset.get(), settings.volume, settings.repeat_mode);
-            let event = sampler_state.sync_params_event(&params, true);
-            events.push(event);
-
-            // redirect all parameters to follow the sample source
-            for effect in effects_chain.0.iter() {
-                commands.entity(*effect).insert(ParamFollower(sample));
             }
 
-            // Insert default pool parameters if not present.
-            for ty in defaults.0.iter() {
-                ty.insert_default(&mut commands.entity(sample));
-            }
+            continue;
+        };
 
-            rank.0.remove(0);
-            commands.entity(sample).remove::<QueuedSample>();
-            commands.entity(node_entity).insert(ActiveSample {
-                sample_entity: sample,
-            });
+        let Ok((node_entity, mut params, effects_chain, state)) = nodes.get_mut(*node_entity)
+        else {
+            continue;
+        };
+
+        params.set_sample(asset.get(), settings.volume, settings.repeat_mode);
+        player.set_sampler(node_entity, state.0.clone());
+
+        // redirect all parameters to follow the sample source
+        for effect in effects_chain.0.iter() {
+            commands.entity(*effect).insert(ParamFollower(sample));
         }
-    });
+
+        // Insert default pool parameters if not present.
+        for ty in defaults.0.iter() {
+            ty.insert_default(&mut commands.entity(sample));
+        }
+
+        rank.0.remove(0);
+        commands.entity(sample).remove::<QueuedSample>();
+        commands.entity(node_entity).insert(ActiveSample {
+            sample_entity: sample,
+        });
+    }
 }
 
 // Stop playback if the source entity no longer exists.
 fn monitor_active(
-    mut nodes: Query<(Entity, &ActiveSample, &mut Events, &EffectsChain)>,
+    mut nodes: Query<(Entity, &mut SamplerNode, &ActiveSample, &EffectsChain)>,
     samples: Query<&SamplePlayer>,
     mut commands: Commands,
 ) {
-    for (node_entity, active, mut events, effects_chain) in nodes.iter_mut() {
+    for (node_entity, mut sampler, active, effects_chain) in nodes.iter_mut() {
         if samples.get(active.sample_entity).is_err() {
-            events.push(NodeEventType::SequenceCommand(SequenceCommand::Stop));
+            sampler.stop();
 
             commands.entity(node_entity).remove::<ActiveSample>();
 

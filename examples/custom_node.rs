@@ -107,12 +107,12 @@ impl AudioNodeProcessor for VolumeProcessor {
             inputs, outputs, ..
         }: ProcBuffers,
         proc_info: &ProcInfo,
-        events: NodeEventList,
+        mut events: NodeEventList,
     ) -> ProcessStatus {
         // This will iterate over this node's events,
         // applying any patches sent from the ECS in a
         // realtime-safe way.
-        self.params.patch_list(events);
+        events.for_each_patch::<CustomVolumeNode>(|patch| self.params.apply(patch));
 
         // Firewheel will inform you if an input channel is silent. If they're
         // all silent, we can simply skip processing and save CPU time.

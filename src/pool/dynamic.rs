@@ -353,7 +353,7 @@ mod test {
                 |players: Query<&SamplePlayer>, server: Res<AssetServer>| {
                     let first = players.iter().next().unwrap();
 
-                    server.is_loaded(&first.0)
+                    server.is_loaded(&first.sample)
                 },
             ) {
                 break;
