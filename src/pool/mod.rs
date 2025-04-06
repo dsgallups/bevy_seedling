@@ -29,19 +29,20 @@ pub(crate) struct SamplePoolPlugin;
 impl Plugin for SamplePoolPlugin {
     fn build(&self, app: &mut bevy_app::App) {
         app.init_resource::<dynamic::Registries>()
+            .register_node::<SamplerNode>()
             .add_systems(
                 Last,
                 (
                     (remove_finished, assign_default, retrieve_state)
+                        .before(SeedlingSystems::Pool)
+                        .after(SeedlingSystems::Connect),
+                    (watch_sample_players, monitor_active)
+                        .chain()
                         .before(SeedlingSystems::Queue)
-                        .after(SeedlingSystems::Acquire),
-                    monitor_active
-                        .before(SeedlingSystems::Flush)
-                        .after(SeedlingSystems::Queue),
+                        .after(SeedlingSystems::Pool),
                 ),
             )
-            .add_systems(PostUpdate, dynamic::update_auto_pools)
-            .register_node::<SamplerNode>();
+            .add_systems(PostUpdate, dynamic::update_auto_pools);
     }
 }
 
@@ -69,6 +70,21 @@ fn retrieve_state(
     });
 }
 
+/// A kind of specialization of [`ParamFollower`] for
+/// sampler nodes.
+fn watch_sample_players(
+    mut q: Query<(&mut SamplerNode, &ActiveSample)>,
+    samples: Query<&PlaybackSettings>,
+) {
+    for (mut sampler_node, sample) in q.iter_mut() {
+        let Ok(settings) = samples.get(sample.sample_entity) else {
+            continue;
+        };
+
+        sampler_node.playhead = settings.playhead.clone();
+        sampler_node.playback = settings.playback.clone();
+    }
+}
 /// Spawn an effects chain, connecting all nodes and
 /// returning the root sampler node.
 #[cfg_attr(debug_assertions, track_caller)]
@@ -123,7 +139,7 @@ fn spawn_pool<'a, L: PoolLabel + Component + Clone>(
                 schedule.add_systems(
                     (rank_nodes::<L>, assign_work::<L>)
                         .chain()
-                        .in_set(SeedlingSystems::Queue),
+                        .in_set(SeedlingSystems::Pool),
                 );
             });
         }
@@ -318,65 +334,56 @@ fn remove_finished(
     nodes: Query<
         (
             Entity,
-            &SamplerNode,
             &EffectsChain,
-            &FirewheelNode,
             &ActiveSample,
             &PoolRoot,
+            &SamplerStateWrapper,
         ),
         With<SamplerNode>,
     >,
     mut samples: Query<(&mut SamplePlayer, &PlaybackSettings)>,
     roots: Query<&SamplePoolTypes>,
     mut commands: Commands,
-    mut context: ResMut<AudioContext>,
 ) {
-    context.with(|context| {
-        for (entity, sampler_node, effects_chain, node, active, pool_root) in nodes.iter() {
-            let Some(state) = context.node_state::<SamplerState>(node.0) else {
+    for (entity, effects_chain, active, pool_root, state) in nodes.iter() {
+        let finished = state.0.finished();
+
+        // The sample completed playback in one-shot mode.
+        if finished {
+            commands.entity(entity).remove::<ActiveSample>();
+
+            for effect in effects_chain.0.iter() {
+                commands.entity(*effect).remove::<ParamFollower>();
+            }
+
+            let Ok((mut sample_player, settings)) = samples.get_mut(active.sample_entity) else {
                 continue;
             };
 
-            let stopped = state.stopped();
-
-            // The sample completed playback in one-shot mode.
-            if stopped && matches!(*sampler_node.playback, PlaybackState::Play { .. }) {
-                commands.entity(entity).remove::<ActiveSample>();
-
-                for effect in effects_chain.0.iter() {
-                    commands.entity(*effect).remove::<ParamFollower>();
+            match settings.on_complete {
+                OnComplete::Preserve => {
+                    sample_player.clear_sampler();
                 }
+                OnComplete::Remove => {
+                    let Ok(root) = roots.get(pool_root.0) else {
+                        continue;
+                    };
 
-                let Ok((mut sample_player, settings)) = samples.get_mut(active.sample_entity)
-                else {
-                    continue;
-                };
-
-                match settings.on_complete {
-                    OnComplete::Preserve => {
-                        sample_player.clear_sampler();
-                    }
-                    OnComplete::Remove => {
-                        let Ok(root) = roots.get(pool_root.0) else {
-                            continue;
-                        };
-
-                        let mut entity_commands = commands.entity(active.sample_entity);
-                        root.remove_nodes(&mut entity_commands);
-                        entity_commands.remove_with_requires::<(
-                            SamplePoolTypes,
-                            SamplePlayer,
-                            PoolLabelContainer,
-                            DynamicPoolRegistry,
-                        )>();
-                    }
-                    OnComplete::Despawn => {
-                        commands.entity(active.sample_entity).despawn_recursive();
-                    }
+                    let mut entity_commands = commands.entity(active.sample_entity);
+                    root.remove_nodes(&mut entity_commands);
+                    entity_commands.remove_with_requires::<(
+                        SamplePoolTypes,
+                        SamplePlayer,
+                        PoolLabelContainer,
+                        DynamicPoolRegistry,
+                    )>();
+                }
+                OnComplete::Despawn => {
+                    commands.entity(active.sample_entity).despawn_recursive();
                 }
             }
         }
-    });
+    }
 }
 
 /// Scan through the set of pending sample players
@@ -450,6 +457,7 @@ fn assign_work<T: Component + Clone>(
 
         params.set_sample(asset.get(), settings.volume, settings.repeat_mode);
         player.set_sampler(node_entity, state.0.clone());
+        state.0.clear_finished();
 
         // redirect all parameters to follow the sample source
         for effect in effects_chain.0.iter() {

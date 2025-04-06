@@ -263,7 +263,7 @@ pub mod prelude {
     pub use firewheel::{
         clock::{ClockSamples, ClockSeconds},
         nodes::{
-            sampler::{RepeatMode, SamplerNode},
+            sampler::{PlaybackSpeedQuality, PlaybackState, Playhead, RepeatMode, SamplerNode},
             spatial_basic::{SpatialBasicConfig, SpatialBasicNode},
             volume::{VolumeNode, VolumeNodeConfig},
             volume_pan::{VolumePanNode, VolumePanNodeConfig},
@@ -290,11 +290,9 @@ pub enum SeedlingSystems {
     Acquire,
     /// Pending connections are made.
     Connect,
+    /// Process sample pool operations.
+    Pool,
     /// Queue audio engine events.
-    ///
-    /// While it's not strictly necessary to separate this
-    /// set from [`SeedlingSystems::Connect`], it's a nice
-    /// semantic divide.
     Queue,
     /// The audio context is updated and flushed.
     Flush,
@@ -386,10 +384,9 @@ where
             Last,
             (
                 SeedlingSystems::Connect.after(SeedlingSystems::Acquire),
-                SeedlingSystems::Queue.after(SeedlingSystems::Acquire),
-                SeedlingSystems::Flush
-                    .after(SeedlingSystems::Connect)
-                    .after(SeedlingSystems::Queue),
+                SeedlingSystems::Pool.after(SeedlingSystems::Connect),
+                SeedlingSystems::Queue.after(SeedlingSystems::Pool),
+                SeedlingSystems::Flush.after(SeedlingSystems::Queue),
             ),
         )
         .add_systems(

@@ -190,7 +190,7 @@ impl core::fmt::Debug for Player {
 }
 
 /// Controls the playback settings of a [`SamplePlayer`].
-#[derive(Debug, Component, Clone, Default)]
+#[derive(Debug, Component, Clone)]
 pub struct PlaybackSettings {
     /// Sets the sample's [`RepeatMode`].
     pub repeat_mode: RepeatMode,
@@ -214,6 +214,12 @@ pub struct PlaybackSettings {
     /// audio processor. To get the current value of the playhead,
     /// see [`SamplePlayer::playhead_frames`].
     pub playhead: Notify<Playhead>,
+}
+
+impl Default for PlaybackSettings {
+    fn default() -> Self {
+        Self::ONCE
+    }
 }
 
 impl PlaybackSettings {
@@ -254,6 +260,22 @@ impl PlaybackSettings {
         playback: Notify::new(PlaybackState::Play { delay: None }),
         playhead: Notify::new(Playhead::Frames(0)),
     };
+
+    /// Start or resume playback.
+    pub fn play(&mut self) {
+        *self.playback = PlaybackState::Play { delay: None };
+    }
+
+    /// Pause playback.
+    pub fn pause(&mut self) {
+        *self.playback = PlaybackState::Pause;
+    }
+
+    /// Stop playback, resetting the playhead to the start.
+    pub fn stop(&mut self) {
+        *self.playback = PlaybackState::Stop;
+        *self.playhead = Playhead::default();
+    }
 }
 
 /// Determines what happens when a sample completes plaback.
