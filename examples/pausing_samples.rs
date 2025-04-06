@@ -21,6 +21,7 @@ fn main() {
         .run();
 }
 
+// Let's start playing a couple samples.
 fn startup(server: Res<AssetServer>, mut commands: Commands) {
     commands.spawn((
         SamplePlayer::new(server.load("caw.ogg")),
@@ -37,7 +38,8 @@ fn startup(server: Res<AssetServer>, mut commands: Commands) {
 struct Metronome(Timer);
 
 fn toggle_playback(
-    mut players: Query<&mut PlaybackSettings, With<SamplePlayer>>,
+    // With this, we can iterate over _all_ sample players.
+    mut players: Query<&mut PlaybackParams, With<SamplePlayer>>,
     mut metro: ResMut<Metronome>,
     time: Res<Time>,
 ) {
@@ -46,6 +48,9 @@ fn toggle_playback(
 
     if metro.0.just_finished() {
         bevy_log::info!("toggled playback!");
+
+        // The pause and play methods queue up audio events that
+        // are sent at the end of the frame.
         for mut player in players.iter_mut() {
             if matches!(*player.playback, PlaybackState::Play { .. }) {
                 player.pause();

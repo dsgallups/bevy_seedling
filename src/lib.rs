@@ -254,7 +254,7 @@ pub mod prelude {
         label::{DefaultPool, PoolLabel},
         PoolCommands, PoolDespawn,
     };
-    pub use crate::sample::{OnComplete, PlaybackSettings, SamplePlayer};
+    pub use crate::sample::{OnComplete, PlaybackParams, PlaybackSettings, SamplePlayer};
     pub use crate::spatial::{
         DefaultSpatialScale, SpatialListener2D, SpatialListener3D, SpatialScale,
     };
@@ -262,6 +262,7 @@ pub mod prelude {
 
     pub use firewheel::{
         clock::{ClockSamples, ClockSeconds},
+        diff::{Memo, Notify},
         nodes::{
             sampler::{PlaybackSpeedQuality, PlaybackState, Playhead, RepeatMode, SamplerNode},
             spatial_basic::{SpatialBasicConfig, SpatialBasicNode},

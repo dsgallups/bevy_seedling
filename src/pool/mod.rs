@@ -2,7 +2,9 @@
 
 use crate::node::{ParamFollower, RegisterNode};
 use crate::prelude::{AudioContext, Connect, DefaultPool, FirewheelNode, PoolLabel, VolumeNode};
-use crate::sample::{OnComplete, PlaybackSettings, QueuedSample, Sample, SamplePlayer};
+use crate::sample::{
+    OnComplete, PlaybackParams, PlaybackSettings, QueuedSample, Sample, SamplePlayer,
+};
 use crate::SeedlingSystems;
 use bevy_app::{Last, Plugin, PostUpdate};
 use bevy_asset::Assets;
@@ -10,7 +12,6 @@ use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
 use bevy_hierarchy::DespawnRecursiveExt;
 use bevy_utils::HashSet;
 use dynamic::DynamicPoolRegistry;
-use firewheel::nodes::sampler::PlaybackState;
 use firewheel::{
     nodes::sampler::{SamplerNode, SamplerState},
     Volume,
@@ -74,7 +75,7 @@ fn retrieve_state(
 /// sampler nodes.
 fn watch_sample_players(
     mut q: Query<(&mut SamplerNode, &ActiveSample)>,
-    samples: Query<&PlaybackSettings>,
+    samples: Query<&PlaybackParams>,
 ) {
     for (mut sampler_node, sample) in q.iter_mut() {
         let Ok(settings) = samples.get(sample.sample_entity) else {

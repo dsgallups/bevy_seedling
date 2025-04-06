@@ -120,7 +120,7 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// find yourself gravitating towards manually defined [`Pool`][crate::prelude::Pool]s as your
 /// requirements grow.
 #[derive(Debug, Component, Clone)]
-#[require(PlaybackSettings, ExcludeNode)]
+#[require(PlaybackSettings, PlaybackParams, ExcludeNode)]
 #[component(on_insert = on_insert_sample)]
 pub struct SamplePlayer {
     pub(crate) sample: Handle<Sample>,
@@ -148,6 +148,11 @@ impl SamplePlayer {
             sample: handle,
             player: None,
         }
+    }
+
+    /// Get a shared reference to the inner sample handle.
+    pub fn sample(&self) -> &Handle<Sample> {
+        &self.sample
     }
 
     /// Returns whether this sample is currently playing.
@@ -190,6 +195,10 @@ impl core::fmt::Debug for Player {
 }
 
 /// Controls the playback settings of a [`SamplePlayer`].
+///
+/// `repeate_mode` and `volume` are read _once_ at the beginning
+/// of playback. Changing them during playback will not
+/// affect playback.
 #[derive(Debug, Component, Clone)]
 pub struct PlaybackSettings {
     /// Sets the sample's [`RepeatMode`].
@@ -200,20 +209,6 @@ pub struct PlaybackSettings {
 
     /// Sets the volume of the sample.
     pub volume: Volume,
-
-    /// Sets the playback state.
-    ///
-    /// This field provides only one-way communication with the
-    /// audio processor. To get whether the sample is playing,
-    /// see [`SamplePlayer::is_playing`].
-    pub playback: Notify<PlaybackState>,
-
-    /// Sets the playhead.
-    ///
-    /// This field provides only one-way communication with the
-    /// audio processor. To get the current value of the playhead,
-    /// see [`SamplePlayer::playhead_frames`].
-    pub playhead: Notify<Playhead>,
 }
 
 impl Default for PlaybackSettings {
@@ -229,8 +224,6 @@ impl PlaybackSettings {
         repeat_mode: RepeatMode::PlayOnce,
         volume: Volume::Linear(1.0),
         on_complete: OnComplete::Despawn,
-        playback: Notify::new(PlaybackState::Play { delay: None }),
-        playhead: Notify::new(Playhead::Frames(0)),
     };
 
     /// Repeatedly loop the audio source until
@@ -239,8 +232,6 @@ impl PlaybackSettings {
         repeat_mode: RepeatMode::RepeatEndlessly,
         volume: Volume::Linear(1.0),
         on_complete: OnComplete::Despawn,
-        playback: Notify::new(PlaybackState::Play { delay: None }),
-        playhead: Notify::new(Playhead::Frames(0)),
     };
 
     /// Play the sample once, removing the audio-related components on completion.
@@ -248,8 +239,6 @@ impl PlaybackSettings {
         repeat_mode: RepeatMode::PlayOnce,
         volume: Volume::Linear(1.0),
         on_complete: OnComplete::Remove,
-        playback: Notify::new(PlaybackState::Play { delay: None }),
-        playhead: Notify::new(Playhead::Frames(0)),
     };
 
     /// Play the sample once, preserving the components and entity on completion.
@@ -257,28 +246,12 @@ impl PlaybackSettings {
         repeat_mode: RepeatMode::PlayOnce,
         volume: Volume::Linear(1.0),
         on_complete: OnComplete::Preserve,
-        playback: Notify::new(PlaybackState::Play { delay: None }),
-        playhead: Notify::new(Playhead::Frames(0)),
     };
-
-    /// Start or resume playback.
-    pub fn play(&mut self) {
-        *self.playback = PlaybackState::Play { delay: None };
-    }
-
-    /// Pause playback.
-    pub fn pause(&mut self) {
-        *self.playback = PlaybackState::Pause;
-    }
-
-    /// Stop playback, resetting the playhead to the start.
-    pub fn stop(&mut self) {
-        *self.playback = PlaybackState::Stop;
-        *self.playhead = Playhead::default();
-    }
 }
 
-/// Determines what happens when a sample completes plaback.
+/// Determines what happens when a sample completes playback.
+///
+/// This will never trigger for looping samples.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum OnComplete {
     /// Preserve the entity and components, leaving them untouched.
@@ -288,6 +261,111 @@ pub enum OnComplete {
     /// Despawn the [`SamplePlayer`] entity.
     #[default]
     Despawn,
+}
+
+/// Sample parameters that can change during playback.
+///
+/// These parameters will apply to samples immediately, so
+/// you can choose to begin playback wherever you'd like,
+/// or even start with the sample paused.
+///
+/// ```
+/// # use bevy_seedling::prelude::*;
+/// # use bevy::prelude::*;
+/// fn play_with_params(mut commands: Commands, server: Res<AssetServer>) {
+///     commands.spawn((
+///         SamplePlayer::new(server.load("my_sample.wav")),
+///         // You can start one second in
+///         PlaybackParams {
+///             playhead: Notify::new(Playhead::Seconds(1.0)),
+///             ..Default::default()
+///         },
+///     ));
+///
+///     commands.spawn((
+///         SamplePlayer::new(server.load("my_sample.wav")),
+///         // Or even spawn with paused playback
+///         PlaybackParams {
+///             playback: Notify::new(PlaybackState::Pause),
+///             ..Default::default()
+///         },
+///     ));
+/// }
+/// ```
+#[derive(Component, Debug)]
+pub struct PlaybackParams {
+    /// Sets the playback state, allowing you to play, pause or stop samples.
+    ///
+    /// This field provides only one-way communication with the
+    /// audio processor. To get whether the sample is playing,
+    /// see [`SamplePlayer::is_playing`].
+    pub playback: Notify<PlaybackState>,
+
+    /// Sets the playhead.
+    ///
+    /// This field provides only one-way communication with the
+    /// audio processor. To get the current value of the playhead,
+    /// see [`SamplePlayer::playhead_frames`].
+    pub playhead: Notify<Playhead>,
+}
+
+impl PlaybackParams {
+    /// Start or resume playback.
+    ///
+    /// ```
+    /// # use bevy_seedling::prelude::*;
+    /// # use bevy::prelude::*;
+    /// fn resume_paused_samples(mut samples: Query<&mut PlaybackParams>) {
+    ///     for mut params in samples.iter_mut() {
+    ///         if !matches!(*params.playback, PlaybackState::Play { .. }) {
+    ///             params.play();
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub fn play(&mut self) {
+        *self.playback = PlaybackState::Play { delay: None };
+    }
+
+    /// Pause playback.
+    ///
+    /// ```
+    /// # use bevy_seedling::prelude::*;
+    /// # use bevy::prelude::*;
+    /// fn pause_all_samples(mut samples: Query<&mut PlaybackParams>) {
+    ///     for mut params in samples.iter_mut() {
+    ///         params.pause();
+    ///     }
+    /// }
+    /// ```
+    pub fn pause(&mut self) {
+        *self.playback = PlaybackState::Pause;
+    }
+
+    /// Stop playback, resetting the playhead to the start.
+    ///
+    /// ```
+    /// # use bevy_seedling::prelude::*;
+    /// # use bevy::prelude::*;
+    /// fn stop_all_samples(mut samples: Query<&mut PlaybackParams>) {
+    ///     for mut params in samples.iter_mut() {
+    ///         params.stop();
+    ///     }
+    /// }
+    /// ```
+    pub fn stop(&mut self) {
+        *self.playback = PlaybackState::Stop;
+        *self.playhead = Playhead::default();
+    }
+}
+
+impl Default for PlaybackParams {
+    fn default() -> Self {
+        Self {
+            playback: Notify::new(PlaybackState::Play { delay: None }),
+            playhead: Notify::default(),
+        }
+    }
 }
 
 /// A marker struct for entities that are waiting
