@@ -230,6 +230,7 @@ pub mod pool;
 pub mod sample;
 pub mod spatial;
 pub mod timeline;
+pub mod tween;
 
 #[cfg(any(feature = "profiling", test))]
 pub mod profiling;

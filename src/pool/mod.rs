@@ -86,6 +86,7 @@ fn watch_sample_players(
         sampler_node.playback = settings.playback.clone();
     }
 }
+
 /// Spawn an effects chain, connecting all nodes and
 /// returning the root sampler node.
 #[cfg_attr(debug_assertions, track_caller)]
@@ -332,22 +333,20 @@ struct ActiveSample {
 /// Automatically remove or despawn sample players when their
 /// sample has finished playing.
 fn remove_finished(
-    nodes: Query<
-        (
-            Entity,
-            &EffectsChain,
-            &ActiveSample,
-            &PoolRoot,
-            &SamplerStateWrapper,
-        ),
-        With<SamplerNode>,
-    >,
+    nodes: Query<(
+        Entity,
+        &SamplerNode,
+        &EffectsChain,
+        &ActiveSample,
+        &PoolRoot,
+        &SamplerStateWrapper,
+    )>,
     mut samples: Query<(&mut SamplePlayer, &PlaybackSettings)>,
     roots: Query<&SamplePoolTypes>,
     mut commands: Commands,
 ) {
-    for (entity, effects_chain, active, pool_root, state) in nodes.iter() {
-        let finished = state.0.finished();
+    for (entity, node, effects_chain, active, pool_root, state) in nodes.iter() {
+        let finished = state.0.finished() == node.sequence.id();
 
         // The sample completed playback in one-shot mode.
         if finished {
