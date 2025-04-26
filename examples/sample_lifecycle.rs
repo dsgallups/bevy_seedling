@@ -1,7 +1,7 @@
 //! This example demonstrates sample lifetimes.
 
 use bevy::{
-    ecs::{component::ComponentId, world::DeferredWorld},
+    ecs::{component::HookContext, world::DeferredWorld},
     log::LogPlugin,
     prelude::*,
 };
@@ -55,7 +55,7 @@ fn play_event(
 #[component(on_remove = on_remove)]
 struct OnFinished;
 
-fn on_remove(mut world: DeferredWorld, _: Entity, _: ComponentId) {
+fn on_remove(mut world: DeferredWorld, _ctx: HookContext) {
     info!("One-shot sample finished!");
 
     world.send_event(PlayEvent);

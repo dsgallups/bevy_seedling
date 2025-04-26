@@ -7,23 +7,24 @@ use quote::quote;
 pub fn derive_node_label_inner(input: TokenStream) -> syn::Result<TokenStream2> {
     let input: syn::DeriveInput = syn::parse(input)?;
 
-    let bevy_ecs = BevyManifest::default().get_path("bevy_ecs");
+    let bevy_ecs = BevyManifest::shared().get_path("bevy_ecs");
     let label_path = syn::parse2(quote! { ::bevy_seedling::prelude::NodeLabel }).unwrap();
 
     let ident = &input.ident;
     let component_derive = quote! {
         impl #bevy_ecs::component::Component for #ident {
             const STORAGE_TYPE: #bevy_ecs::component::StorageType = #bevy_ecs::component::StorageType::Table;
+            type Mutability = #bevy_ecs::component::Immutable;
 
             #[allow(unused_variables)]
             fn register_component_hooks(hooks: &mut #bevy_ecs::component::ComponentHooks) {
-                hooks.on_insert(|mut world: #bevy_ecs::world::DeferredWorld, entity: #bevy_ecs::entity::Entity, _| {
-                    let value = world.get::<Self>(entity).unwrap();
+                hooks.on_insert(|mut world: #bevy_ecs::world::DeferredWorld, context: #bevy_ecs::component::HookContext| {
+                    let value = world.get::<Self>(context.entity).unwrap();
                     let interned = <Self as #label_path>::intern(value);
 
                     world
                         .commands()
-                        .entity(entity)
+                        .entity(context.entity)
                         .entry::<::bevy_seedling::node::label::NodeLabels>()
                         .or_insert(::core::default::Default::default())
                         .and_modify(move |mut labels| {
@@ -50,25 +51,24 @@ pub fn derive_node_label_inner(input: TokenStream) -> syn::Result<TokenStream2> 
 pub fn derive_pool_label_inner(input: TokenStream) -> syn::Result<TokenStream2> {
     let input: syn::DeriveInput = syn::parse(input)?;
 
-    let bevy_ecs = BevyManifest::default().get_path("bevy_ecs");
+    let bevy_ecs = BevyManifest::shared().get_path("bevy_ecs");
     let label_path = syn::parse2(quote! { ::bevy_seedling::prelude::PoolLabel }).unwrap();
 
     let ident = &input.ident;
     let component_derive = quote! {
         impl #bevy_ecs::component::Component for #ident {
             const STORAGE_TYPE: #bevy_ecs::component::StorageType = #bevy_ecs::component::StorageType::Table;
+            type Mutability = #bevy_ecs::component::Immutable;
 
             #[allow(unused_variables)]
             fn register_component_hooks(hooks: &mut #bevy_ecs::component::ComponentHooks) {
-                hooks.on_insert(|mut world: #bevy_ecs::world::DeferredWorld,
-                    entity: #bevy_ecs::entity::Entity,
-                    id: #bevy_ecs::component::ComponentId| {
-                    let value = world.get::<Self>(entity).unwrap();
-                    let container = ::bevy_seedling::pool::label::PoolLabelContainer::new(value, id);
+                hooks.on_insert(|mut world: #bevy_ecs::world::DeferredWorld, context: #bevy_ecs::component::HookContext| {
+                    let value = world.get::<Self>(context.entity).unwrap();
+                    let container = ::bevy_seedling::pool::label::PoolLabelContainer::new(value, context.component_id);
 
                     world
                         .commands()
-                        .entity(entity)
+                        .entity(context.entity)
                         .insert(container);
                 });
             }

@@ -2,8 +2,8 @@
 
 use crate::node::label::InternedNodeLabel;
 use crate::prelude::{FirewheelNode, MainBus, NodeLabel};
-use bevy_ecs::prelude::*;
-use bevy_utils::HashMap;
+use bevy::platform::collections::HashMap;
+use bevy::prelude::*;
 use firewheel::node::NodeID;
 
 #[cfg(debug_assertions)]

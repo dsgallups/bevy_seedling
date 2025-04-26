@@ -216,10 +216,8 @@
 // Naming trick to facilitate straightforward internal macro usage.
 extern crate self as bevy_seedling;
 
-use bevy_app::{Last, Plugin, PreStartup};
-use bevy_asset::AssetApp;
-use bevy_ecs::prelude::*;
-use firewheel::{backend::AudioBackend, CpalBackend};
+use bevy::prelude::*;
+use firewheel::{CpalBackend, backend::AudioBackend};
 
 pub mod context;
 pub mod edge;
@@ -230,7 +228,6 @@ pub mod pool;
 pub mod sample;
 pub mod spatial;
 pub mod timeline;
-pub mod tween;
 
 #[cfg(any(feature = "profiling", test))]
 pub mod profiling;
@@ -238,11 +235,12 @@ pub mod profiling;
 pub mod prelude {
     //! All `bevy_seedlings`'s important types and traits.
 
+    pub use crate::SeedlingPlugin;
     pub use crate::context::AudioContext;
     pub use crate::edge::{Connect, Disconnect, EdgeTarget};
     pub use crate::node::{
-        label::{MainBus, NodeLabel},
         FirewheelNode, RegisterNode,
+        label::{MainBus, NodeLabel},
     };
     pub use crate::nodes::{
         bpf::{BandPassConfig, BandPassNode},
@@ -251,27 +249,26 @@ pub mod prelude {
         send::{SendConfig, SendNode},
     };
     pub use crate::pool::{
+        PoolCommands, PoolDespawn,
         builder::{Pool, PoolBuilder},
         label::{DefaultPool, PoolLabel},
-        PoolCommands, PoolDespawn,
     };
     pub use crate::sample::{OnComplete, PlaybackParams, PlaybackSettings, SamplePlayer};
     pub use crate::spatial::{
         DefaultSpatialScale, SpatialListener2D, SpatialListener3D, SpatialScale,
     };
-    pub use crate::SeedlingPlugin;
 
     pub use firewheel::{
+        FirewheelConfig, Volume,
         clock::{ClockSamples, ClockSeconds},
         diff::{Memo, Notify},
         nodes::{
+            StereoToMonoNode,
             sampler::{PlaybackSpeedQuality, PlaybackState, Playhead, RepeatMode, SamplerNode},
             spatial_basic::{SpatialBasicConfig, SpatialBasicNode},
             volume::{VolumeNode, VolumeNodeConfig},
             volume_pan::{VolumePanNode, VolumePanNodeConfig},
-            StereoToMonoNode,
         },
-        FirewheelConfig, Volume,
     };
 
     #[cfg(feature = "stream")]
@@ -357,7 +354,7 @@ where
     B::Config: Clone + Send + Sync + 'static,
     B::StreamError: Send + Sync + 'static,
 {
-    fn build(&self, app: &mut bevy_app::App) {
+    fn build(&self, app: &mut App) {
         use prelude::*;
 
         let mut context = AudioContext::new::<B>(self.config, self.stream_config.clone());

@@ -2,7 +2,7 @@
 
 use super::SamplePoolTypes;
 use crate::prelude::PoolLabel;
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 use firewheel::node::AudioNode;
 
 /// Chain effects in a pool.

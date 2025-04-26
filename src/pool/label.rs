@@ -31,11 +31,19 @@
 //! }
 //! ```
 
-use bevy_ecs::{component::ComponentId, intern::Interned, prelude::*, world::DeferredWorld};
+use bevy::{
+    ecs::{
+        component::{ComponentId, HookContext},
+        intern::Interned,
+        world::DeferredWorld,
+    },
+    prelude::*,
+};
+// use bevy_ecs::{component::ComponentId, intern::Interned, prelude::*, world::DeferredWorld};
 
 pub use bevy_seedling_macros::PoolLabel;
 
-bevy_ecs::define_label!(
+bevy::ecs::define_label!(
     /// A label for differentiating sample pools.
     ///
     /// When deriving [`PoolLabel`], you'll need to make sure your type implements
@@ -126,11 +134,11 @@ impl PoolLabelContainer {
         }
     }
 
-    fn on_remove(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
+    fn on_remove(mut world: DeferredWorld, context: HookContext) {
         let id = world
-            .entity(entity)
+            .entity(context.entity)
             .components::<&PoolLabelContainer>()
             .label_id;
-        world.commands().entity(entity).remove_by_id(id);
+        world.commands().entity(context.entity).remove_by_id(id);
     }
 }

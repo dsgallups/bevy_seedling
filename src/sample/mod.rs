@@ -2,8 +2,10 @@
 
 use crate::node::ExcludeNode;
 use crate::prelude::Volume;
-use bevy_asset::Handle;
-use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
+use bevy::{
+    ecs::{component::HookContext, world::DeferredWorld},
+    prelude::*,
+};
 use firewheel::{
     diff::Notify,
     nodes::sampler::{PlaybackState, Playhead, RepeatMode, SamplerState},
@@ -127,8 +129,8 @@ pub struct SamplePlayer {
     player: Option<Player>,
 }
 
-fn on_insert_sample(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
-    world.commands().entity(entity).insert(QueuedSample);
+fn on_insert_sample(mut world: DeferredWorld, context: HookContext) {
+    world.commands().entity(context.entity).insert(QueuedSample);
 }
 
 impl SamplePlayer {
@@ -307,6 +309,9 @@ pub struct PlaybackParams {
     /// audio processor. To get the current value of the playhead,
     /// see [`SamplePlayer::playhead_frames`].
     pub playhead: Notify<Playhead>,
+
+    /// Sets the playback speed.
+    pub speed: f64,
 }
 
 impl PlaybackParams {
@@ -364,6 +369,7 @@ impl Default for PlaybackParams {
         Self {
             playback: Notify::new(PlaybackState::Play { delay: None }),
             playhead: Notify::default(),
+            speed: 1.0,
         }
     }
 }

@@ -7,6 +7,7 @@ use bevy_seedling::prelude::*;
 // You'll need to depend on firewheel directly when defining
 // custom nodes.
 use firewheel::{
+    Volume,
     channel_config::{ChannelConfig, NonZeroChannelCount},
     diff::{Diff, Patch},
     event::NodeEventList,
@@ -14,14 +15,13 @@ use firewheel::{
         AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, ProcBuffers,
         ProcInfo, ProcessStatus,
     },
-    Volume,
 };
 
 fn main() {
     App::new()
         .add_plugins((
             MinimalPlugins,
-            bevy_log::LogPlugin::default(),
+            bevy::log::LogPlugin::default(),
             AssetPlugin::default(),
             SeedlingPlugin::default(),
         ))

@@ -5,8 +5,9 @@ use crate::{
     node::ParamFollower,
     prelude::MainBus,
 };
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 use firewheel::{
+    SilenceMask, Volume,
     channel_config::{ChannelConfig, ChannelCount, NonZeroChannelCount},
     diff::{Diff, Patch},
     dsp::volume::DEFAULT_AMP_EPSILON,
@@ -16,7 +17,6 @@ use firewheel::{
         ProcInfo, ProcessStatus,
     },
     param::smoother::{SmoothedParamBuffer, SmootherConfig},
-    SilenceMask, Volume,
 };
 
 /// A convenient node for routing to sends.

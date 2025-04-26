@@ -1,7 +1,6 @@
-use super::{EdgeTarget, NodeMap, PendingEdge, DEFAULT_CONNECTION};
+use super::{DEFAULT_CONNECTION, EdgeTarget, NodeMap, PendingEdge};
 use crate::{context::AudioContext, node::FirewheelNode};
-use bevy_ecs::prelude::*;
-use bevy_log::error_once;
+use bevy::prelude::*;
 
 #[cfg(debug_assertions)]
 use core::panic::Location;
@@ -184,13 +183,12 @@ pub(crate) fn process_disconnections(
 #[cfg(test)]
 mod test {
     use crate::{
-        context::AudioContext, edge::Connect, prelude::MainBus, profiling::ProfilingBackend,
-        SeedlingPlugin,
+        SeedlingPlugin, context::AudioContext, edge::Connect, prelude::MainBus,
+        profiling::ProfilingBackend,
     };
 
     use super::*;
-    use bevy::prelude::*;
-    use bevy_ecs::system::RunSystemOnce;
+    use bevy::ecs::system::RunSystemOnce;
     use firewheel::nodes::volume::VolumeNode;
 
     #[derive(Component)]

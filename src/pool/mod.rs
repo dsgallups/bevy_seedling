@@ -1,20 +1,24 @@
 //! Sampler pools, which represent primary sampler player mechanism.
 
+use crate::SeedlingSystems;
 use crate::node::{ParamFollower, RegisterNode};
 use crate::prelude::{AudioContext, Connect, DefaultPool, FirewheelNode, PoolLabel, VolumeNode};
 use crate::sample::{
     OnComplete, PlaybackParams, PlaybackSettings, QueuedSample, Sample, SamplePlayer,
 };
-use crate::SeedlingSystems;
-use bevy_app::{Last, Plugin, PostUpdate};
-use bevy_asset::Assets;
-use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
-use bevy_hierarchy::DespawnRecursiveExt;
-use bevy_utils::HashSet;
+use bevy::ecs::component::HookContext;
+use bevy::ecs::world::DeferredWorld;
+use bevy::platform::collections::HashSet;
+use bevy::prelude::*;
+// use bevy_app::{Last, Plugin, PostUpdate};
+// use bevy_asset::Assets;
+// use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
+// use bevy_hierarchy::DespawnRecursiveExt;
+// use bevy_utils::HashSet;
 use dynamic::DynamicPoolRegistry;
 use firewheel::{
-    nodes::sampler::{SamplerNode, SamplerState},
     Volume,
+    nodes::sampler::{SamplerNode, SamplerState},
 };
 use std::any::TypeId;
 use std::sync::Arc;
@@ -28,7 +32,7 @@ use label::PoolLabelContainer;
 pub(crate) struct SamplePoolPlugin;
 
 impl Plugin for SamplePoolPlugin {
-    fn build(&self, app: &mut bevy_app::App) {
+    fn build(&self, app: &mut App) {
         app.init_resource::<dynamic::Registries>()
             .register_node::<SamplerNode>()
             .add_systems(
@@ -84,6 +88,7 @@ fn watch_sample_players(
 
         sampler_node.playhead = settings.playhead.clone();
         sampler_node.playback = settings.playback.clone();
+        sampler_node.speed = settings.speed;
     }
 }
 
@@ -191,8 +196,8 @@ impl core::ops::Deref for SamplerNodes {
     }
 }
 
-fn on_remove_sampler_nodes(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
-    let Some(mut nodes) = world.get_mut::<SamplerNodes>(entity) else {
+fn on_remove_sampler_nodes(mut world: DeferredWorld, context: HookContext) {
+    let Some(mut nodes) = world.get_mut::<SamplerNodes>(context.entity) else {
         return;
     };
 
@@ -211,8 +216,8 @@ struct SamplePoolNode;
 #[component(on_remove = on_remove_effects_chain)]
 struct EffectsChain(Vec<Entity>);
 
-fn on_remove_effects_chain(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
-    let Some(mut nodes) = world.get_mut::<EffectsChain>(entity) else {
+fn on_remove_effects_chain(mut world: DeferredWorld, context: HookContext) {
+    let Some(mut nodes) = world.get_mut::<EffectsChain>(context.entity) else {
         return;
     };
 
@@ -379,7 +384,7 @@ fn remove_finished(
                     )>();
                 }
                 OnComplete::Despawn => {
-                    commands.entity(active.sample_entity).despawn_recursive();
+                    commands.entity(active.sample_entity).despawn();
                 }
             }
         }
@@ -558,7 +563,7 @@ impl<T: PoolLabel + Component> Command for PoolDespawn<T> {
         let interned = self.0.intern();
         for (root, label) in roots {
             if label.label == interned {
-                commands.entity(root).despawn_recursive();
+                commands.entity(root).despawn();
             }
         }
     }
@@ -582,10 +587,10 @@ impl PoolCommands for Commands<'_, '_> {
 
 #[cfg(test)]
 mod test {
+    use bevy::ecs::system::RunSystemOnce;
+
     use super::*;
     use crate::{pool::NodeRank, prelude::*, profiling::ProfilingBackend};
-    use bevy::prelude::*;
-    use bevy_ecs::system::RunSystemOnce;
 
     fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
         let mut app = App::new();
@@ -597,7 +602,6 @@ mod test {
                 default_pool_size: None,
                 ..SeedlingPlugin::<ProfilingBackend>::new()
             },
-            HierarchyPlugin,
         ))
         .add_systems(Startup, startup);
 
@@ -657,7 +661,7 @@ mod test {
         run(
             &mut app,
             |q: Query<Entity, With<NodeRank>>, mut commands: Commands| {
-                let pool = q.single();
+                let pool = q.single().unwrap();
 
                 commands.entity(pool).despawn();
             },
@@ -704,7 +708,7 @@ mod test {
         // Once removed, we'll verify that _all_ audio-related components are removed.
         let world = app.world_mut();
         let mut q = world.query_filtered::<EntityRef, With<EmptyComponent>>();
-        let entity = q.single(world);
+        let entity = q.single(world).unwrap();
 
         let archetype = entity.archetype();
 
@@ -747,7 +751,7 @@ mod test {
         // Once removed, we'll verify that _all_ audio-related components are removed.
         let world = app.world_mut();
         let mut q = world.query_filtered::<EntityRef, With<EmptyComponent>>();
-        let entity = q.single(world);
+        let entity = q.single(world).unwrap();
 
         let archetype = entity.archetype();
 

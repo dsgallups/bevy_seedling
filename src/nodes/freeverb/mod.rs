@@ -4,7 +4,7 @@
 #![allow(missing_docs)]
 #![allow(clippy::module_inception)]
 
-use bevy_ecs::component::Component;
+use bevy::prelude::Component;
 use firewheel::{
     channel_config::{ChannelConfig, ChannelCount},
     core::node::ProcInfo,

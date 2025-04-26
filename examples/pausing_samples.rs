@@ -47,7 +47,7 @@ fn toggle_playback(
     metro.0.tick(delta);
 
     if metro.0.just_finished() {
-        bevy_log::info!("toggled playback!");
+        info!("toggled playback!");
 
         // The pause and play methods queue up audio events that
         // are sent at the end of the frame.

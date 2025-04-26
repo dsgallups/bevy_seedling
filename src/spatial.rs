@@ -32,9 +32,7 @@
 //! simply select the closest listener for distance
 //! calculations.
 
-use bevy_ecs::prelude::*;
-use bevy_math::Vec3;
-use bevy_transform::components::{GlobalTransform, Transform};
+use bevy::prelude::*;
 use firewheel::nodes::spatial_basic::SpatialBasicNode;
 
 /// A scaling factor applied to the distance between spatial listeners and emitters.
@@ -152,7 +150,7 @@ pub(crate) fn update_2d_emitters(
             continue;
         };
 
-        let scale = scale.map(|s| s.0).unwrap_or(default_scale.0 .0);
+        let scale = scale.map(|s| s.0).unwrap_or(default_scale.0.0);
 
         let x_diff = (emitter_pos.x - listener_pos.x) * scale.x;
         let y_diff = (emitter_pos.y - listener_pos.y) * scale.y;
@@ -182,7 +180,7 @@ pub(crate) fn update_3d_emitters(
             continue;
         };
 
-        let scale = scale.map(|s| s.0).unwrap_or(default_scale.0 .0);
+        let scale = scale.map(|s| s.0).unwrap_or(default_scale.0.0);
 
         spatial.offset = (emitter_pos - listener_pos) * scale;
     }

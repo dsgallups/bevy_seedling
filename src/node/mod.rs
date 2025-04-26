@@ -2,10 +2,10 @@
 
 use crate::edge::NodeMap;
 use crate::pool;
-use crate::{prelude::AudioContext, SeedlingSystems};
-use bevy_app::Last;
-use bevy_ecs::{prelude::*, world::DeferredWorld};
-use bevy_log::error;
+use crate::{SeedlingSystems, prelude::AudioContext};
+use bevy::ecs::component::{HookContext, Mutable};
+use bevy::ecs::world::DeferredWorld;
+use bevy::prelude::*;
 use firewheel::diff::PathBuilder;
 use firewheel::{
     diff::{Diff, Patch},
@@ -64,7 +64,7 @@ fn apply_patch<T: Patch>(value: &mut T, event: &NodeEventType) {
             value.apply(patch);
         }
         Err(e) => {
-            bevy_log::error!(
+            error!(
                 "Failed to apply patch for {}: {:?}",
                 core::any::type_name::<T>(),
                 e
@@ -188,7 +188,11 @@ pub trait RegisterNode {
     /// parameter diffing.
     fn register_node<T>(&mut self) -> &mut Self
     where
-        T: AudioNode<Configuration: Component + Clone> + Diff + Patch + Component + Clone;
+        T: AudioNode<Configuration: Component + Clone>
+            + Diff
+            + Patch
+            + Component<Mutability = Mutable>
+            + Clone;
 
     /// Register an audio node without automatic diffing.
     ///
@@ -200,17 +204,24 @@ pub trait RegisterNode {
         T: AudioNode<Configuration: Component + Clone> + Component + Clone;
 }
 
-impl RegisterNode for bevy_app::App {
+impl RegisterNode for App {
     fn register_node<T>(&mut self) -> &mut Self
     where
-        T: AudioNode<Configuration: Component + Clone> + Diff + Patch + Component + Clone,
+        T: AudioNode<Configuration: Component + Clone>
+            + Diff
+            + Patch
+            + Component<Mutability = Mutable>
+            + Clone,
     {
         let world = self.world_mut();
 
         world.register_component_hooks::<T>().on_insert(
-            |mut world: DeferredWorld, entity: Entity, _| {
-                let value = world.get::<T>(entity).unwrap().clone();
-                world.commands().entity(entity).insert(Baseline(value));
+            |mut world: DeferredWorld, context: HookContext| {
+                let value = world.get::<T>(context.entity).unwrap().clone();
+                world
+                    .commands()
+                    .entity(context.entity)
+                    .insert(Baseline(value));
             },
         );
         world.register_required_components::<T, Events>();
@@ -249,22 +260,17 @@ impl RegisterNode for bevy_app::App {
 ///
 /// When this component is removed, the underlying
 /// audio node is removed from the graph.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Component)]
+#[component(on_remove = on_remove_node, immutable)]
 pub struct FirewheelNode(pub NodeID);
 
-impl Component for FirewheelNode {
-    const STORAGE_TYPE: bevy_ecs::component::StorageType = bevy_ecs::component::StorageType::Table;
+fn on_remove_node(mut world: DeferredWorld, context: HookContext) {
+    let Some(node) = world.get::<FirewheelNode>(context.entity).copied() else {
+        return;
+    };
 
-    fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
-        hooks.on_remove(|mut world, entity, _| {
-            let Some(node) = world.get::<FirewheelNode>(entity).copied() else {
-                return;
-            };
-
-            let mut removals = world.resource_mut::<PendingRemovals>();
-            removals.push(node.0);
-        });
-    }
+    let mut removals = world.resource_mut::<PendingRemovals>();
+    removals.push(node.0);
 }
 
 /// Queued audio node removals.
@@ -377,7 +383,7 @@ pub struct ParamFollower(pub Entity);
 /// For example, it's much easier for users to set parameters
 /// on a sample player entity directly rather than drilling
 /// into the sample pool and node the sample is assigned to.
-pub(crate) fn param_follower<T: Diff + Patch + Component>(
+pub(crate) fn param_follower<T: Diff + Patch + Component<Mutability = Mutable>>(
     sources: Query<&T, (Changed<T>, Without<ParamFollower>)>,
     mut followers: Query<(&ParamFollower, &mut T)>,
 ) {

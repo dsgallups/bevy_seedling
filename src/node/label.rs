@@ -8,8 +8,11 @@
 //! will be automatically connected to [MainBus].
 use crate::edge::NodeMap;
 use crate::prelude::{AudioContext, Connect};
-use bevy_ecs::{component::ComponentId, intern::Interned, prelude::*, world::DeferredWorld};
-use firewheel::{nodes::volume::VolumeNode, Volume};
+use bevy::ecs::component::HookContext;
+use bevy::ecs::intern::Interned;
+use bevy::ecs::world::DeferredWorld;
+use bevy::prelude::*;
+use firewheel::{Volume, nodes::volume::VolumeNode};
 use smallvec::SmallVec;
 
 /// Node label derive macro.
@@ -48,7 +51,7 @@ use smallvec::SmallVec;
 /// [`Component`]: bevy_ecs::component::Component
 pub use bevy_seedling_macros::NodeLabel;
 
-bevy_ecs::define_label!(
+bevy::ecs::define_label!(
     /// A label for addressing audio nodes.
     ///
     /// Types that implement [NodeLabel] can be used in place of entity IDs
@@ -147,8 +150,8 @@ pub(crate) fn insert_main_bus(mut commands: Commands, mut context: ResMut<AudioC
 #[component(on_remove = on_remove)]
 pub struct NodeLabels(SmallVec<[InternedNodeLabel; 1]>);
 
-fn on_remove(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
-    let Some(labels) = world.get::<NodeLabels>(entity) else {
+fn on_remove(mut world: DeferredWorld, context: HookContext) {
+    let Some(labels) = world.get::<NodeLabels>(context.entity) else {
         return;
     };
 

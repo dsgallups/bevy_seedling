@@ -1,7 +1,7 @@
 //! One-pole, low-pass filter.
 
 use crate::timeline::Timeline;
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 use firewheel::{
     channel_config::{ChannelConfig, NonZeroChannelCount},
     clock::ClockSeconds,

@@ -48,11 +48,17 @@
 //! Note that when no effects are applied, your samples will be queued in the
 //! [`DefaultPool`][crate::prelude::DefaultPool], not a dynamic pool.
 
-use super::{builder::PoolBuilder, SamplePoolTypes};
+use super::{SamplePoolTypes, builder::PoolBuilder};
 use crate::sample::{QueuedSample, SamplePlayer};
-use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
+use bevy::{
+    ecs::{
+        component::{ComponentId, HookContext},
+        world::DeferredWorld,
+    },
+    platform::collections::HashMap,
+    prelude::*,
+};
 use bevy_seedling_macros::PoolLabel;
-use bevy_utils::HashMap;
 use core::marker::PhantomData;
 use firewheel::node::AudioNode;
 
@@ -159,12 +165,12 @@ impl<T: Component> core::default::Default for AutoRegister<T> {
 }
 
 impl<T: Component> AutoRegister<T> {
-    fn on_insert(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
+    fn on_insert(mut world: DeferredWorld, context: HookContext) {
         let Some(id) = world.component_id::<T>() else {
             return;
         };
 
-        let mut entity = world.entity_mut(entity);
+        let mut entity = world.entity_mut(context.entity);
 
         if let Some(mut pool) = entity.get_mut::<DynamicPoolRegistry>() {
             pool.insert(id);
@@ -227,14 +233,14 @@ impl<'a> PoolBuilder for DynamicPoolCommands<'a> {
 
 #[cfg(test)]
 mod test {
+    use bevy::ecs::system::RunSystemOnce;
+
     use super::*;
     use crate::{
         pool::{NodeRank, SamplerNodes},
         prelude::*,
         profiling::ProfilingBackend,
     };
-    use bevy::prelude::*;
-    use bevy_ecs::system::RunSystemOnce;
 
     fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
         let mut app = App::new();
@@ -247,7 +253,6 @@ mod test {
                 dynamic_pool_range: Some(4..=16),
                 ..SeedlingPlugin::<ProfilingBackend>::new()
             },
-            HierarchyPlugin,
         ))
         .add_systems(Startup, startup);
 
@@ -272,7 +277,7 @@ mod test {
         });
 
         fn verify_one_pool(pool_root: Query<(&DynamicPoolId, &SamplerNodes), With<NodeRank>>) {
-            let (id, children) = pool_root.single();
+            let (id, children) = pool_root.single().unwrap();
 
             assert_eq!(id.0, 0);
             assert_eq!(children.len(), 4);
@@ -327,7 +332,7 @@ mod test {
         run(
             &mut app,
             |pool_root: Query<(&DynamicPoolId, &SamplerNodes), With<NodeRank>>| {
-                let (_, children) = pool_root.single();
+                let (_, children) = pool_root.single().unwrap();
 
                 assert_eq!(children.len(), 4);
             },
@@ -370,7 +375,7 @@ mod test {
              players: Query<&SamplePlayer>| {
                 assert_eq!(players.iter().count(), 6);
 
-                let (_, children) = pool_root.single();
+                let (_, children) = pool_root.single().unwrap();
                 assert!(children.len() > 4);
             },
         );
