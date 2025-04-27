@@ -346,7 +346,7 @@ fn remove_finished(
         &PoolRoot,
         &SamplerStateWrapper,
     )>,
-    mut samples: Query<(&mut SamplePlayer, &PlaybackSettings)>,
+    mut samples: Query<(&mut SamplePlayer, &PlaybackSettings, &PoolLabelContainer)>,
     roots: Query<&SamplePoolTypes>,
     mut commands: Commands,
 ) {
@@ -361,7 +361,9 @@ fn remove_finished(
                 commands.entity(*effect).remove::<ParamFollower>();
             }
 
-            let Ok((mut sample_player, settings)) = samples.get_mut(active.sample_entity) else {
+            let Ok((mut sample_player, settings, container)) =
+                samples.get_mut(active.sample_entity)
+            else {
                 continue;
             };
 
@@ -376,12 +378,15 @@ fn remove_finished(
 
                     let mut entity_commands = commands.entity(active.sample_entity);
                     root.remove_nodes(&mut entity_commands);
-                    entity_commands.remove_with_requires::<(
-                        SamplePoolTypes,
-                        SamplePlayer,
-                        PoolLabelContainer,
-                        DynamicPoolRegistry,
-                    )>();
+
+                    entity_commands
+                        .remove_by_id(container.label_id)
+                        .remove_with_requires::<(
+                            SamplePoolTypes,
+                            SamplePlayer,
+                            PoolLabelContainer,
+                            DynamicPoolRegistry,
+                        )>();
                 }
                 OnComplete::Despawn => {
                     commands.entity(active.sample_entity).despawn();

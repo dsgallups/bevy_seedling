@@ -119,10 +119,9 @@ pub type InternedPoolLabel = Interned<dyn PoolLabel>;
 
 /// A type-erased pool label container.
 #[derive(Component, Debug, Clone)]
-#[component(on_remove = Self::on_remove)]
 pub struct PoolLabelContainer {
     pub(crate) label: InternedPoolLabel,
-    label_id: ComponentId,
+    pub(crate) label_id: ComponentId,
 }
 
 impl PoolLabelContainer {
@@ -134,11 +133,12 @@ impl PoolLabelContainer {
         }
     }
 
-    fn on_remove(mut world: DeferredWorld, context: HookContext) {
-        let id = world
-            .entity(context.entity)
-            .components::<&PoolLabelContainer>()
-            .label_id;
-        world.commands().entity(context.entity).remove_by_id(id);
-    }
+    // TODO: make an issue -- this panics on 0.16
+    // fn on_remove(mut world: DeferredWorld, context: HookContext) {
+    //     let id = world
+    //         .entity(context.entity)
+    //         .components::<&PoolLabelContainer>()
+    //         .label_id;
+    //     world.commands().entity(context.entity).remove_by_id(id);
+    // }
 }
