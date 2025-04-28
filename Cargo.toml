@@ -14,8 +14,9 @@ categories = ["game-development", "multimedia::audio"]
 exclude = ["/assets"]
 
 [features]
-default = ["stream", "wav", "ogg"]
+default = ["stream", "wav", "ogg", "rand"]
 stream = ["firewheel/stream_nodes"]
+rand = ["dep:rand"]
 
 # formats
 wav = ["symphonium/wav", "symphonium/pcm"]
@@ -48,6 +49,9 @@ serde = { version = "1.0", features = ["derive"] }
 smallvec = "1.13"
 arrayvec = "0.7"
 bevy_seedling_macros = { path = "./seedling_macros", version = "0.3.0" }
+rand = { version = "0.9", default-features = false, features = [
+  "small_rng",
+], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 firewheel = { git = "https://github.com/CorvusPrudens/Firewheel", branch = "bevy-16", features = [

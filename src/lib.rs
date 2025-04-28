@@ -276,6 +276,9 @@ pub mod prelude {
         reader::{StreamReaderConfig, StreamReaderNode},
         writer::{StreamWriterConfig, StreamWriterNode},
     };
+
+    #[cfg(feature = "rand")]
+    pub use crate::sample::PitchRange;
 }
 
 /// Sets for all `bevy_seedling` systems.
@@ -420,6 +423,10 @@ where
             ),
         );
 
-        app.add_plugins((pool::SamplePoolPlugin, nodes::SeedlingNodesPlugin));
+        app.add_plugins((
+            pool::SamplePoolPlugin,
+            nodes::SeedlingNodesPlugin,
+            sample::RandomPlugin,
+        ));
     }
 }

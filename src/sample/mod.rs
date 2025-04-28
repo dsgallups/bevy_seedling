@@ -379,3 +379,57 @@ impl Default for PlaybackParams {
 #[derive(Debug, Component, Default)]
 #[component(storage = "SparseSet")]
 pub struct QueuedSample;
+
+#[cfg(feature = "rand")]
+pub use random::PitchRange;
+
+#[cfg(feature = "rand")]
+pub(crate) use random::RandomPlugin;
+
+#[cfg(feature = "rand")]
+mod random {
+    use super::PlaybackParams;
+    use bevy::{
+        ecs::{component::HookContext, world::DeferredWorld},
+        prelude::*,
+    };
+    use rand::{Rng, SeedableRng, rngs::SmallRng};
+
+    pub struct RandomPlugin;
+
+    impl Plugin for RandomPlugin {
+        fn build(&self, app: &mut App) {
+            app.insert_resource(PitchRng(SmallRng::from_os_rng()));
+        }
+    }
+
+    #[derive(Resource)]
+    struct PitchRng(SmallRng);
+
+    /// A component that applies a random pitch
+    /// to a sample player when spawned.
+    #[derive(Debug, Component, Default)]
+    #[require(PlaybackParams)]
+    #[component(immutable, on_add = Self::on_add_hook)]
+    pub struct PitchRange(pub core::ops::Range<f64>);
+
+    impl PitchRange {
+        fn on_add_hook(mut world: DeferredWorld, context: HookContext) {
+            let range = world
+                .get::<PitchRange>(context.entity)
+                .expect("Entity should have a `PitchRange` component")
+                .0
+                .clone();
+
+            let mut rng = world.resource_mut::<PitchRng>();
+            let value = rng.0.random_range(range);
+
+            world
+                .commands()
+                .entity(context.entity)
+                .entry::<PlaybackParams>()
+                .or_default()
+                .and_modify(move |mut params| params.speed = value);
+        }
+    }
+}

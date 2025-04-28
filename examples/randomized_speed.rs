@@ -6,7 +6,6 @@
 
 use bevy::{log::LogPlugin, prelude::*};
 use bevy_seedling::prelude::*;
-use rand::Rng;
 
 fn main() {
     App::new()
@@ -36,14 +35,9 @@ fn play_samples(
 
     let delta = time.delta();
     if timer.tick(delta).just_finished() {
-        let mut rng = rand::rng();
-
         commands.spawn((
             SamplePlayer::new(server.load("caw.ogg")),
-            PlaybackParams {
-                speed: rng.random_range(0.9..1.1),
-                ..Default::default()
-            },
+            PitchRange(0.9..1.1),
             Lifetime(Timer::from_seconds(0.4, TimerMode::Once)),
         ));
     }
