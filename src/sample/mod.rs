@@ -408,7 +408,7 @@ mod random {
 
     /// A component that applies a random pitch
     /// to a sample player when spawned.
-    #[derive(Debug, Component, Default)]
+    #[derive(Debug, Component, Default, Clone)]
     #[require(PlaybackParams)]
     #[component(immutable, on_add = Self::on_add_hook)]
     pub struct PitchRange(pub core::ops::Range<f64>);

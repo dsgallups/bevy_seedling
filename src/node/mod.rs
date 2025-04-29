@@ -101,6 +101,10 @@ fn acquire_id<T>(
 ) where
     T: AudioNode<Configuration: Component + Clone> + Component + Clone,
 {
+    if q.iter().len() == 0 {
+        return;
+    }
+
     context.with(|context| {
         for (entity, container, config, labels) in q.iter() {
             let node = context.add_node(container.clone(), config.cloned());

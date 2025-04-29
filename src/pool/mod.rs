@@ -16,6 +16,7 @@ use bevy::prelude::*;
 // use bevy_hierarchy::DespawnRecursiveExt;
 // use bevy_utils::HashSet;
 use dynamic::DynamicPoolRegistry;
+use firewheel::nodes::sampler::RepeatMode;
 use firewheel::{
     Volume,
     nodes::sampler::{SamplerNode, SamplerState},
@@ -296,7 +297,7 @@ struct PoolRange(pub core::ops::RangeInclusive<usize>);
 
 /// Sampler node ranking for playback.
 #[derive(Default, Component)]
-struct NodeRank(Vec<(Entity, u64)>);
+struct NodeRank(Vec<(Entity, u64, bool)>);
 
 fn rank_nodes<T: Component>(
     q: Query<
@@ -320,13 +321,27 @@ fn rank_nodes<T: Component>(
                 };
 
                 let score = state.worker_score(params);
+                let is_looping = params
+                    .sequence
+                    .as_ref()
+                    .as_ref()
+                    .map(|s| {
+                        matches!(
+                            s,
+                            firewheel::nodes::sampler::SequenceType::SingleSample {
+                                repeat_mode: RepeatMode::RepeatEndlessly,
+                                ..
+                            }
+                        )
+                    })
+                    .unwrap_or_default();
 
-                rank.0.push((e, score));
+                rank.0.push((e, score, is_looping));
             }
         });
 
         rank.0
-            .sort_unstable_by_key(|pair| std::cmp::Reverse(pair.1));
+            .sort_unstable_by_key(|pair| (pair.2, std::cmp::Reverse(pair.1)));
     }
 }
 
@@ -440,8 +455,13 @@ fn assign_work<T: Component + Clone>(
             continue;
         };
 
-        // get the best candidate
-        let Some((node_entity, _)) = rank.0.first() else {
+        // try to find the best non-looping candidate
+        let Some((node_index, node_entity)) = rank
+            .0
+            .iter()
+            .enumerate()
+            .find_map(|(i, r)| (!r.2).then_some((i, r.0)))
+        else {
             // Try to grow the pool if it's reached max capacity.
             // TODO: find a decent way to do this eagerly.
             let current_size = pool_nodes.len();
@@ -460,8 +480,7 @@ fn assign_work<T: Component + Clone>(
             continue;
         };
 
-        let Ok((node_entity, mut params, effects_chain, state)) = nodes.get_mut(*node_entity)
-        else {
+        let Ok((node_entity, mut params, effects_chain, state)) = nodes.get_mut(node_entity) else {
             continue;
         };
 
@@ -475,12 +494,14 @@ fn assign_work<T: Component + Clone>(
         }
 
         // Insert default pool parameters if not present.
+        let mut entity_commands = commands.entity(sample);
         for ty in defaults.0.iter() {
-            ty.insert_default(&mut commands.entity(sample));
+            ty.insert_default(&mut entity_commands);
         }
 
-        rank.0.remove(0);
-        commands.entity(sample).remove::<QueuedSample>();
+        entity_commands.remove::<QueuedSample>();
+
+        rank.0.remove(node_index);
         commands.entity(node_entity).insert(ActiveSample {
             sample_entity: sample,
         });

@@ -32,11 +32,7 @@
 //! ```
 
 use bevy::{
-    ecs::{
-        component::{ComponentId, HookContext},
-        intern::Interned,
-        world::DeferredWorld,
-    },
+    ecs::{component::ComponentId, intern::Interned},
     prelude::*,
 };
 // use bevy_ecs::{component::ComponentId, intern::Interned, prelude::*, world::DeferredWorld};
