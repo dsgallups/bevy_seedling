@@ -1,19 +1,22 @@
 use bevy::{ecs::entity::EntityCloner, prelude::*};
 use core::ops::{Deref, RangeInclusive};
 use firewheel::nodes::{
-    sampler::{SamplerConfig, SamplerNode},
+    sampler::{SamplerConfig, SamplerNode, SamplerState},
     volume::VolumeNode,
 };
 use sample_effects::{EffectOf, SampleEffects};
 
 use crate::{
     SeedlingSystems,
+    context::AudioContext,
     edge::{PendingConnections, PendingEdge},
-    node::{EffectId, RegisterNode},
+    node::{EffectId, FirewheelNode, RegisterNode},
     pool::label::PoolLabelContainer,
+    sample::PlaybackParams,
 };
 
 pub mod dynamic;
+mod queue;
 pub mod sample_effects;
 
 pub(crate) struct SamplePoolPlugin;
@@ -21,7 +24,19 @@ pub(crate) struct SamplePoolPlugin;
 impl Plugin for SamplePoolPlugin {
     fn build(&self, app: &mut App) {
         app.register_node::<SamplerNode>()
-            .add_systems(Last, populate_pool.before(SeedlingSystems::Acquire))
+            .add_systems(
+                Last,
+                (
+                    populate_pool.before(SeedlingSystems::Acquire),
+                    (queue::assign_default, retrieve_state)
+                        .before(SeedlingSystems::Pool)
+                        .after(SeedlingSystems::Connect),
+                    (watch_sample_players, queue::monitor_active)
+                        .chain()
+                        .before(SeedlingSystems::Queue)
+                        .after(SeedlingSystems::Pool),
+                ),
+            )
             .add_plugins(dynamic::DynamicPlugin);
     }
 }
@@ -33,6 +48,52 @@ pub struct SamplerOf(pub Entity);
 #[derive(Debug, Component)]
 #[relationship_target(relationship = SamplerOf, linked_spawn)]
 pub struct Samplers(Vec<Entity>);
+
+#[derive(Component)]
+struct SamplerStateWrapper(SamplerState);
+
+#[derive(Component, Clone, Copy)]
+struct ActiveSample {
+    sample_entity: Entity,
+}
+
+fn retrieve_state(
+    q: Query<(Entity, &FirewheelNode), (With<SamplerNode>, Without<SamplerStateWrapper>)>,
+    mut commands: Commands,
+    mut context: ResMut<AudioContext>,
+) {
+    if q.iter().len() == 0 {
+        return;
+    }
+
+    context.with(|ctx| {
+        for (entity, node_id) in q.iter() {
+            let Some(state) = ctx.node_state::<SamplerState>(node_id.0) else {
+                continue;
+            };
+            commands
+                .entity(entity)
+                .insert(SamplerStateWrapper(state.clone()));
+        }
+    });
+}
+
+/// A kind of specialization of [`ParamFollower`] for
+/// sampler nodes.
+fn watch_sample_players(
+    mut q: Query<(&mut SamplerNode, &ActiveSample)>,
+    samples: Query<&PlaybackParams>,
+) {
+    for (mut sampler_node, sample) in q.iter_mut() {
+        let Ok(settings) = samples.get(sample.sample_entity) else {
+            continue;
+        };
+
+        sampler_node.playhead = settings.playhead.clone();
+        sampler_node.playback = settings.playback.clone();
+        sampler_node.speed = settings.speed;
+    }
+}
 
 fn spawn_chain(
     bus: Entity,
@@ -61,6 +122,9 @@ fn spawn_chain(
         }
         chain.push(bus);
 
+        // Until we come up with a good way to implement the
+        // connect trait for `WorldEntityMut`, we're stuck with
+        // a bit of boilerplate.
         world
             .get_entity_mut(sampler)?
             .add_children(&chain)
@@ -94,7 +158,7 @@ fn populate_pool(
     q: Query<
         (
             Entity,
-            Option<&SamplerConfig>,
+            &SamplerConfig,
             Option<&PoolSize>,
             Option<&SampleEffects>,
             Option<&EffectId>,
@@ -114,11 +178,11 @@ fn populate_pool(
             .unwrap_or(default_pool_size.0.clone());
 
         let size = (*size.start()).max(1);
-        let config = config.cloned();
+        let config = config.clone();
         for _ in 0..size {
             spawn_chain(
                 pool,
-                config.clone(),
+                Some(config.clone()),
                 effects.map(|e| e.deref()).unwrap_or(&[]),
                 &mut commands,
             );
@@ -150,34 +214,3 @@ mod test {
         });
     }
 }
-
-// /// Spawn a sampler pool with an initial size.
-// #[cfg_attr(debug_assertions, track_caller)]
-// fn spawn_pool<'a, L: PoolLabel + Component + Clone>(
-//     label: L,
-//     size: core::ops::RangeInclusive<usize>,
-//     defaults: SamplePoolTypes,
-//     commands: &'a mut Commands,
-// ) -> EntityCommands<'a> {
-//     commands.despawn_pool(label.clone());
-
-//     let bus = commands
-//         .spawn((
-//             VolumeNode {
-//                 volume: Volume::Linear(1.0),
-//             },
-//             label.clone(),
-//             NodeRank::default(),
-//             PoolRange(size.clone()),
-//         ))
-//         .id();
-
-//     let mut nodes = Vec::new();
-//     nodes.reserve_exact(*size.start());
-//     for _ in 0..*size.start() {
-//         let node = spawn_chain(bus, &defaults, label.clone(), commands);
-//         nodes.push(node);
-//     }
-
-//     bus
-// }
