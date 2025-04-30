@@ -1,7 +1,7 @@
 //! Sampler pools, which represent primary sampler player mechanism.
 
 use crate::SeedlingSystems;
-use crate::node::{ParamFollower, RegisterNode};
+use crate::node::{RegisterNode, follower::FollowerOf};
 use crate::prelude::{AudioContext, Connect, DefaultPool, FirewheelNode, PoolLabel, VolumeNode};
 use crate::sample::{
     OnComplete, PlaybackParams, PlaybackSettings, QueuedSample, Sample, SamplePlayer,
@@ -373,7 +373,7 @@ fn remove_finished(
             commands.entity(entity).remove::<ActiveSample>();
 
             for effect in effects_chain.0.iter() {
-                commands.entity(*effect).remove::<ParamFollower>();
+                commands.entity(*effect).remove::<FollowerOf>();
             }
 
             let Ok((mut sample_player, settings, container)) =
@@ -490,7 +490,7 @@ fn assign_work<T: Component + Clone>(
 
         // redirect all parameters to follow the sample source
         for effect in effects_chain.0.iter() {
-            commands.entity(*effect).insert(ParamFollower(sample));
+            commands.entity(*effect).insert(FollowerOf(sample));
         }
 
         // Insert default pool parameters if not present.
@@ -521,7 +521,7 @@ fn monitor_active(
             commands.entity(node_entity).remove::<ActiveSample>();
 
             for effect in effects_chain.0.iter() {
-                commands.entity(*effect).remove::<ParamFollower>();
+                commands.entity(*effect).remove::<FollowerOf>();
             }
         }
     }

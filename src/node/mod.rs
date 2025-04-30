@@ -1,18 +1,20 @@
 //! Audio node registration and management.
 
 use crate::edge::NodeMap;
+use crate::error::SeedlingError;
 use crate::pool;
+use crate::pool2::sample_effects::EffectOf;
 use crate::{SeedlingSystems, prelude::AudioContext};
-use bevy::ecs::component::{HookContext, Mutable};
+use bevy::ecs::component::{ComponentId, HookContext, Mutable};
 use bevy::ecs::world::DeferredWorld;
 use bevy::prelude::*;
-use firewheel::diff::PathBuilder;
 use firewheel::{
     diff::{Diff, Patch},
     event::{NodeEvent, NodeEventType},
     node::{AudioNode, NodeID},
 };
 
+pub mod follower;
 pub mod label;
 
 use label::NodeLabels;
@@ -22,6 +24,12 @@ use label::NodeLabels;
 /// This is used as the baseline for diffing.
 #[derive(Component)]
 pub(crate) struct Baseline<T>(pub(crate) T);
+
+/// A component that communicates an effect is present on an entity.
+///
+/// This is used for sample pool bookkeeping.
+#[derive(Component)]
+pub(crate) struct EffectId(pub(crate) ComponentId);
 
 /// An event queue.
 ///
@@ -54,28 +62,24 @@ impl Events {
     }
 }
 
-fn apply_patch<T: Patch>(value: &mut T, event: &NodeEventType) {
+fn apply_patch<T: Patch>(value: &mut T, event: &NodeEventType) -> Result {
     let NodeEventType::Param { data, path } = event else {
-        return;
+        return Ok(());
     };
 
-    match T::patch(data, path) {
-        Ok(patch) => {
-            value.apply(patch);
-        }
-        Err(e) => {
-            error!(
-                "Failed to apply patch for {}: {:?}",
-                core::any::type_name::<T>(),
-                e
-            );
-        }
-    }
+    let patch = T::patch(data, path).map_err(|e| SeedlingError::PatchError {
+        ty: core::any::type_name::<T>(),
+        error: e,
+    })?;
+
+    value.apply(patch);
+
+    Ok(())
 }
 
 fn generate_param_events<T: Diff + Patch + Component + Clone>(
-    mut nodes: Query<(&T, &mut Baseline<T>, &mut Events), (Changed<T>, Without<ExcludeNode>)>,
-) {
+    mut nodes: Query<(&T, &mut Baseline<T>, &mut Events), (Changed<T>, Without<EffectOf>)>,
+) -> Result {
     for (params, mut baseline, mut events) in nodes.iter_mut() {
         // This ensures we only apply patches that were generated here.
         // I'm not sure this is correct in all cases, though.
@@ -85,15 +89,17 @@ fn generate_param_events<T: Diff + Patch + Component + Clone>(
 
         // Patch the baseline.
         for event in &events.0[starting_len..] {
-            apply_patch(&mut baseline.0, event);
+            apply_patch(&mut baseline.0, event)?;
         }
     }
+
+    Ok(())
 }
 
 fn acquire_id<T>(
     q: Query<
         (Entity, &T, Option<&T::Configuration>, Option<&NodeLabels>),
-        (Without<FirewheelNode>, Without<ExcludeNode>),
+        (Without<FirewheelNode>, Without<EffectOf>),
     >,
     mut context: ResMut<AudioContext>,
     mut commands: Commands,
@@ -225,7 +231,7 @@ impl RegisterNode for App {
                 world
                     .commands()
                     .entity(context.entity)
-                    .insert(Baseline(value));
+                    .insert((Baseline(value), EffectId(context.component_id)));
             },
         );
         world.register_required_components::<T, Events>();
@@ -236,7 +242,7 @@ impl RegisterNode for App {
             Last,
             (
                 acquire_id::<T>.in_set(SeedlingSystems::Acquire),
-                (param_follower::<T>, generate_param_events::<T>)
+                (follower::param_follower::<T>, generate_param_events::<T>)
                     .chain()
                     .in_set(SeedlingSystems::Queue),
             ),
@@ -317,90 +323,4 @@ pub(crate) fn flush_events(
             }
         }
     });
-}
-
-/// Exclude a node from the audio graph.
-///
-/// This component prevents audio node components
-/// like [`VolumeNode`][crate::prelude::VolumeNode] from
-/// automatically inserting themselves into the audio graph.
-/// This allows you to treat nodes as plain old data,
-/// facilitating the [`ParamFollower`] pattern.
-///
-/// ```
-/// # use bevy_ecs::prelude::*;
-/// # use bevy_seedling::{prelude::*, node::{ExcludeNode, ParamFollower}};
-/// fn system(mut commands: Commands) {
-///     let pod = commands.spawn((VolumeNode::default(), ExcludeNode)).head();
-///
-///     // This node will be inserted into the graph,
-///     // and the volume will track any changes
-///     // made to the `pod` entity.
-///     commands.spawn((VolumeNode::default(), ParamFollower(pod)));
-/// }
-/// ```
-///
-/// Nodes inserted into an entity with [`ExcludeNode`] can be
-/// thought of as *remote nodes* that other graph-connected
-/// nodes can track.
-#[derive(Debug, Default, Component)]
-pub struct ExcludeNode;
-
-/// A component that allows one entity's parameters to track another's.
-///
-/// This can only support a single rank; cascading
-/// is not allowed.
-///
-/// Within `bevy_seedling`, this is used primarily by sampler
-/// pools. When you define a pool with a set of effects,
-/// those nodes will be automatically inserted on
-/// [`SamplePlayer`][crate::prelude::SamplePlayer] entities
-/// queued for that pool. Then, each effect node will
-/// have a [`ParamFollower`] component inserted that
-/// tracks the [`SamplePlayer`][crate::prelude::SamplePlayer].
-///
-/// ```
-/// # use bevy::prelude::*;
-/// # use bevy_seedling::prelude::*;
-/// # #[derive(PoolLabel, Clone, Debug, PartialEq, Eq, Hash)]
-/// # struct MyLabel;
-/// # fn system(mut commands: Commands, server: Res<AssetServer>) {
-/// Pool::new(MyLabel, 1)
-///     .effect(SpatialBasicNode::default())
-///     .spawn(&mut commands);
-///
-/// commands.spawn((MyLabel, SamplePlayer::new(server.load("my_sample.wav"))));
-///
-/// // Once spawned, these will look something like
-/// // Pool: (SamplePlayer) -> (SpatialBasicNode, ParamFollower) -> (VolumeNode) -> (MainBus)
-/// // SamplePlayer: (SamplePlayer, SpatialBasicNode, ExcludeNode)
-/// # }
-/// ```
-#[derive(Debug, Component)]
-pub struct ParamFollower(pub Entity);
-
-/// Apply diffing and patching between two sets of parameters
-/// in the ECS. This allows the engine-connected parameters
-/// to follow another set of parameters that may be
-/// closer to user code.
-///
-/// For example, it's much easier for users to set parameters
-/// on a sample player entity directly rather than drilling
-/// into the sample pool and node the sample is assigned to.
-pub(crate) fn param_follower<T: Diff + Patch + Component<Mutability = Mutable>>(
-    sources: Query<&T, (Changed<T>, Without<ParamFollower>)>,
-    mut followers: Query<(&ParamFollower, &mut T)>,
-) {
-    let mut event_queue = Vec::new();
-    for (follower, mut params) in followers.iter_mut() {
-        let Ok(source) = sources.get(follower.0) else {
-            continue;
-        };
-
-        source.diff(&params, PathBuilder::default(), &mut event_queue);
-
-        for event in event_queue.drain(..) {
-            apply_patch(params.as_mut(), &event);
-        }
-    }
 }

@@ -2,7 +2,7 @@
 
 use crate::{
     edge::{Disconnect, EdgeTarget, PendingConnections, PendingEdge},
-    node::ParamFollower,
+    node::follower::FollowerOf,
     prelude::MainBus,
 };
 use bevy::prelude::*;
@@ -100,7 +100,7 @@ pub(crate) fn update_remote_sends(
         (
             Entity,
             &SendNode,
-            &ParamFollower,
+            &FollowerOf,
             &SendConfig,
             &mut PendingConnections,
         ),

@@ -1,6 +1,5 @@
 //! Audio sample components.
 
-use crate::node::ExcludeNode;
 use crate::prelude::Volume;
 use bevy::{
     ecs::{component::HookContext, world::DeferredWorld},
@@ -122,7 +121,7 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// find yourself gravitating towards manually defined [`Pool`][crate::prelude::Pool]s as your
 /// requirements grow.
 #[derive(Debug, Component, Clone)]
-#[require(PlaybackSettings, PlaybackParams, ExcludeNode)]
+#[require(PlaybackSettings, PlaybackParams)]
 #[component(on_insert = on_insert_sample)]
 pub struct SamplePlayer {
     pub(crate) sample: Handle<Sample>,

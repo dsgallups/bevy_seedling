@@ -229,6 +229,9 @@ pub mod sample;
 pub mod spatial;
 pub mod timeline;
 
+pub mod error;
+pub mod pool2;
+
 #[cfg(any(feature = "profiling", test))]
 pub mod profiling;
 
@@ -428,5 +431,36 @@ where
             nodes::SeedlingNodesPlugin,
             sample::RandomPlugin,
         ));
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::prelude::*;
+    use bevy::{ecs::system::RunSystemOnce, prelude::*};
+
+    pub fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
+        let mut app = App::new();
+
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            SeedlingPlugin::<crate::profiling::ProfilingBackend> {
+                default_pool_size: None,
+                ..SeedlingPlugin::<crate::profiling::ProfilingBackend>::new()
+            },
+        ))
+        .add_systems(Startup, startup);
+
+        app.finish();
+        app.cleanup();
+        app.update();
+
+        app
+    }
+
+    pub fn run<F: IntoSystem<(), O, M>, O, M>(app: &mut App, system: F) -> O {
+        let world = app.world_mut();
+        world.run_system_once(system).unwrap()
     }
 }
