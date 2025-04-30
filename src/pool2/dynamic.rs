@@ -1,4 +1,4 @@
-use super::sample_effects::EffectOf;
+use super::{DefaultPoolSize, sample_effects::EffectOf};
 use crate::{
     error::SeedlingError,
     node::EffectId,
@@ -22,11 +22,11 @@ impl Plugin for DynamicPlugin {
 #[derive(PoolLabel, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 struct DynamicPoolId(usize);
 
-/// Sets the range for the number dynamic pool sampler nodes.
-///
-/// When the inner value is `None`, no new dynamic pools will be created.
-#[derive(Resource, Clone, Debug)]
-pub struct DynamicPoolRange(pub Option<core::ops::RangeInclusive<usize>>);
+// /// Sets the range for the number dynamic pool sampler nodes.
+// ///
+// /// When the inner value is `None`, no new dynamic pools will be created.
+// #[derive(Resource, Clone, Debug)]
+// pub struct DynamicPoolRange(pub Option<core::ops::RangeInclusive<usize>>);
 
 struct RegistryEntry {
     label: DynamicPoolId,
@@ -48,11 +48,11 @@ fn update_auto_pools(
     effects: Query<&EffectId, With<EffectOf>>,
     mut registries: ResMut<Registries>,
     mut commands: Commands,
-    dynamic_range: Res<DynamicPoolRange>,
+    dynamic_range: Res<DefaultPoolSize>,
 ) -> Result {
-    let Some(dynamic_range) = dynamic_range.0.clone() else {
-        return Ok(());
-    };
+    // let Some(dynamic_range) = dynamic_range.0.clone() else {
+    //     return Ok(());
+    // };
 
     for (sample, sample_effects) in queued_samples.iter() {
         let mut component_ids = Vec::new();

@@ -613,35 +613,9 @@ impl PoolCommands for Commands<'_, '_> {
 
 #[cfg(test)]
 mod test {
-    use bevy::ecs::system::RunSystemOnce;
-
     use super::*;
-    use crate::{pool::NodeRank, prelude::*, profiling::ProfilingBackend};
-
-    fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
-        let mut app = App::new();
-
-        app.add_plugins((
-            MinimalPlugins,
-            AssetPlugin::default(),
-            SeedlingPlugin::<ProfilingBackend> {
-                default_pool_size: None,
-                ..SeedlingPlugin::<ProfilingBackend>::new()
-            },
-        ))
-        .add_systems(Startup, startup);
-
-        app.finish();
-        app.cleanup();
-        app.update();
-
-        app
-    }
-
-    fn run<F: IntoSystem<(), O, M>, O, M>(app: &mut App, system: F) -> O {
-        let world = app.world_mut();
-        world.run_system_once(system).unwrap()
-    }
+    use crate::test::{prepare_app, run};
+    use crate::{pool::NodeRank, prelude::*};
 
     #[test]
     fn test_despawn_static() {

@@ -439,9 +439,7 @@ pub(crate) fn process_connections(
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        SeedlingPlugin, context::AudioContext, prelude::MainBus, profiling::ProfilingBackend,
-    };
+    use crate::{context::AudioContext, prelude::MainBus, test::prepare_app};
 
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
@@ -453,26 +451,6 @@ mod test {
     struct Two;
     #[derive(Component)]
     struct Three;
-
-    fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
-        let mut app = App::new();
-
-        app.add_plugins((
-            MinimalPlugins,
-            AssetPlugin::default(),
-            SeedlingPlugin::<ProfilingBackend> {
-                default_pool_size: None,
-                ..SeedlingPlugin::<ProfilingBackend>::new()
-            },
-        ))
-        .add_systems(Startup, startup);
-
-        app.finish();
-        app.cleanup();
-        app.update();
-
-        app
-    }
 
     #[test]
     fn test_chain() {

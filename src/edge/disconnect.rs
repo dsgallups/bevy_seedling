@@ -183,43 +183,19 @@ pub(crate) fn process_disconnections(
 #[cfg(test)]
 mod test {
     use crate::{
-        SeedlingPlugin, context::AudioContext, edge::Connect, prelude::MainBus,
-        profiling::ProfilingBackend,
+        context::AudioContext,
+        edge::Connect,
+        prelude::MainBus,
+        test::{prepare_app, run},
     };
 
     use super::*;
-    use bevy::ecs::system::RunSystemOnce;
     use firewheel::nodes::volume::VolumeNode;
 
     #[derive(Component)]
     struct One;
     #[derive(Component)]
     struct Two;
-
-    fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
-        let mut app = App::new();
-
-        app.add_plugins((
-            MinimalPlugins,
-            AssetPlugin::default(),
-            SeedlingPlugin::<ProfilingBackend> {
-                default_pool_size: None,
-                ..SeedlingPlugin::<ProfilingBackend>::new()
-            },
-        ))
-        .add_systems(Startup, startup);
-
-        app.finish();
-        app.cleanup();
-        app.update();
-
-        app
-    }
-
-    fn run<F: IntoSystem<(), O, M>, O, M>(app: &mut App, system: F) -> O {
-        let world = app.world_mut();
-        world.run_system_once(system).unwrap()
-    }
 
     #[test]
     fn test_disconnect() {

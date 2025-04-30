@@ -1,11 +1,15 @@
 use bevy::{ecs::entity::EntityCloner, prelude::*};
-use firewheel::nodes::sampler::{SamplerConfig, SamplerNode};
+use core::ops::{Deref, RangeInclusive};
+use firewheel::nodes::{
+    sampler::{SamplerConfig, SamplerNode},
+    volume::VolumeNode,
+};
 use sample_effects::{EffectOf, SampleEffects};
 
 use crate::{
     SeedlingSystems,
     edge::{PendingConnections, PendingEdge},
-    node::RegisterNode,
+    node::{EffectId, RegisterNode},
     pool::label::PoolLabelContainer,
 };
 
@@ -33,7 +37,7 @@ pub struct Samplers(Vec<Entity>);
 fn spawn_chain(
     bus: Entity,
     config: Option<SamplerConfig>,
-    effects: &SampleEffects,
+    effects: &[Entity],
     commands: &mut Commands,
 ) -> Entity {
     let sampler = commands
@@ -44,7 +48,7 @@ fn spawn_chain(
         ))
         .id();
 
-    let effects: Vec<_> = effects.iter().collect();
+    let effects = effects.to_vec();
     commands.queue(move |world: &mut World| -> Result {
         let mut cloner = EntityCloner::build(world);
         cloner.deny::<EffectOf>();
@@ -80,8 +84,46 @@ fn spawn_chain(
     sampler
 }
 
-fn populate_pool(q: Query<(&PoolLabelContainer), Without<Samplers>>) {
-    todo!()
+#[derive(Debug, Clone, Component)]
+pub struct PoolSize(pub RangeInclusive<usize>);
+
+#[derive(Debug, Clone, Resource)]
+pub struct DefaultPoolSize(pub RangeInclusive<usize>);
+
+fn populate_pool(
+    q: Query<
+        (
+            Entity,
+            Option<&SamplerConfig>,
+            Option<&PoolSize>,
+            Option<&SampleEffects>,
+            Option<&EffectId>,
+        ),
+        (With<PoolLabelContainer>, Without<Samplers>),
+    >,
+    default_pool_size: Res<DefaultPoolSize>,
+    mut commands: Commands,
+) {
+    for (pool, config, size, effects, effect_id) in &q {
+        if effect_id.is_none() {
+            commands.entity(pool).insert(VolumeNode::default());
+        }
+
+        let size = size
+            .map(|p| p.0.clone())
+            .unwrap_or(default_pool_size.0.clone());
+
+        let size = (*size.start()).max(1);
+        let config = config.cloned();
+        for _ in 0..size {
+            spawn_chain(
+                pool,
+                config.clone(),
+                effects.map(|e| e.deref()).unwrap_or(&[]),
+                &mut commands,
+            );
+        }
+    }
 }
 
 #[cfg(test)]

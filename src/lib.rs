@@ -217,6 +217,7 @@
 extern crate self as bevy_seedling;
 
 use bevy::prelude::*;
+use core::ops::RangeInclusive;
 use firewheel::{CpalBackend, backend::AudioBackend};
 
 pub mod context;
@@ -319,18 +320,13 @@ pub struct SeedlingPlugin<B: AudioBackend = CpalBackend> {
     /// The stream settings, forwarded directly to the backend.
     pub stream_config: B::Config,
 
-    /// The number of sampler nodes for the default
-    /// sampler pool. If `None` is provided,
-    /// the default pool will not be spawned, allowing
-    /// you to set it up how you like.
-    pub default_pool_size: Option<usize>,
+    /// Set whether to spawn the [`DefaultPool`].
+    ///
+    /// This allows you to define the default pool manually.
+    pub spawn_default_pool: bool,
 
-    /// The size range for dynamic pools. Pools
-    /// will be spawned with the minimum value,
-    /// and will grow depending on demand to the
-    /// maximum size. Setting this field to `None`
-    /// will disabled dynamic pools entirely.
-    pub dynamic_pool_range: Option<core::ops::RangeInclusive<usize>>,
+    /// Sets the default size range for sample pools.
+    pub pool_size: RangeInclusive<usize>,
 }
 
 impl Default for SeedlingPlugin<CpalBackend> {
@@ -348,8 +344,8 @@ where
         Self {
             config: Default::default(),
             stream_config: Default::default(),
-            default_pool_size: Some(24),
-            dynamic_pool_range: Some(4..=16),
+            spawn_default_pool: true,
+            pool_size: 4..=32,
         }
     }
 }
@@ -365,15 +361,13 @@ where
 
         let mut context = AudioContext::new::<B>(self.config, self.stream_config.clone());
         let sample_rate = context.with(|ctx| ctx.stream_info().unwrap().sample_rate);
-        let sample_pool_size = self.default_pool_size;
+        let spawn_default = self.spawn_default_pool;
 
         app.insert_resource(context)
             .init_resource::<edge::NodeMap>()
             .init_resource::<node::PendingRemovals>()
             .init_resource::<spatial::DefaultSpatialScale>()
-            .insert_resource(pool::dynamic::DynamicPoolRange(
-                self.dynamic_pool_range.clone(),
-            ))
+            .insert_resource(pool2::DefaultPoolSize(self.pool_size.clone()))
             .init_asset::<sample::Sample>()
             .register_asset_loader(sample::SampleLoader { sample_rate })
             .register_node::<VolumeNode>()
@@ -419,15 +413,16 @@ where
             (
                 node::label::insert_main_bus,
                 move |mut commands: Commands| {
-                    if let Some(size) = sample_pool_size {
-                        Pool::new(DefaultPool, size).spawn(&mut commands);
+                    if spawn_default {
+                        commands.spawn(DefaultPool);
                     }
                 },
             ),
         );
 
         app.add_plugins((
-            pool::SamplePoolPlugin,
+            // pool::SamplePoolPlugin,
+            pool2::SamplePoolPlugin,
             nodes::SeedlingNodesPlugin,
             sample::RandomPlugin,
         ));
@@ -446,7 +441,7 @@ mod test {
             MinimalPlugins,
             AssetPlugin::default(),
             SeedlingPlugin::<crate::profiling::ProfilingBackend> {
-                default_pool_size: None,
+                spawn_default_pool: false,
                 ..SeedlingPlugin::<crate::profiling::ProfilingBackend>::new()
             },
         ))

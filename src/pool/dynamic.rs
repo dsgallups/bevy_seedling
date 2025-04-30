@@ -249,8 +249,8 @@ mod test {
             MinimalPlugins,
             AssetPlugin::default(),
             SeedlingPlugin::<ProfilingBackend> {
-                default_pool_size: None,
-                dynamic_pool_range: Some(4..=16),
+                spawn_default_pool: false,
+                pool_size: 4..=16,
                 ..SeedlingPlugin::<ProfilingBackend>::new()
             },
         ))

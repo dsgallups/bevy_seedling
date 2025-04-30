@@ -9,6 +9,14 @@ pub struct EffectOf(pub Entity);
 #[relationship_target(relationship = EffectOf, linked_spawn)]
 pub struct SampleEffects(SmallVec<[Entity; 2]>);
 
+impl core::ops::Deref for SampleEffects {
+    type Target = [Entity];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 #[doc(hidden)]
 pub use bevy::ecs::spawn::Spawn;
 
@@ -24,32 +32,8 @@ mod test {
     use super::*;
     use crate::prelude::*;
     use crate::profiling::ProfilingBackend;
+    use crate::test::{prepare_app, run};
     use bevy::ecs::system::RunSystemOnce;
-
-    fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
-        let mut app = App::new();
-
-        app.add_plugins((
-            MinimalPlugins,
-            AssetPlugin::default(),
-            SeedlingPlugin::<ProfilingBackend> {
-                default_pool_size: None,
-                ..SeedlingPlugin::<ProfilingBackend>::new()
-            },
-        ))
-        .add_systems(Startup, startup);
-
-        app.finish();
-        app.cleanup();
-        app.update();
-
-        app
-    }
-
-    fn run<F: IntoSystem<(), O, M>, O, M>(app: &mut App, system: F) -> O {
-        let world = app.world_mut();
-        world.run_system_once(system).unwrap()
-    }
 
     fn test_clone() {
         #[derive(PoolLabel, Debug, Clone, Hash, PartialEq, Eq)]
