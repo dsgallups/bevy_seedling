@@ -1,4 +1,4 @@
-use super::{DefaultPoolSize, sample_effects::EffectOf};
+use super::{DefaultPoolSize, PoolSize, sample_effects::EffectOf};
 use crate::{
     error::SeedlingError,
     node::EffectId,
@@ -6,7 +6,11 @@ use crate::{
     pool2::sample_effects::SampleEffects,
     sample::{QueuedSample, SamplePlayer},
 };
-use bevy::{ecs::component::ComponentId, platform::collections::HashMap, prelude::*};
+use bevy::{
+    ecs::{component::ComponentId, system::QueryLens},
+    platform::collections::HashMap,
+    prelude::*,
+};
 use bevy_seedling_macros::PoolLabel;
 
 pub(crate) struct DynamicPlugin;
@@ -45,28 +49,21 @@ fn update_auto_pools(
             Without<PoolLabelContainer>,
         ),
     >,
-    effects: Query<&EffectId, With<EffectOf>>,
+    mut effects: Query<&EffectId>,
     mut registries: ResMut<Registries>,
     mut commands: Commands,
     dynamic_range: Res<DefaultPoolSize>,
 ) -> Result {
-    // let Some(dynamic_range) = dynamic_range.0.clone() else {
-    //     return Ok(());
-    // };
-
     for (sample, sample_effects) in queued_samples.iter() {
-        let mut component_ids = Vec::new();
-        component_ids.reserve_exact(sample_effects.len());
+        let component_ids =
+            match super::fetch_effect_ids(&sample_effects, &mut effects.as_query_lens()) {
+                Ok(ids) => ids,
+                Err(e) => {
+                    error!("{e}");
 
-        for effect in sample_effects.iter() {
-            let id = effects
-                .get(effect)
-                .map_err(|_| SeedlingError::MissingEffect {
-                    effect_parent: sample,
-                    empty_entity: effect,
-                })?;
-            component_ids.push(id.0);
-        }
+                    continue;
+                }
+            };
 
         match registries.0.get_mut(&component_ids) {
             Some(entry) => {
@@ -75,21 +72,13 @@ fn update_auto_pools(
             None => {
                 let label = DynamicPoolId(registries.0.len());
 
-                // // create the pool
-                // super::spawn_pool(
-                //     label,
-                //     dynamic_range.clone(),
-                //     defaults.clone(),
-                //     &mut commands,
-                // );
+                let pool = commands
+                    .spawn((label, PoolSize(dynamic_range.0.clone())))
+                    .id();
 
-                registries.0.insert(
-                    component_ids,
-                    RegistryEntry {
-                        label,
-                        pool: todo!(),
-                    },
-                );
+                registries
+                    .0
+                    .insert(component_ids, RegistryEntry { label, pool });
 
                 commands.entity(sample).insert(label);
             }

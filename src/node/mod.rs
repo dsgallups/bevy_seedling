@@ -28,7 +28,7 @@ pub(crate) struct Baseline<T>(pub(crate) T);
 /// A component that communicates an effect is present on an entity.
 ///
 /// This is used for sample pool bookkeeping.
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub(crate) struct EffectId(pub(crate) ComponentId);
 
 /// An event queue.

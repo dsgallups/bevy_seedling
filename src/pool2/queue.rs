@@ -1,15 +1,21 @@
-use bevy::{platform::collections::HashMap, prelude::*};
+use bevy::{
+    ecs::{entity::EntityCloner, relationship::Relationship},
+    platform::collections::HashMap,
+    prelude::*,
+};
 use firewheel::nodes::sampler::SamplerNode;
 
 use crate::{
-    node::follower::FollowerOf,
+    node::{EffectId, follower::FollowerOf},
     pool::label::PoolLabelContainer,
     prelude::DefaultPool,
     sample::{PlaybackSettings, QueuedSample, Sample, SamplePlayer},
 };
 
 use super::{
-    ActiveSample, PoolSize, SamplerOf, SamplerStateWrapper, Samplers, sample_effects::SampleEffects,
+    ActiveSample, PoolShape, PoolSize, SamplerAssignmentOf, SamplerOf, SamplerStateWrapper,
+    Samplers,
+    sample_effects::{EffectOf, SampleEffects},
 };
 
 /// Scan through the set of pending sample players
@@ -21,6 +27,7 @@ pub(super) fn assign_work(
             &mut SamplePlayer,
             &PlaybackSettings,
             &PoolLabelContainer,
+            Option<&SampleEffects>,
         ),
         With<QueuedSample>,
     >,
@@ -29,18 +36,28 @@ pub(super) fn assign_work(
         &PoolLabelContainer,
         &Samplers,
         &PoolSize,
+        &PoolShape,
         Option<&SampleEffects>,
     )>,
-    mut nodes: Query<(Entity, &mut SamplerNode, &SamplerStateWrapper), With<SamplerOf>>,
+    mut nodes: Query<
+        (
+            Entity,
+            &mut SamplerNode,
+            &SamplerStateWrapper,
+            Option<&SamplerAssignmentOf>,
+        ),
+        With<SamplerOf>,
+    >,
+    mut effects: Query<&EffectId, With<EffectOf>>,
     assets: Res<Assets<Sample>>,
     mut commands: Commands,
-) {
-    let queued_samples: HashMap<_, Vec<_>> = queued_samples
+) -> Result {
+    let mut queued_samples: HashMap<_, Vec<_>> = queued_samples
         .iter_mut()
-        .filter_map(|(entity, player, settings, label)| {
+        .filter_map(|(entity, player, settings, label, effects)| {
             let asset = assets.get(&player.sample)?;
 
-            Some((label.label, (entity, player, settings, asset)))
+            Some((label.label, (entity, player, settings, asset, effects)))
         })
         .fold(HashMap::new(), |mut acc, (key, value)| {
             acc.entry(key).or_default().push(value);
@@ -48,79 +65,159 @@ pub(super) fn assign_work(
         });
 
     if queued_samples.is_empty() {
-        return;
+        return Ok(());
     }
 
-    let pools = pools
+    let pools: Vec<_> = pools
         .iter()
-        .filter(|(_, label, ..)| queued_samples.contains_key(&label.label));
+        .filter(|(_, label, ..)| queued_samples.contains_key(&label.label))
+        .collect();
 
-    for (pool_entity, label, samplers, size, effects) in pools {
-        todo!()
+    for (pool_entity, label, samplers, size, pool_shape, pool_effects) in pools {
+        let queued_samples = queued_samples.remove(&label.label).unwrap();
+
+        // if there is enough sampler availability in the pool,
+        // don't bother sorting samples by priority
+
+        let inactive_samplers: Vec<_> = samplers
+            .iter()
+            .filter(|s| nodes.get(*s).is_ok_and(|n| n.3.is_none()))
+            .collect();
+
+        if inactive_samplers.len() >= queued_samples.len() {
+            let mut inactive = inactive_samplers.into_iter();
+
+            for (sample_entity, mut player, settings, asset, sample_effects) in queued_samples {
+                let (sampler_entity, mut params, state, _) =
+                    nodes.get_mut(inactive.next().unwrap())?;
+
+                params.set_sample(asset.get(), settings.volume, settings.repeat_mode);
+                player.set_sampler(sampler_entity, state.0.clone());
+                state.0.clear_finished();
+
+                // normalize sample effects
+                if sample_effects.is_some() && pool_effects.is_none() {
+                    match player.sample.path() {
+                        Some(path) => warn!(
+                            "Queued sample \"{}\" with effects in an effect-less pool.",
+                            path
+                        ),
+                        None => warn!("Queued sample with effects in an effect-less pool."),
+                    }
+                }
+
+                if let Some(pool_effects) = pool_effects {
+                    match sample_effects {
+                        Some(sample_effects) => {
+                            let component_ids = match super::fetch_effect_ids(
+                                sample_effects,
+                                &mut effects.as_query_lens(),
+                            ) {
+                                Ok(ids) => ids,
+                                Err(e) => {
+                                    error!("{e}");
+
+                                    continue;
+                                }
+                            };
+
+                            if component_ids != pool_shape.0 {
+                                // N will never be large enough for this to be a concern
+                                if component_ids.iter().any(|id| !pool_shape.0.contains(id)) {
+                                    match player.sample.path() {
+                                        Some(path) => warn!(
+                                            "Queued sample \"{}\" contains one or more effects that the pool does not.",
+                                            path
+                                        ),
+                                        None => warn!(
+                                            "Queued sample contains one or more effects that the pool does not."
+                                        ),
+                                    }
+                                }
+
+                                let mut new_effects = Vec::new();
+                                new_effects.reserve_exact(pool_shape.0.len());
+                                let mut clone_into = Vec::new();
+
+                                for (effect, id) in pool_effects.iter().zip(&pool_shape.0) {
+                                    match component_ids.iter().position(|c| c == id) {
+                                        Some(index) => {
+                                            new_effects.push(sample_effects[index]);
+                                        }
+                                        None => {
+                                            let empty = commands.spawn_empty().id();
+
+                                            clone_into.push((empty, effect));
+                                            new_effects.push(empty);
+                                        }
+                                    }
+                                }
+
+                                commands
+                                    .entity(sample_entity)
+                                    .remove_related::<EffectOf>(sample_effects)
+                                    .add_related::<EffectOf>(&new_effects);
+
+                                commands.queue(move |world: &mut World| {
+                                    let mut cloner = EntityCloner::build(world);
+                                    cloner.deny::<EffectOf>();
+                                    let mut cloner = cloner.finish();
+
+                                    for (dest, src) in clone_into {
+                                        cloner.clone_entity(world, src, dest);
+                                    }
+                                });
+                            }
+                        }
+                        None => {
+                            let pool_effects: Vec<_> = pool_effects.iter().collect();
+                            commands.queue(move |world: &mut World| {
+                                let mut cloner = EntityCloner::build(world);
+                                cloner.deny::<EffectOf>();
+                                let mut cloner = cloner.finish();
+
+                                let mut sample_effects = Vec::new();
+                                sample_effects.reserve_exact(pool_effects.len());
+                                for effect in pool_effects {
+                                    let sample_effect = cloner.spawn_clone(world, effect);
+                                    sample_effects.push(sample_effect);
+                                }
+
+                                world
+                                    .entity_mut(sample_entity)
+                                    .add_related::<EffectOf>(&sample_effects);
+                            });
+                        }
+                    }
+                }
+
+                commands
+                    .entity(sample_entity)
+                    .remove::<QueuedSample>()
+                    .insert(SamplerAssignmentOf(sample_entity));
+            }
+
+            continue;
+        }
     }
 
-    // for (sample, mut player, settings, label) in queued_samples.iter_mut() {
-    //     let Some(asset) = assets.get(&player.sample) else {
-    //         continue;
-    //     };
+    Ok(())
+}
 
-    //     let Some((pool_entity, mut rank, defaults, pool_label, _, pool_range, mut pool_nodes)) =
-    //         pools.iter_mut().find(|pool| pool.4.label == label.label)
-    //     else {
-    //         continue;
-    //     };
+pub(super) fn update_followers(
+    samplers: Query<(&Children, &SamplerAssignmentOf), Changed<SamplerAssignmentOf>>,
+    samples: Query<&SampleEffects>,
+    mut commands: Commands,
+) {
+    for (children, assignment) in &samplers {
+        let Ok(effects) = samples.get(assignment.get()) else {
+            continue;
+        };
 
-    //     // try to find the best non-looping candidate
-    //     let Some((node_index, node_entity)) = rank
-    //         .0
-    //         .iter()
-    //         .enumerate()
-    //         .find_map(|(i, r)| (!r.2).then_some((i, r.0)))
-    //     else {
-    //         // Try to grow the pool if it's reached max capacity.
-    //         // TODO: find a decent way to do this eagerly.
-    //         let current_size = pool_nodes.len();
-    //         let max_size = *pool_range.0.end();
-
-    //         if current_size < max_size {
-    //             let new_size = (current_size * 2).min(max_size);
-
-    //             for _ in 0..new_size - current_size {
-    //                 let new_sampler =
-    //                     spawn_chain(pool_entity, defaults, pool_label.clone(), &mut commands);
-    //                 pool_nodes.0.push(new_sampler);
-    //             }
-    //         }
-
-    //         continue;
-    //     };
-
-    //     let Ok((node_entity, mut params, effects_chain, state)) = nodes.get_mut(node_entity) else {
-    //         continue;
-    //     };
-
-    //     params.set_sample(asset.get(), settings.volume, settings.repeat_mode);
-    //     player.set_sampler(node_entity, state.0.clone());
-    //     state.0.clear_finished();
-
-    //     // redirect all parameters to follow the sample source
-    //     for effect in effects_chain.0.iter() {
-    //         commands.entity(*effect).insert(FollowerOf(sample));
-    //     }
-
-    //     // Insert default pool parameters if not present.
-    //     let mut entity_commands = commands.entity(sample);
-    //     for ty in defaults.0.iter() {
-    //         ty.insert_default(&mut entity_commands);
-    //     }
-
-    //     entity_commands.remove::<QueuedSample>();
-
-    //     rank.0.remove(node_index);
-    //     commands.entity(node_entity).insert(ActiveSample {
-    //         sample_entity: sample,
-    //     });
-    // }
+        for (effect, follower) in effects.iter().zip(children.iter()) {
+            commands.entity(follower).insert(FollowerOf(effect));
+        }
+    }
 }
 
 // Stop playback if the source entity no longer exists.

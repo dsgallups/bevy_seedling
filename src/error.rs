@@ -16,10 +16,7 @@ pub enum SeedlingError {
     },
     /// A sample effect relationship was spawned with an empty
     /// effect entity.
-    MissingEffect {
-        effect_parent: Entity,
-        empty_entity: Entity,
-    },
+    MissingEffect { empty_entity: Entity },
 }
 
 impl core::fmt::Display for SeedlingError {
@@ -31,10 +28,7 @@ impl core::fmt::Display for SeedlingError {
             Self::ConnectionError { error, .. } => {
                 write!(f, "Failed to connect audio nodes: {error}")
             }
-            Self::MissingEffect {
-                effect_parent,
-                empty_entity,
-            } => {
+            Self::MissingEffect { empty_entity } => {
                 write!(f, "Expected audio node in `AudioEffect` relationship")
             }
         }

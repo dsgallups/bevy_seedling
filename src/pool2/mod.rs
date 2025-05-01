@@ -1,4 +1,7 @@
-use bevy::{ecs::entity::EntityCloner, prelude::*};
+use bevy::{
+    ecs::{component::ComponentId, entity::EntityCloner, system::QueryLens},
+    prelude::*,
+};
 use core::ops::{Deref, RangeInclusive};
 use firewheel::nodes::{
     sampler::{SamplerConfig, SamplerNode, SamplerState},
@@ -10,6 +13,7 @@ use crate::{
     SeedlingSystems,
     context::AudioContext,
     edge::{PendingConnections, PendingEdge},
+    error::SeedlingError,
     node::{EffectId, FirewheelNode, RegisterNode},
     pool::label::PoolLabelContainer,
     sample::PlaybackParams,
@@ -35,6 +39,9 @@ impl Plugin for SamplePoolPlugin {
                         .chain()
                         .before(SeedlingSystems::Queue)
                         .after(SeedlingSystems::Pool),
+                    (queue::assign_work, queue::update_followers)
+                        .chain()
+                        .in_set(SeedlingSystems::Pool),
                 ),
             )
             .add_plugins(dynamic::DynamicPlugin);
@@ -55,6 +62,38 @@ struct SamplerStateWrapper(SamplerState);
 #[derive(Component, Clone, Copy)]
 struct ActiveSample {
     sample_entity: Entity,
+}
+
+#[derive(Debug, Component)]
+#[relationship(relationship_target = SamplerAssignment)]
+pub struct SamplerAssignmentOf(pub Entity);
+
+#[derive(Debug, Component)]
+#[relationship_target(relationship = SamplerAssignmentOf)]
+pub struct SamplerAssignment(Entity);
+
+#[derive(Component)]
+struct PoolShape(Vec<ComponentId>);
+
+fn fetch_effect_ids(
+    effects: &[Entity],
+    lens: &mut QueryLens<&EffectId>,
+) -> core::result::Result<Vec<ComponentId>, SeedlingError> {
+    let query = lens.query();
+
+    let mut effect_ids = Vec::new();
+    effect_ids.reserve_exact(effects.len());
+    for entity in effects {
+        let id = query
+            .get(*entity)
+            .map_err(|_| SeedlingError::MissingEffect {
+                empty_entity: *entity,
+            })?;
+
+        effect_ids.push(id.0);
+    }
+
+    Ok(effect_ids)
 }
 
 fn retrieve_state(
@@ -165,13 +204,21 @@ fn populate_pool(
         ),
         (With<PoolLabelContainer>, Without<Samplers>),
     >,
+    mut effects: Query<&EffectId>,
     default_pool_size: Res<DefaultPoolSize>,
     mut commands: Commands,
-) {
-    for (pool, config, size, effects, effect_id) in &q {
+) -> Result {
+    for (pool, config, size, pool_effects, effect_id) in &q {
         if effect_id.is_none() {
             commands.entity(pool).insert(VolumeNode::default());
         }
+
+        let component_ids = fetch_effect_ids(
+            pool_effects.map(|e| e.deref()).unwrap_or(&[]),
+            &mut effects.as_query_lens(),
+        )?;
+
+        commands.entity(pool).insert(PoolShape(component_ids));
 
         let size = size
             .map(|p| p.0.clone())
@@ -183,11 +230,13 @@ fn populate_pool(
             spawn_chain(
                 pool,
                 Some(config.clone()),
-                effects.map(|e| e.deref()).unwrap_or(&[]),
+                pool_effects.map(|e| e.deref()).unwrap_or(&[]),
                 &mut commands,
             );
         }
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
