@@ -15,8 +15,7 @@ use crate::{
 };
 
 use super::{
-    ActiveSample, PoolShape, PoolSize, SamplerAssignmentOf, SamplerOf, SamplerStateWrapper,
-    Samplers,
+    PoolShape, PoolSize, SamplerAssignmentOf, SamplerOf, SamplerStateWrapper, Samplers,
     sample_effects::{EffectOf, SampleEffects},
 };
 
@@ -205,7 +204,7 @@ pub(super) fn assign_work(
                 commands
                     .entity(sample_entity)
                     .remove::<QueuedSample>()
-                    .insert(SamplerAssignmentOf(sample_entity));
+                    .add_one_related::<SamplerAssignmentOf>(sampler_entity);
             }
 
             continue;
@@ -350,7 +349,7 @@ pub(super) fn assign_work(
             commands
                 .entity(sample_entity)
                 .remove::<QueuedSample>()
-                .insert(SamplerAssignmentOf(sample_entity));
+                .add_one_related::<SamplerAssignmentOf>(sampler_entity);
         }
 
         // attempt to grow pool if possible
@@ -390,15 +389,15 @@ pub(super) fn update_followers(
 
 // Stop playback if the source entity no longer exists.
 pub(super) fn monitor_active(
-    mut nodes: Query<(Entity, &mut SamplerNode, &ActiveSample, &Children)>,
+    mut nodes: Query<(Entity, &mut SamplerNode, &SamplerAssignmentOf, &Children)>,
     samples: Query<&SamplePlayer>,
     mut commands: Commands,
 ) {
     for (node_entity, mut sampler, active, effects_chain) in nodes.iter_mut() {
-        if samples.get(active.sample_entity).is_err() {
+        if samples.get(active.0).is_err() {
             sampler.stop();
 
-            commands.entity(node_entity).remove::<ActiveSample>();
+            commands.entity(node_entity).remove::<SamplerAssignmentOf>();
 
             for effect in effects_chain.iter() {
                 commands.entity(effect).remove::<FollowerOf>();

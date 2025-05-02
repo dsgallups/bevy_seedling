@@ -119,7 +119,6 @@ pub type InternedPoolLabel = Interned<dyn PoolLabel>;
 #[require(SamplerConfig)]
 pub struct PoolLabelContainer {
     pub(crate) label: InternedPoolLabel,
-    #[expect(dead_code)]
     pub(crate) label_id: ComponentId,
 }
 

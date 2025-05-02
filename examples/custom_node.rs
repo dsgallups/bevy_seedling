@@ -2,7 +2,7 @@
 //! Firehwel node.
 
 use bevy::prelude::*;
-use bevy_seedling::prelude::*;
+use bevy_seedling::{pool::sample_effects::SampleEffects, prelude::*};
 
 // You'll need to depend on firewheel directly when defining
 // custom nodes.
@@ -140,27 +140,29 @@ impl AudioNodeProcessor for VolumeProcessor {
 
 fn startup(server: Res<AssetServer>, mut commands: Commands) {
     // Let's spawn a looping sample.
-    commands
-        .spawn((
-            SamplePlayer::new(server.load("selfless_courage.ogg")),
-            PlaybackSettings::LOOP,
-        ))
-        .effect(CustomVolumeNode {
+    commands.spawn((
+        SamplePlayer::new(server.load("selfless_courage.ogg")),
+        PlaybackSettings::LOOP,
+        sample_effects![CustomVolumeNode {
             volume: Volume::Linear(1.0),
-        });
+        }],
+    ));
 }
 
 // Here we'll see how simply mutating the parameters
 // will be automatically synchronized with the audio processor.
 fn update(
-    custom_node: Single<&mut CustomVolumeNode, With<SamplePlayer>>,
+    player: Single<&SampleEffects, With<SamplePlayer>>,
+    mut custom_node: Query<&mut CustomVolumeNode>,
     time: Res<Time>,
     mut angle: Local<f32>,
-) {
-    let mut custom_node = custom_node.into_inner();
+) -> Result {
+    let mut custom_node = custom_node.get_mut(player[0])?;
 
     custom_node.volume = Volume::Linear(angle.cos() * 0.25 + 0.5);
 
     let period = 5.0;
     *angle += time.delta().as_secs_f32() * core::f32::consts::TAU / period;
+
+    Ok(())
 }

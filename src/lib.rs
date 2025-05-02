@@ -222,6 +222,7 @@ use firewheel::{CpalBackend, backend::AudioBackend};
 
 pub mod context;
 pub mod edge;
+pub mod error;
 pub mod fixed_vec;
 pub mod node;
 pub mod nodes;
@@ -229,9 +230,6 @@ pub mod pool;
 pub mod sample;
 pub mod spatial;
 pub mod timeline;
-
-pub mod error;
-pub mod pool2;
 
 #[cfg(any(feature = "profiling", test))]
 pub mod profiling;
@@ -254,10 +252,10 @@ pub mod prelude {
     };
     pub use crate::pool::{
         PoolCommands, PoolDespawn,
-        builder::{Pool, PoolBuilder},
         label::{DefaultPool, PoolLabel},
     };
     pub use crate::sample::{OnComplete, PlaybackParams, PlaybackSettings, SamplePlayer};
+    pub use crate::sample_effects;
     pub use crate::spatial::{
         DefaultSpatialScale, SpatialListener2D, SpatialListener3D, SpatialScale,
     };
@@ -367,7 +365,7 @@ where
             .init_resource::<edge::NodeMap>()
             .init_resource::<node::PendingRemovals>()
             .init_resource::<spatial::DefaultSpatialScale>()
-            .insert_resource(pool2::DefaultPoolSize(self.pool_size.clone()))
+            .insert_resource(pool::DefaultPoolSize(self.pool_size.clone()))
             .init_asset::<sample::Sample>()
             .register_asset_loader(sample::SampleLoader { sample_rate })
             .register_node::<VolumeNode>()
@@ -391,7 +389,12 @@ where
         .add_systems(
             Last,
             (
-                (spatial::update_2d_emitters, spatial::update_3d_emitters)
+                (
+                    spatial::update_2d_emitters,
+                    spatial::update_2d_emitters_effects,
+                    spatial::update_3d_emitters,
+                    spatial::update_3d_emitters_effects,
+                )
                     .before(SeedlingSystems::Acquire),
                 edge::auto_connect
                     .before(SeedlingSystems::Connect)
@@ -421,8 +424,7 @@ where
         );
 
         app.add_plugins((
-            // pool::SamplePoolPlugin,
-            pool2::SamplePoolPlugin,
+            pool::SamplePoolPlugin,
             nodes::SeedlingNodesPlugin,
             sample::RandomPlugin,
         ));
@@ -432,7 +434,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::prelude::*;
-    use bevy::{ecs::system::RunSystemOnce, prelude::*};
+    use bevy::{ecs::system::RunSystemOnce, log::LogPlugin, prelude::*};
 
     pub fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
         let mut app = App::new();
@@ -444,6 +446,7 @@ mod test {
                 spawn_default_pool: false,
                 ..SeedlingPlugin::<crate::profiling::ProfilingBackend>::new()
             },
+            LogPlugin::default(),
         ))
         .add_systems(Startup, startup);
 

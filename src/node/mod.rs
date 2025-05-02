@@ -2,8 +2,7 @@
 
 use crate::edge::NodeMap;
 use crate::error::SeedlingError;
-use crate::pool;
-use crate::pool2::sample_effects::EffectOf;
+use crate::pool::sample_effects::EffectOf;
 use crate::{SeedlingSystems, prelude::AudioContext};
 use bevy::ecs::component::{ComponentId, HookContext, Mutable};
 use bevy::ecs::world::DeferredWorld;
@@ -236,7 +235,6 @@ impl RegisterNode for App {
         );
         world.register_required_components::<T, Events>();
         world.register_required_components::<T, T::Configuration>();
-        world.register_required_components::<T, pool::dynamic::AutoRegister<T>>();
 
         self.add_systems(
             Last,
@@ -256,7 +254,6 @@ impl RegisterNode for App {
         let world = self.world_mut();
         world.register_required_components::<T, Events>();
         world.register_required_components::<T, T::Configuration>();
-        world.register_required_components::<T, pool::dynamic::AutoRegister<T>>();
 
         self.add_systems(Last, acquire_id::<T>.in_set(SeedlingSystems::Acquire))
     }

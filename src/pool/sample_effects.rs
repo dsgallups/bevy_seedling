@@ -23,7 +23,7 @@ pub use bevy::ecs::spawn::Spawn;
 #[macro_export]
 macro_rules! sample_effects {
     [$($effect:expr),*$(,)?] => {
-        <$crate::pool2::sample_effects::SampleEffects>::spawn(($($crate::pool2::sample_effects::Spawn($effect)),*))
+        <$crate::pool::sample_effects::SampleEffects>::spawn(($($crate::pool::sample_effects::Spawn($effect)),*))
     };
 }
 

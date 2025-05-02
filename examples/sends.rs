@@ -25,10 +25,11 @@ fn main() {
 
                 // We can insert a send anywhere, including directly on a
                 // sample player.
-                commands
-                    .spawn(SamplePlayer::new(server.load("caw.ogg")))
+                commands.spawn((
+                    SamplePlayer::new(server.load("caw.ogg")),
                     // Here we send some of the signal to our effects.
-                    .effect(SendNode::new(Volume::Linear(0.75), send));
+                    sample_effects![SendNode::new(Volume::Linear(0.75), send)],
+                ));
             },
         )
         .run();

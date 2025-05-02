@@ -35,6 +35,8 @@
 use bevy::prelude::*;
 use firewheel::nodes::spatial_basic::SpatialBasicNode;
 
+use crate::pool::sample_effects::EffectOf;
+
 /// A scaling factor applied to the distance between spatial listeners and emitters.
 ///
 /// To override the [global spatial scaling][DefaultSpatialScale] for an entity,
@@ -160,6 +162,38 @@ pub(crate) fn update_2d_emitters(
     }
 }
 
+// TODO: is there a good way to consolidate this?
+pub(crate) fn update_2d_emitters_effects(
+    listeners: Query<&GlobalTransform, With<SpatialListener2D>>,
+    mut emitters: Query<(&mut SpatialBasicNode, Option<&SpatialScale>, &EffectOf)>,
+    effect_parents: Query<&GlobalTransform>,
+    default_scale: Res<DefaultSpatialScale>,
+) {
+    for (mut spatial, scale, effect_of) in emitters.iter_mut() {
+        let Ok(transform) = effect_parents.get(effect_of.0) else {
+            continue;
+        };
+
+        let emitter_pos = transform.translation();
+        let closest_listener = find_closest_listener(
+            emitter_pos,
+            listeners.iter().map(GlobalTransform::translation),
+        );
+
+        let Some(listener_pos) = closest_listener else {
+            continue;
+        };
+
+        let scale = scale.map(|s| s.0).unwrap_or(default_scale.0.0);
+
+        let x_diff = (emitter_pos.x - listener_pos.x) * scale.x;
+        let y_diff = (emitter_pos.y - listener_pos.y) * scale.y;
+
+        spatial.offset.x = x_diff;
+        spatial.offset.z = y_diff;
+    }
+}
+
 pub(crate) fn update_3d_emitters(
     listeners: Query<&GlobalTransform, With<SpatialListener3D>>,
     mut emitters: Query<(
@@ -170,6 +204,33 @@ pub(crate) fn update_3d_emitters(
     default_scale: Res<DefaultSpatialScale>,
 ) {
     for (mut spatial, scale, transform) in emitters.iter_mut() {
+        let emitter_pos = transform.translation();
+        let closest_listener = find_closest_listener(
+            emitter_pos,
+            listeners.iter().map(GlobalTransform::translation),
+        );
+
+        let Some(listener_pos) = closest_listener else {
+            continue;
+        };
+
+        let scale = scale.map(|s| s.0).unwrap_or(default_scale.0.0);
+
+        spatial.offset = (emitter_pos - listener_pos) * scale;
+    }
+}
+
+pub(crate) fn update_3d_emitters_effects(
+    listeners: Query<&GlobalTransform, With<SpatialListener3D>>,
+    mut emitters: Query<(&mut SpatialBasicNode, Option<&SpatialScale>, &EffectOf)>,
+    effect_parents: Query<&GlobalTransform>,
+    default_scale: Res<DefaultSpatialScale>,
+) {
+    for (mut spatial, scale, effect_of) in emitters.iter_mut() {
+        let Ok(transform) = effect_parents.get(effect_of.0) else {
+            continue;
+        };
+
         let emitter_pos = transform.translation();
         let closest_listener = find_closest_listener(
             emitter_pos,

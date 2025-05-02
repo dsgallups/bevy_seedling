@@ -20,17 +20,16 @@ fn main() {
 fn startup(server: Res<AssetServer>, mut commands: Commands) {
     // Here we spawn a sample player with a spatial effect,
     // making sure our sample player entity has a transform.
-    commands
-        .spawn((
-            SamplePlayer::new(server.load("selfless_courage.ogg")),
-            PlaybackSettings::LOOP,
-            Transform::default(),
-        ))
-        .effect(SpatialBasicNode {
+    commands.spawn((
+        SamplePlayer::new(server.load("selfless_courage.ogg")),
+        PlaybackSettings::LOOP,
+        Transform::default(),
+        sample_effects![SpatialBasicNode {
             // This should make the panning obvious.
             panning_threshold: 0.8,
             ..Default::default()
-        });
+        }],
+    ));
 
     // Then, we'll spawn a simple listener that just circles the emitter.
     //
