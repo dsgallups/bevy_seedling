@@ -253,6 +253,7 @@ pub mod prelude {
     pub use crate::pool::{
         PoolCommands, PoolDespawn,
         label::{DefaultPool, PoolLabel},
+        sample_effects::{EffectOf, EffectsQuery, SampleEffects},
     };
     pub use crate::sample::{OnComplete, PlaybackParams, PlaybackSettings, SamplePlayer};
     pub use crate::sample_effects;

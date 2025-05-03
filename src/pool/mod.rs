@@ -21,6 +21,7 @@ use crate::{
 };
 
 pub mod dynamic;
+mod entity_set;
 pub mod label;
 mod queue;
 pub mod sample_effects;

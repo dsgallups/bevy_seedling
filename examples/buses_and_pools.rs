@@ -30,15 +30,13 @@ fn main() {
                 commands
                     .spawn((VolumeNode::default(), EffectsBus))
                     // Any arbitrary effects chain can go here, but
-                    // let's just insert a reverb node.
-                    //
+                    // let's just insert some reverb and a low-pass filter.
+                    .chain_node(LowPassNode::default())
                     // This node is implicitly connected to the `MainBus`.
                     .chain_node(FreeverbNode::default());
 
                 // Let's create a new sample player pool and route it to our effects bus.
-                Pool::new(EffectsPool, 4)
-                    .spawn(&mut commands)
-                    .connect(EffectsBus);
+                commands.spawn(EffectsPool).connect(EffectsBus);
 
                 // Finally, let's play a sample through the chain.
                 commands.spawn((
@@ -75,10 +73,10 @@ fn main() {
 
                 node.frequency
                     .push_curve(
-                        10000.,
+                        1000.,
                         now + ClockSeconds(4.0),
                         now + ClockSeconds(8.0),
-                        EaseFunction::ExponentialOut,
+                        EaseFunction::Linear,
                     )
                     .unwrap();
             },

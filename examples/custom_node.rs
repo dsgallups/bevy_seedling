@@ -7,7 +7,6 @@ use bevy_seedling::{pool::sample_effects::SampleEffects, prelude::*};
 // You'll need to depend on firewheel directly when defining
 // custom nodes.
 use firewheel::{
-    Volume,
     channel_config::{ChannelConfig, NonZeroChannelCount},
     diff::{Diff, Patch},
     event::NodeEventList,
@@ -157,7 +156,7 @@ fn update(
     time: Res<Time>,
     mut angle: Local<f32>,
 ) -> Result {
-    let mut custom_node = custom_node.get_mut(player[0])?;
+    let mut custom_node = custom_node.get_effect_mut(&player)?;
 
     custom_node.volume = Volume::Linear(angle.cos() * 0.25 + 0.5);
 
