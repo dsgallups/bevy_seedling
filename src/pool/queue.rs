@@ -94,12 +94,34 @@ pub(super) fn assign_work(
             .filter(|s| nodes.get(*s).is_ok_and(|n| n.3.is_none()))
             .collect();
 
+        #[cfg(debug_assertions)]
+        commands.queue({
+            let inactive = inactive_samplers.len();
+            let queued_len = queued_samples.len();
+            let total_samplers = samplers.len();
+            let size = size.clone();
+            let id = label.label_id;
+            move |world: &mut World| {
+                let component = world.components().get_descriptor(id);
+
+                if let Some(component) = component {
+                    let s = if queued_len != 1 { "s" } else { "" };
+                    debug!(
+                        "queued {queued_len} sample{s} in {} ({} total, {inactive} inactive, {:?})",
+                        component.name(),
+                        total_samplers,
+                        size.0
+                    );
+                }
+            }
+        });
+
         if inactive_samplers.len() >= queued_samples.len() {
-            let mut inactive = inactive_samplers.into_iter();
+            let mut inactive = inactive_samplers.iter();
 
             for (sample_entity, mut player, settings, asset, sample_effects) in queued_samples {
                 let (sampler_entity, mut params, state, _) =
-                    nodes.get_mut(inactive.next().unwrap())?;
+                    nodes.get_mut(*inactive.next().unwrap())?;
 
                 params.set_sample(asset.get(), settings.volume, settings.repeat_mode);
                 player.set_sampler(sampler_entity, state.0.clone());
@@ -239,7 +261,7 @@ pub(super) fn assign_work(
         // then sort the queued samples
         queued_samples.sort_by_key(|s| s.2.repeat_mode == RepeatMode::RepeatEndlessly);
 
-        let difference = queued_samples.len() - sampler_scores.len();
+        let difference = queued_samples.len() - inactive_samplers.len();
 
         for (sampler, queued) in sampler_scores.into_iter().zip(queued_samples.into_iter()) {
             let (sample_entity, mut player, settings, asset, sample_effects) = queued;
