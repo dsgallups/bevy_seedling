@@ -293,7 +293,8 @@ impl PendingRemovals {
     }
 }
 
-pub(crate) fn process_removals(
+pub(crate) fn flush_events(
+    mut nodes: Query<(&FirewheelNode, &mut Events)>,
     mut removals: ResMut<PendingRemovals>,
     mut context: ResMut<AudioContext>,
 ) {
@@ -303,14 +304,7 @@ pub(crate) fn process_removals(
                 error!("attempted to remove non-existent or invalid node from audio graph");
             }
         }
-    });
-}
 
-pub(crate) fn flush_events(
-    mut nodes: Query<(&FirewheelNode, &mut Events)>,
-    mut context: ResMut<AudioContext>,
-) {
-    context.with(|context| {
         for (node, mut events) in nodes.iter_mut() {
             for event in events.0.drain(..) {
                 context.queue_event(NodeEvent {
@@ -318,6 +312,10 @@ pub(crate) fn flush_events(
                     event,
                 });
             }
+        }
+
+        if let Err(e) = context.update() {
+            error!("graph error: {:?}", e);
         }
     });
 }

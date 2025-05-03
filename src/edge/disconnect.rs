@@ -125,8 +125,17 @@ pub(crate) fn process_disconnections(
     node_map: Res<NodeMap>,
     mut context: ResMut<AudioContext>,
 ) {
+    let disconnections = disconnections
+        .iter_mut()
+        .filter(|(pending, _)| !pending.0.is_empty())
+        .collect::<Vec<_>>();
+
+    if disconnections.is_empty() {
+        return;
+    }
+
     context.with(|context| {
-        for (mut pending, source_node) in disconnections.iter_mut() {
+        for (mut pending, source_node) in disconnections.into_iter() {
             pending.0.retain(|disconnections| {
                 let ports = disconnections.ports.as_deref().unwrap_or(DEFAULT_CONNECTION);
 

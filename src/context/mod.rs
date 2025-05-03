@@ -93,11 +93,3 @@ impl AudioContext {
         self.0.with(f)
     }
 }
-
-pub(crate) fn update_context(mut context: ResMut<AudioContext>) {
-    context.with(|context| {
-        if let Err(e) = context.update() {
-            error!("graph error: {:?}", e);
-        }
-    });
-}

@@ -371,15 +371,23 @@ impl core::fmt::Debug for ConnectCommands<'_> {
     }
 }
 
-// this has turned into a bit of a monster
 pub(crate) fn process_connections(
     mut connections: Query<(&mut PendingConnections, &FirewheelNode)>,
     targets: Query<&FirewheelNode>,
     node_map: Res<NodeMap>,
     mut context: ResMut<AudioContext>,
 ) {
+    let connections = connections
+        .iter_mut()
+        .filter(|(pending, _)| !pending.0.is_empty())
+        .collect::<Vec<_>>();
+
+    if connections.is_empty() {
+        return;
+    }
+
     context.with(|context| {
-        for (mut pending, source_node) in connections.iter_mut() {
+        for (mut pending, source_node) in connections.into_iter() {
             pending.0.retain(|connection| {
                 let ports = connection.ports.as_deref().unwrap_or(DEFAULT_CONNECTION);
 
