@@ -56,29 +56,14 @@ fn main() {
             },
         )
         .add_systems(
-            PostStartup,
+            Update,
             // Here we apply some modulation to the frequency of the low-pass filter.
-            |q: Single<&mut LowPassNode>, mut context: ResMut<AudioContext>| {
-                let now = context.now();
-                let mut node = q.into_inner();
+            |mut node: Single<&mut LowPassNode>, mut angle: Local<f32>, time: Res<Time>| {
+                let period = 10.0;
+                *angle += time.delta_secs() * core::f32::consts::TAU / period;
 
-                node.frequency
-                    .push_curve(
-                        80.,
-                        now,
-                        now + ClockSeconds(4.0),
-                        EaseFunction::ExponentialOut,
-                    )
-                    .unwrap();
-
-                node.frequency
-                    .push_curve(
-                        1000.,
-                        now + ClockSeconds(4.0),
-                        now + ClockSeconds(8.0),
-                        EaseFunction::Linear,
-                    )
-                    .unwrap();
+                let sin = angle.sin() * 0.5 + 0.5;
+                node.frequency = 200.0 + sin * sin * 3500.0;
             },
         )
         .run();
