@@ -58,6 +58,33 @@ impl Plugin for SamplePoolPlugin {
 }
 
 #[derive(Debug, Component)]
+#[component(immutable, on_insert = Self::on_insert_hook)]
+#[require(PoolMarker)]
+pub struct SamplerPool<T: PoolLabel + Component + Clone>(pub T);
+
+impl<T: PoolLabel + Component + Clone> SamplerPool<T> {
+    fn on_insert_hook(mut world: DeferredWorld, context: HookContext) {
+        world.commands().queue(move |world: &mut World| {
+            let id = match world.component_id::<T>() {
+                Some(id) => id,
+                None => world.register_component::<T>(),
+            };
+
+            let Some(value) = world.get::<SamplerPool<T>>(context.entity) else {
+                return;
+            };
+
+            let container = PoolLabelContainer::new(&value.0, id);
+            world.entity_mut(context.entity).insert(container);
+        });
+    }
+}
+
+/// A simple marker to make it easy to distinguish pools in a type-erased way.
+#[derive(Component, Default)]
+struct PoolMarker;
+
+#[derive(Debug, Component)]
 #[relationship(relationship_target = Samplers)]
 pub struct SamplerOf(pub Entity);
 
@@ -226,7 +253,7 @@ fn populate_pool(
         ),
         (
             With<PoolLabelContainer>,
-            Without<SamplePlayer>,
+            With<PoolMarker>,
             Without<Samplers>,
         ),
     >,
@@ -329,17 +356,17 @@ fn remove_finished(
 #[derive(Debug)]
 pub struct PoolDespawn<T>(T);
 
-impl<T: PoolLabel + Component> PoolDespawn<T> {
+impl<T: PoolLabel + Component + Clone> PoolDespawn<T> {
     /// Construct a new [`PoolDespawn`] with the provided label.
     pub fn new(label: T) -> Self {
         Self(label)
     }
 }
 
-impl<T: PoolLabel + Component> Command for PoolDespawn<T> {
+impl<T: PoolLabel + Component + Clone> Command for PoolDespawn<T> {
     fn apply(self, world: &mut World) {
         let mut roots =
-            world.query_filtered::<(Entity, &PoolLabelContainer), (With<T>, With<Samplers>, With<FirewheelNode>)>();
+            world.query_filtered::<(Entity, &PoolLabelContainer), (With<SamplerPool<T>>, With<Samplers>, With<FirewheelNode>)>();
 
         let roots: Vec<_> = roots
             .iter(world)
@@ -364,11 +391,11 @@ pub trait PoolCommands {
     ///
     /// Despawning the terminal volume node recursively
     /// will produce the same effect.
-    fn despawn_pool<T: PoolLabel + Component>(&mut self, label: T);
+    fn despawn_pool<T: PoolLabel + Component + Clone>(&mut self, label: T);
 }
 
 impl PoolCommands for Commands<'_, '_> {
-    fn despawn_pool<T: PoolLabel + Component>(&mut self, label: T) {
+    fn despawn_pool<T: PoolLabel + Component + Clone>(&mut self, label: T) {
         self.queue(PoolDespawn::new(label));
     }
 }
@@ -389,19 +416,25 @@ mod test {
     #[test]
     fn test_spawn() {
         let mut app = prepare_app(|mut commands: Commands| {
-            commands.spawn((TestPool, sample_effects![LowPassNode::default()]));
+            commands.spawn((
+                SamplerPool(TestPool),
+                sample_effects![LowPassNode::default()],
+            ));
         });
 
-        run(&mut app, |q: Query<&Samplers, With<TestPool>>| {
-            assert_eq!(q.iter().len(), 1);
-        });
+        run(
+            &mut app,
+            |q: Query<&Samplers, With<SamplerPool<TestPool>>>| {
+                assert_eq!(q.iter().len(), 1);
+            },
+        );
     }
 
     #[test]
     fn test_despawn() {
         let mut app = prepare_app(|mut commands: Commands| {
             commands.spawn((
-                TestPool,
+                SamplerPool(TestPool),
                 PoolSize(4..=32),
                 sample_effects![LowPassNode::default()],
             ));
@@ -427,7 +460,10 @@ mod test {
     #[test]
     fn test_playback_starts() {
         let mut app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
-            commands.spawn((TestPool, sample_effects![LowPassNode::default()]));
+            commands.spawn((
+                SamplerPool(TestPool),
+                sample_effects![LowPassNode::default()],
+            ));
             commands.spawn((
                 TestPool,
                 SamplePlayer::new(server.load("caw.ogg")),
@@ -493,7 +529,10 @@ mod test {
     #[test]
     fn test_remove_in_pool() {
         let mut app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
-            commands.spawn((TestPool, sample_effects![LowPassNode::default()]));
+            commands.spawn((
+                SamplerPool(TestPool),
+                sample_effects![LowPassNode::default()],
+            ));
 
             commands.spawn((
                 TestPool,

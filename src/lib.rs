@@ -251,7 +251,7 @@ pub mod prelude {
         send::{SendConfig, SendNode},
     };
     pub use crate::pool::{
-        PoolCommands, PoolDespawn,
+        PoolCommands, PoolDespawn, SamplerPool,
         label::{DefaultPool, PoolLabel},
         sample_effects::{EffectOf, EffectsQuery, SampleEffects},
     };

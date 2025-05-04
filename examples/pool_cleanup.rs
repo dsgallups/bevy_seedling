@@ -23,7 +23,7 @@ struct AmbiencePool;
 
 fn startup(server: Res<AssetServer>, mut commands: Commands) {
     // Here we spawn our custom ambience pool.
-    commands.spawn(AmbiencePool);
+    commands.spawn(SamplerPool(AmbiencePool));
 
     // And we start playing our sample in the pool.
     commands.spawn((

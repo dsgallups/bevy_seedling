@@ -1,16 +1,7 @@
-use std::iter::Copied;
-
 use bevy::{
-    ecs::{
-        entity::{EntitySet, EntitySetIterator},
-        query::{
-            QueryData, QueryEntityError, QueryFilter, QueryManyIter, QueryManyUniqueIter,
-            ROQueryItem,
-        },
-    },
+    ecs::query::{QueryData, QueryFilter, QueryManyIter, QueryManyUniqueIter, ROQueryItem},
     prelude::*,
 };
-use smallvec::SmallVec;
 
 #[derive(Debug, Component)]
 #[relationship(relationship_target = SampleEffects)]
@@ -118,51 +109,5 @@ where
         effects: &SampleEffects,
     ) -> QueryManyIter<'_, 's, D, F, impl Iterator<Item = Entity>> {
         self.iter_many_mut(effects.iter())
-    }
-}
-
-fn test_query_too(
-    player: Single<&crate::prelude::SampleEffects>,
-    mut effects: Query<&mut crate::prelude::VolumeNode>,
-) -> Result {
-    let mut volume = effects.get_effect_mut(&player)?;
-
-    volume.volume = crate::prelude::Volume::Linear(0.0);
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::prelude::*;
-    use crate::profiling::ProfilingBackend;
-    use crate::test::{prepare_app, run};
-    use bevy::ecs::system::RunSystemOnce;
-
-    fn test_clone() {
-        #[derive(PoolLabel, Debug, Clone, Hash, PartialEq, Eq)]
-        struct MyPool;
-
-        let app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
-            // Spawn a sample pool
-            commands.spawn((
-                MyPool,
-                sample_effects![LowPassNode::default(), SpatialBasicNode::default()],
-            ));
-
-            // Spawn a sample with effects
-            commands.spawn((
-                SamplePlayer::new(server.load("caw.ogg")),
-                sample_effects![LowPassNode::default(), SpatialBasicNode::default()],
-            ));
-
-            // bsn! {
-            //     (
-            //         SamplePlayer(@"caw.ogg"),
-            //         SampleEffects [ LowPassNode, SpatialBasicNode ],
-            //     )
-            // }
-        });
     }
 }

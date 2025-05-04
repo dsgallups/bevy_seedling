@@ -36,7 +36,7 @@ fn main() {
                     .chain_node(FreeverbNode::default());
 
                 // Let's create a new sample player pool and route it to our effects bus.
-                commands.spawn(EffectsPool).connect(EffectsBus);
+                commands.spawn(SamplerPool(EffectsPool)).connect(EffectsBus);
 
                 // Finally, let's play a sample through the chain.
                 commands.spawn((

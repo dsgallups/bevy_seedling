@@ -1,4 +1,4 @@
-use super::{DefaultPoolSize, PoolSize, sample_effects::EffectOf};
+use super::{DefaultPoolSize, PoolSize, SamplerPool, sample_effects::EffectOf};
 use crate::{
     node::EffectId,
     pool::{label::PoolLabelContainer, sample_effects::SampleEffects},
@@ -64,7 +64,7 @@ fn update_dynamic_pools(
                 let label = DynamicPoolId(registries.0.len());
 
                 let bus = commands
-                    .spawn((label, PoolSize(dynamic_range.0.clone())))
+                    .spawn((SamplerPool(label), PoolSize(dynamic_range.0.clone())))
                     .id();
 
                 let effects: Vec<_> = sample_effects.iter().collect();
