@@ -403,7 +403,7 @@ where
                 (edge::process_connections, edge::process_disconnections)
                     .chain()
                     .in_set(SeedlingSystems::Connect),
-                node::flush_events.chain().in_set(SeedlingSystems::Flush),
+                node::flush_events.in_set(SeedlingSystems::Flush),
             ),
         )
         .add_systems(

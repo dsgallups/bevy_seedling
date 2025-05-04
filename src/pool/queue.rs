@@ -26,6 +26,88 @@ struct SamplerScore {
     raw_score: u64,
 }
 
+/// Eagerly grow pools to handle over-allocation when possible.
+pub(super) fn grow_pools(
+    queued_samples: Query<(&SamplePlayer, &PoolLabelContainer), With<QueuedSample>>,
+    pools: Query<(
+        Entity,
+        &PoolLabelContainer,
+        &Samplers,
+        &PoolSize,
+        Option<&SampleEffects>,
+        &SamplerConfig,
+    )>,
+    nodes: Query<Option<&SamplerAssignmentOf>, With<SamplerOf>>,
+    server: Res<AssetServer>,
+    mut commands: Commands,
+) -> Result {
+    let queued_samples: HashMap<_, usize> = queued_samples
+        .iter()
+        .filter_map(|(player, label)| server.is_loaded(player.sample()).then_some(label))
+        .fold(HashMap::new(), |mut acc, label| {
+            *acc.entry(label.label).or_default() += 1;
+            acc
+        });
+
+    if queued_samples.is_empty() {
+        return Ok(());
+    }
+
+    for (pool_entity, label, samplers, size, pool_effects, pool_config) in pools {
+        let Some(queued_samples) = queued_samples.get(&label.label).copied() else {
+            continue;
+        };
+
+        let inactive_samplers = nodes
+            .iter_many(samplers.iter())
+            .filter(|n| n.is_some())
+            .count();
+
+        if inactive_samplers >= queued_samples {
+            continue;
+        }
+
+        let difference = queued_samples - inactive_samplers;
+
+        // attempt to grow pool if possible
+        if samplers.len() < *size.0.end() {
+            let growth_size = difference.max(samplers.len().min(8));
+            let new_size = (samplers.len() + growth_size).min(*size.0.end());
+
+            #[cfg(debug_assertions)]
+            commands.queue({
+                let id = label.label_id;
+                let num_samplers = samplers.len();
+                move |world: &mut World| {
+                    let component = world.components().get_descriptor(id);
+
+                    if let Some(component) = component {
+                        let s = if new_size != 1 { "s" } else { "" };
+                        debug!(
+                            "growing {} from {} to {} sampler{s} ({} over-allocated)",
+                            component.name(),
+                            num_samplers,
+                            new_size,
+                            difference,
+                        );
+                    }
+                }
+            });
+
+            for _ in samplers.len()..new_size {
+                super::spawn_chain(
+                    pool_entity,
+                    Some(pool_config.clone()),
+                    pool_effects.map(|e| e.deref()).unwrap_or(&[]),
+                    &mut commands,
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Scan through the set of pending sample players
 /// and assign work to the most appropriate sampler node.
 pub(super) fn assign_work(
@@ -40,13 +122,11 @@ pub(super) fn assign_work(
         With<QueuedSample>,
     >,
     pools: Query<(
-        Entity,
         &PoolLabelContainer,
         &Samplers,
         &PoolSize,
         &PoolShape,
         Option<&SampleEffects>,
-        &SamplerConfig,
     )>,
     mut nodes: Query<
         (
@@ -78,13 +158,10 @@ pub(super) fn assign_work(
         return Ok(());
     }
 
-    let pools: Vec<_> = pools
-        .iter()
-        .filter(|(_, label, ..)| queued_samples.contains_key(&label.label))
-        .collect();
-
-    for (pool_entity, label, samplers, size, pool_shape, pool_effects, pool_config) in pools {
-        let mut queued_samples = queued_samples.remove(&label.label).unwrap();
+    for (label, samplers, size, pool_shape, pool_effects) in pools {
+        let Some(mut queued_samples) = queued_samples.remove(&label.label) else {
+            continue;
+        };
 
         // if there is enough sampler availability in the pool,
         // don't bother sorting samples by priority
@@ -261,8 +338,6 @@ pub(super) fn assign_work(
         // then sort the queued samples
         queued_samples.sort_by_key(|s| s.2.repeat_mode == RepeatMode::RepeatEndlessly);
 
-        let difference = queued_samples.len() - inactive_samplers.len();
-
         for (sampler, queued) in sampler_scores.into_iter().zip(queued_samples.into_iter()) {
             let (sample_entity, mut player, settings, asset, sample_effects) = queued;
 
@@ -373,21 +448,6 @@ pub(super) fn assign_work(
                 .remove::<QueuedSample>()
                 .add_one_related::<SamplerAssignmentOf>(sampler_entity);
         }
-
-        // attempt to grow pool if possible
-        if samplers.len() < *size.0.end() {
-            let growth_size = difference.max(8);
-            let new_size = (samplers.len() + growth_size).min(*size.0.end());
-
-            for _ in samplers.len()..new_size {
-                super::spawn_chain(
-                    pool_entity,
-                    Some(pool_config.clone()),
-                    pool_effects.map(|e| e.deref()).unwrap_or(&[]),
-                    &mut commands,
-                );
-            }
-        }
     }
 
     Ok(())
@@ -405,25 +465,6 @@ pub(super) fn update_followers(
 
         for (effect, follower) in effects.iter().zip(children.iter()) {
             commands.entity(follower).insert(FollowerOf(effect));
-        }
-    }
-}
-
-// Stop playback if the source entity no longer exists.
-pub(super) fn monitor_active(
-    mut nodes: Query<(Entity, &mut SamplerNode, &SamplerAssignmentOf, &Children)>,
-    samples: Query<&SamplePlayer>,
-    mut commands: Commands,
-) {
-    for (node_entity, mut sampler, active, effects_chain) in nodes.iter_mut() {
-        if samples.get(active.0).is_err() {
-            sampler.stop();
-
-            commands.entity(node_entity).remove::<SamplerAssignmentOf>();
-
-            for effect in effects_chain.iter() {
-                commands.entity(effect).remove::<FollowerOf>();
-            }
         }
     }
 }

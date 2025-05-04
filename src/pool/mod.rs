@@ -1,5 +1,10 @@
 use bevy::{
-    ecs::{component::ComponentId, entity::EntityCloner, system::QueryLens},
+    ecs::{
+        component::{ComponentId, HookContext},
+        entity::EntityCloner,
+        system::QueryLens,
+        world::DeferredWorld,
+    },
     prelude::*,
 };
 use core::ops::{Deref, RangeInclusive};
@@ -14,7 +19,7 @@ use crate::{
     context::AudioContext,
     edge::{PendingConnections, PendingEdge},
     error::SeedlingError,
-    node::{EffectId, FirewheelNode, RegisterNode, follower::FollowerOf},
+    node::{EffectId, FirewheelNode, RegisterNode},
     pool::label::PoolLabelContainer,
     prelude::PoolLabel,
     sample::{OnComplete, PlaybackParams, PlaybackSettings, SamplePlayer},
@@ -34,12 +39,13 @@ impl Plugin for SamplePoolPlugin {
             .add_systems(
                 Last,
                 (
-                    populate_pool.before(SeedlingSystems::Acquire),
+                    (populate_pool, queue::grow_pools)
+                        .chain()
+                        .before(SeedlingSystems::Acquire),
                     (remove_finished, queue::assign_default, retrieve_state)
                         .before(SeedlingSystems::Pool)
                         .after(SeedlingSystems::Connect),
-                    (watch_sample_players, queue::monitor_active)
-                        .chain()
+                    watch_sample_players
                         .before(SeedlingSystems::Queue)
                         .after(SeedlingSystems::Pool),
                     (queue::assign_work, queue::update_followers)
@@ -64,11 +70,29 @@ struct SamplerStateWrapper(SamplerState);
 
 #[derive(Debug, Component)]
 #[relationship(relationship_target = SamplerAssignment)]
+#[component(on_remove = Self::on_remove_hook)]
 pub struct SamplerAssignmentOf(pub Entity);
+
+impl SamplerAssignmentOf {
+    fn on_remove_hook(mut world: DeferredWorld, context: HookContext) {
+        if let Some(mut sampler) = world.get_mut::<SamplerNode>(context.entity) {
+            sampler.stop();
+        }
+    }
+}
 
 #[derive(Debug, Component)]
 #[relationship_target(relationship = SamplerAssignmentOf)]
+#[component(on_remove = Self::on_remove_hook)]
 pub struct SamplerAssignment(Entity);
+
+impl SamplerAssignment {
+    fn on_remove_hook(mut world: DeferredWorld, context: HookContext) {
+        if let Some(mut player) = world.get_mut::<SamplePlayer>(context.entity) {
+            player.clear_sampler();
+        }
+    }
+}
 
 #[derive(Component)]
 struct PoolShape(Vec<ComponentId>);
@@ -246,43 +270,33 @@ fn populate_pool(
 /// Automatically remove or despawn sample players when their
 /// sample has finished playing.
 fn remove_finished(
-    nodes: Query<(
-        Entity,
-        &SamplerNode,
-        Option<&Children>,
-        &SamplerAssignmentOf,
-        &SamplerStateWrapper,
-    )>,
-    mut samples: Query<(&mut SamplePlayer, &PlaybackSettings, &PoolLabelContainer)>,
+    nodes: Query<(&SamplerNode, &SamplerAssignmentOf, &SamplerStateWrapper)>,
+    samples: Query<(&PlaybackSettings, &PoolLabelContainer)>,
     mut commands: Commands,
 ) {
-    for (entity, node, children, active, state) in nodes.iter() {
+    for (node, active, state) in nodes.iter() {
         let finished = state.0.finished() == node.sequence.id();
 
         // The sample completed playback in one-shot mode.
         if finished {
-            commands.entity(entity).remove::<SamplerAssignmentOf>();
-
-            if let Some(children) = children {
-                for effect in children.iter() {
-                    commands.entity(effect).remove::<FollowerOf>();
-                }
-            }
-
-            let Ok((mut sample_player, settings, container)) = samples.get_mut(active.0) else {
+            let Ok((settings, container)) = samples.get(active.0) else {
                 continue;
             };
 
             match settings.on_complete {
                 OnComplete::Preserve => {
-                    sample_player.clear_sampler();
+                    commands.entity(active.0).remove::<SamplerAssignment>();
                 }
                 OnComplete::Remove => {
                     commands
                         .entity(active.0)
                         .remove_by_id(container.label_id)
-                        .remove_with_requires::<(SampleEffects, SamplePlayer, PoolLabelContainer)>(
-                        );
+                        .remove_with_requires::<(
+                            SampleEffects,
+                            SamplePlayer,
+                            PoolLabelContainer,
+                            SamplerAssignment,
+                        )>();
                 }
                 OnComplete::Despawn => {
                     commands.entity(active.0).despawn();
@@ -394,7 +408,7 @@ mod test {
         });
 
         run(&mut app, |pool_nodes: Query<&FirewheelNode>| {
-            // 2 * 4 (sampler and low pass nodes) + 1 (pool volume) + 1 (global volume)
+            // 2 * 4 (sampler and low pass nodes) + (pool volume) + 1 (global volume)
             assert_eq!(pool_nodes.iter().count(), 10);
         });
 
