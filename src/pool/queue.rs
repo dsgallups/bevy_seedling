@@ -71,7 +71,7 @@ pub(super) fn grow_pools(
 
         // attempt to grow pool if possible
         if samplers.len() < *size.0.end() {
-            let growth_size = difference.max(samplers.len().min(8));
+            let growth_size = difference.max(samplers.len().min(16));
             let new_size = (samplers.len() + growth_size).min(*size.0.end());
 
             #[cfg(debug_assertions)]

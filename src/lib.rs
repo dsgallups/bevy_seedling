@@ -412,7 +412,7 @@ where
                 node::label::insert_main_bus,
                 move |mut commands: Commands| {
                     if spawn_default {
-                        commands.spawn(DefaultPool);
+                        commands.spawn(SamplerPool(DefaultPool));
                     }
                 },
             ),
