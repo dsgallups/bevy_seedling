@@ -60,7 +60,7 @@ pub(super) fn grow_pools(
 
         let inactive_samplers = nodes
             .iter_many(samplers.iter())
-            .filter(|n| n.is_some())
+            .filter(|n| n.is_none())
             .count();
 
         if inactive_samplers >= queued_samples {
