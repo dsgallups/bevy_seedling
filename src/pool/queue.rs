@@ -1,9 +1,10 @@
-use std::ops::Deref;
+use std::{ops::Deref, time::Duration};
 
 use bevy::{
     ecs::{entity::EntityCloner, relationship::Relationship},
     platform::collections::HashMap,
     prelude::*,
+    time::Stopwatch,
 };
 use firewheel::nodes::sampler::{RepeatMode, SamplerConfig, SamplerNode};
 
@@ -11,19 +12,34 @@ use crate::{
     node::{EffectId, follower::FollowerOf},
     pool::label::PoolLabelContainer,
     prelude::DefaultPool,
-    sample::{PlaybackSettings, QueuedSample, Sample, SamplePlayer},
+    sample::{
+        PlaybackSettings, QueuedSample, Sample, SamplePlayer, SamplePriority, SampleQueueLifetime,
+    },
 };
 
 use super::{
-    PoolShape, PoolSize, SamplerAssignmentOf, SamplerOf, SamplerStateWrapper, Samplers,
+    PlaybackCompletionEvent, PoolShape, PoolSize, SamplerAssignmentOf, SamplerOf,
+    SamplerStateWrapper, Samplers,
     sample_effects::{EffectOf, SampleEffects},
 };
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
+#[derive(PartialEq, Debug, Eq, PartialOrd, Ord, Copy, Clone)]
 struct SamplerScore {
+    priority: SamplePriority,
     is_looping: bool,
     has_assignment: bool,
     raw_score: u64,
+}
+
+impl Default for SamplerScore {
+    fn default() -> Self {
+        SamplerScore {
+            priority: Default::default(),
+            is_looping: false,
+            has_assignment: false,
+            raw_score: u64::MAX,
+        }
+    }
 }
 
 /// Eagerly grow pools to handle over-allocation when possible.
@@ -118,6 +134,7 @@ pub(super) fn assign_work(
             &PlaybackSettings,
             &PoolLabelContainer,
             Option<&SampleEffects>,
+            &SamplePriority,
         ),
         With<QueuedSample>,
     >,
@@ -137,17 +154,20 @@ pub(super) fn assign_work(
         ),
         With<SamplerOf>,
     >,
-    active_samples: Query<&PlaybackSettings>,
+    active_samples: Query<(&PlaybackSettings, &SamplePriority)>,
     mut effects: Query<&EffectId, With<EffectOf>>,
     assets: Res<Assets<Sample>>,
     mut commands: Commands,
 ) -> Result {
     let mut queued_samples: HashMap<_, Vec<_>> = queued_samples
         .iter_mut()
-        .filter_map(|(entity, player, settings, label, effects)| {
+        .filter_map(|(entity, player, settings, label, effects, priority)| {
             let asset = assets.get(&player.sample)?;
 
-            Some((label.label, (entity, player, settings, asset, effects)))
+            Some((
+                label.label,
+                (entity, player, settings, asset, effects, priority),
+            ))
         })
         .fold(HashMap::new(), |mut acc, (key, value)| {
             acc.entry(key).or_default().push(value);
@@ -196,7 +216,9 @@ pub(super) fn assign_work(
         if inactive_samplers.len() >= queued_samples.len() {
             let mut inactive = inactive_samplers.iter();
 
-            for (sample_entity, mut player, settings, asset, sample_effects) in queued_samples {
+            for (sample_entity, mut player, settings, asset, sample_effects, priority) in
+                queued_samples
+            {
                 let (sampler_entity, mut params, state, _) =
                     nodes.get_mut(*inactive.next().unwrap())?;
 
@@ -309,23 +331,28 @@ pub(super) fn assign_work(
             continue;
         }
 
-        // first, sort the available samplers
+        // otherwise, sort the available samplers
         let mut sampler_scores = Vec::new();
         for (sampler_entity, params, state, assignment) in nodes.iter_many(samplers.iter()) {
             let raw_score = state.0.worker_score(params);
             let has_assignment = assignment.is_some();
-            let is_looping = assignment
-                .and_then(|a| {
-                    active_samples
-                        .get(a.0)
-                        .ok()
-                        .map(|s| s.repeat_mode != RepeatMode::PlayOnce)
-                })
-                .unwrap_or_default();
+
+            let active_data = assignment.and_then(|a| {
+                active_samples
+                    .get(a.0)
+                    .map(|s| (s.0.repeat_mode, *s.1))
+                    .ok()
+            });
+
+            let (is_looping, priority) = match active_data {
+                Some((repeat, priority)) => (repeat != RepeatMode::PlayOnce, priority),
+                None => (false, SamplePriority(0)),
+            };
 
             sampler_scores.push((
                 sampler_entity,
                 SamplerScore {
+                    priority,
                     raw_score,
                     has_assignment,
                     is_looping,
@@ -336,12 +363,31 @@ pub(super) fn assign_work(
         sampler_scores.sort_by_key(|pair| pair.1);
 
         // then sort the queued samples
-        queued_samples.sort_by_key(|s| s.2.repeat_mode == RepeatMode::RepeatEndlessly);
+        queued_samples.sort_by_key(|s| {
+            (
+                core::cmp::Reverse(s.5),
+                s.2.repeat_mode == RepeatMode::PlayOnce,
+            )
+        });
 
-        for (sampler, queued) in sampler_scores.into_iter().zip(queued_samples.into_iter()) {
-            let (sample_entity, mut player, settings, asset, sample_effects) = queued;
+        for ((sampler_entity, sampler_score), queued) in
+            sampler_scores.into_iter().zip(queued_samples.into_iter())
+        {
+            let (sample_entity, mut player, settings, asset, sample_effects, priority) = queued;
 
-            let (sampler_entity, mut params, state, _) = nodes.get_mut(sampler.0)?;
+            // Due to the sorting, if any queued sample has a lower priority then a currently playing sample,
+            // then every subsequent sample must also have a lower priority than its corresponding player.
+            if &sampler_score.priority > priority {
+                break;
+            }
+
+            // We'll also skip over samples that won't loop
+            // when the occupied sampler is currently looping.
+            if sampler_score.is_looping && settings.repeat_mode == RepeatMode::PlayOnce {
+                continue;
+            }
+
+            let (sampler_entity, mut params, state, _) = nodes.get_mut(sampler_entity)?;
 
             params.set_sample(asset.get(), settings.volume, settings.repeat_mode);
             player.set_sampler(sampler_entity, state.0.clone());
@@ -469,6 +515,40 @@ pub(super) fn update_followers(
     }
 }
 
+#[derive(Component)]
+pub(super) struct SkipTimer(Stopwatch);
+
+pub(super) fn mark_skipped(
+    samples: Query<(Entity, &SamplePlayer), (With<QueuedSample>, Without<SkipTimer>)>,
+    server: Res<AssetServer>,
+    mut commands: Commands,
+) {
+    for (sample, player) in &samples {
+        if server.is_loaded(player.sample()) {
+            commands.entity(sample).insert(SkipTimer(Stopwatch::new()));
+        }
+    }
+}
+
+pub(super) fn tick_skipped(
+    mut samples: Query<
+        (Entity, &mut SkipTimer, &SampleQueueLifetime),
+        (With<SamplePlayer>, With<QueuedSample>),
+    >,
+    time: Res<Time>,
+    mut commands: Commands,
+) {
+    let delta = time.delta();
+
+    for (sample_entity, mut timer, lifetime) in &mut samples {
+        if timer.0.tick(delta).elapsed() >= lifetime.0 {
+            commands
+                .entity(sample_entity)
+                .trigger(PlaybackCompletionEvent);
+        }
+    }
+}
+
 /// Assign the default pool label to a sample player that has no label.
 pub(super) fn assign_default(
     samples: Query<
@@ -483,5 +563,56 @@ pub(super) fn assign_default(
 ) {
     for sample in samples.iter() {
         commands.entity(sample).insert(DefaultPool);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_sorting() {
+        fn test_order<const LEN: usize>(candidates: [SamplerScore; LEN], expected: &[usize]) {
+            let mut candidates = candidates.into_iter().enumerate().collect::<Vec<_>>();
+            candidates.sort_by_key(|c| c.1);
+
+            let ordering = candidates.into_iter().map(|c| c.0).collect::<Vec<_>>();
+            assert_eq!(ordering.as_slice(), expected);
+        }
+
+        let candidates = [
+            SamplerScore::default(),
+            SamplerScore {
+                priority: SamplePriority(1),
+                ..Default::default()
+            },
+        ];
+
+        test_order(candidates, &[0, 1]);
+
+        let candidates = [
+            SamplerScore {
+                is_looping: true,
+                ..Default::default()
+            },
+            SamplerScore::default(),
+        ];
+
+        test_order(candidates, &[1, 0]);
+
+        let candidates = [
+            SamplerScore {
+                priority: SamplePriority(1),
+                ..Default::default()
+            },
+            SamplerScore {
+                priority: SamplePriority(0),
+                is_looping: true,
+                has_assignment: true,
+                raw_score: 0,
+            },
+        ];
+
+        test_order(candidates, &[1, 0]);
     }
 }

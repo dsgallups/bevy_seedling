@@ -1,5 +1,7 @@
 //! Audio sample components.
 
+use std::time::Duration;
+
 use crate::prelude::Volume;
 use bevy::{
     ecs::{component::HookContext, world::DeferredWorld},
@@ -121,7 +123,7 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// find yourself gravitating towards manually defined [`Pool`][crate::prelude::Pool]s as your
 /// requirements grow.
 #[derive(Debug, Component, Clone)]
-#[require(PlaybackSettings, PlaybackParams)]
+#[require(PlaybackSettings, PlaybackParams, SamplePriority, SampleQueueLifetime)]
 #[component(on_insert = on_insert_sample)]
 pub struct SamplePlayer {
     pub(crate) sample: Handle<Sample>,
@@ -178,6 +180,26 @@ impl SamplePlayer {
 
     pub(crate) fn clear_sampler(&mut self) {
         self.player = None;
+    }
+}
+
+#[derive(Debug, Default, Component, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[component(immutable)]
+pub struct SamplePriority(pub u32);
+
+/// The maximum duration of time that a sample will wait for an available sampler.
+///
+/// The timer begins once the sample asset has loaded and after the sample player has been skipped
+/// at least once. If the sample player is not queued for playback within this duration,
+/// it will be considered to have completed playback.
+///
+/// The default lifetime is 100ms.
+#[derive(Debug, Component, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SampleQueueLifetime(pub Duration);
+
+impl Default for SampleQueueLifetime {
+    fn default() -> Self {
+        Self(Duration::from_millis(100))
     }
 }
 

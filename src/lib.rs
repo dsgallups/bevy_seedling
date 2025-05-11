@@ -251,11 +251,13 @@ pub mod prelude {
         send::{SendConfig, SendNode},
     };
     pub use crate::pool::{
-        PoolCommands, PoolDespawn, SamplerPool,
+        PlaybackCompletionEvent, PoolCommands, PoolDespawn, SamplerPool,
         label::{DefaultPool, PoolLabel},
         sample_effects::{EffectOf, EffectsQuery, SampleEffects},
     };
-    pub use crate::sample::{OnComplete, PlaybackParams, PlaybackSettings, SamplePlayer};
+    pub use crate::sample::{
+        OnComplete, PlaybackParams, PlaybackSettings, SamplePlayer, SamplePriority,
+    };
     pub use crate::sample_effects;
     pub use crate::spatial::{
         DefaultSpatialScale, SpatialListener2D, SpatialListener3D, SpatialScale,
@@ -429,7 +431,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::prelude::*;
-    use bevy::{ecs::system::RunSystemOnce, log::LogPlugin, prelude::*};
+    use bevy::{ecs::system::RunSystemOnce, prelude::*};
 
     pub fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
         let mut app = App::new();
@@ -441,7 +443,6 @@ mod test {
                 spawn_default_pool: false,
                 ..SeedlingPlugin::<crate::profiling::ProfilingBackend>::new()
             },
-            LogPlugin::default(),
         ))
         .add_systems(Startup, startup);
 

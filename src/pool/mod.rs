@@ -12,6 +12,7 @@ use firewheel::nodes::{
     sampler::{SamplerConfig, SamplerNode, SamplerState},
     volume::VolumeNode,
 };
+use queue::SkipTimer;
 use sample_effects::{EffectOf, SampleEffects};
 
 use crate::{
@@ -22,7 +23,7 @@ use crate::{
     node::{EffectId, FirewheelNode, RegisterNode},
     pool::label::PoolLabelContainer,
     prelude::PoolLabel,
-    sample::{OnComplete, PlaybackParams, PlaybackSettings, SamplePlayer},
+    sample::{OnComplete, PlaybackParams, PlaybackSettings, QueuedSample, SamplePlayer},
 };
 
 pub mod dynamic;
@@ -42,7 +43,7 @@ impl Plugin for SamplePoolPlugin {
                     (populate_pool, queue::grow_pools)
                         .chain()
                         .before(SeedlingSystems::Acquire),
-                    (remove_finished, queue::assign_default, retrieve_state)
+                    (poll_finished, queue::assign_default, retrieve_state)
                         .before(SeedlingSystems::Pool)
                         .after(SeedlingSystems::Connect),
                     watch_sample_players
@@ -51,8 +52,12 @@ impl Plugin for SamplePoolPlugin {
                     (queue::assign_work, queue::update_followers)
                         .chain()
                         .in_set(SeedlingSystems::Pool),
+                    (queue::tick_skipped, queue::mark_skipped)
+                        .chain()
+                        .after(SeedlingSystems::Pool),
                 ),
             )
+            .add_observer(remove_finished)
             .add_plugins(dynamic::DynamicPlugin);
     }
 }
@@ -294,41 +299,56 @@ fn populate_pool(
     Ok(())
 }
 
+#[derive(Debug, Event)]
+pub struct PlaybackCompletionEvent;
+
+/// Clean up sample resources according to their playback settings.
+fn remove_finished(
+    trigger: Trigger<PlaybackCompletionEvent>,
+    samples: Query<(&PlaybackSettings, &PoolLabelContainer)>,
+    mut commands: Commands,
+) -> Result {
+    let sample_entity = trigger.target();
+    let (settings, container) = samples.get(sample_entity)?;
+
+    match settings.on_complete {
+        OnComplete::Preserve => {
+            commands
+                .entity(sample_entity)
+                .remove::<(SamplerAssignment, QueuedSample, SkipTimer)>();
+        }
+        OnComplete::Remove => {
+            commands
+                .entity(sample_entity)
+                .remove_by_id(container.label_id)
+                .remove_with_requires::<(
+                    SampleEffects,
+                    SamplePlayer,
+                    PoolLabelContainer,
+                    SamplerAssignment,
+                    QueuedSample,
+                    SkipTimer,
+                )>();
+        }
+        OnComplete::Despawn => {
+            commands.entity(sample_entity).despawn();
+        }
+    }
+
+    Ok(())
+}
+
 /// Automatically remove or despawn sample players when their
 /// sample has finished playing.
-fn remove_finished(
+fn poll_finished(
     nodes: Query<(&SamplerNode, &SamplerAssignmentOf, &SamplerStateWrapper)>,
-    samples: Query<(&PlaybackSettings, &PoolLabelContainer)>,
     mut commands: Commands,
 ) {
     for (node, active, state) in nodes.iter() {
         let finished = state.0.finished() == node.sequence.id();
 
-        // The sample completed playback in one-shot mode.
         if finished {
-            let Ok((settings, container)) = samples.get(active.0) else {
-                continue;
-            };
-
-            match settings.on_complete {
-                OnComplete::Preserve => {
-                    commands.entity(active.0).remove::<SamplerAssignment>();
-                }
-                OnComplete::Remove => {
-                    commands
-                        .entity(active.0)
-                        .remove_by_id(container.label_id)
-                        .remove_with_requires::<(
-                            SampleEffects,
-                            SamplePlayer,
-                            PoolLabelContainer,
-                            SamplerAssignment,
-                        )>();
-                }
-                OnComplete::Despawn => {
-                    commands.entity(active.0).despawn();
-                }
-            }
+            commands.entity(active.0).trigger(PlaybackCompletionEvent);
         }
     }
 }

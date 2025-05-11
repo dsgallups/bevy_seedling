@@ -52,7 +52,7 @@ pub struct Followers(SmallVec<[Entity; 2]>);
 /// on a sample player entity directly rather than drilling
 /// into the sample pool and node the sample is assigned to.
 pub(crate) fn param_follower<T: Diff + Patch + Component<Mutability = Mutable>>(
-    sources: Query<&T, (Changed<T>, Without<FollowerOf>)>,
+    sources: Query<&T, Without<FollowerOf>>,
     mut followers: Query<(&FollowerOf, &mut T)>,
 ) -> Result {
     let mut event_queue = Vec::new();
