@@ -423,6 +423,7 @@ where
         app.add_plugins((
             pool::SamplePoolPlugin,
             nodes::SeedlingNodesPlugin,
+            #[cfg(feature = "rand")]
             sample::RandomPlugin,
         ));
     }
