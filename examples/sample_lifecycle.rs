@@ -37,10 +37,7 @@ fn play_event(
         // A looping sample, on the other hand, will continue
         // playing indefinitely until the sample entity is despawned.
         let sample = commands
-            .spawn((
-                SamplePlayer::new(server.load("caw.ogg")),
-                PlaybackSettings::LOOP,
-            ))
+            .spawn(SamplePlayer::new(server.load("caw.ogg")).looping())
             .id();
 
         // Here we kick off a timer that will remove the looping sample, stopping playback.

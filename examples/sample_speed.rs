@@ -14,13 +14,11 @@ fn main() {
         .add_systems(
             Startup,
             |server: Res<AssetServer>, mut commands: Commands| {
-                commands.spawn((
-                    SamplePlayer::new(server.load("selfless_courage.ogg")),
-                    PlaybackSettings {
-                        volume: Volume::Decibels(-6.0),
-                        ..PlaybackSettings::LOOP
-                    },
-                ));
+                commands.spawn(SamplePlayer {
+                    sample: server.load("selfless_courage.ogg"),
+                    volume: Volume::Decibels(-6.0),
+                    repeat_mode: RepeatMode::RepeatEndlessly,
+                });
             },
         )
         .add_systems(Update, modulate_speed)
@@ -30,7 +28,7 @@ fn main() {
 // The key component is `PlaybackParams`. It's a set of parameters
 // that can be changed during playback, unlike `PlaybackSettings` which
 // only takes effect once at the beginning of playback.
-fn modulate_speed(player: Single<&mut PlaybackParams>, mut angle: Local<f32>, time: Res<Time>) {
+fn modulate_speed(player: Single<&mut PlaybackSettings>, mut angle: Local<f32>, time: Res<Time>) {
     let mut params = player.into_inner();
 
     params.speed = angle.sin() as f64 * 0.05 + 1.0;

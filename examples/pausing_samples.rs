@@ -23,15 +23,9 @@ fn main() {
 
 // Let's start playing a couple samples.
 fn startup(server: Res<AssetServer>, mut commands: Commands) {
-    commands.spawn((
-        SamplePlayer::new(server.load("caw.ogg")),
-        PlaybackSettings::LOOP,
-    ));
+    commands.spawn(SamplePlayer::new(server.load("caw.ogg")).looping());
 
-    commands.spawn((
-        SamplePlayer::new(server.load("crow_ambience.ogg")),
-        PlaybackSettings::LOOP,
-    ));
+    commands.spawn(SamplePlayer::new(server.load("crow_ambience.ogg")).looping());
 }
 
 #[derive(Resource)]
@@ -39,7 +33,7 @@ struct Metronome(Timer);
 
 fn toggle_playback(
     // With this, we can iterate over _all_ sample players.
-    mut players: Query<&mut PlaybackParams, With<SamplePlayer>>,
+    mut players: Query<&mut PlaybackSettings, With<SamplePlayer>>,
     mut metro: ResMut<Metronome>,
     time: Res<Time>,
 ) {

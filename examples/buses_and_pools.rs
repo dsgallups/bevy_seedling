@@ -40,8 +40,7 @@ fn main() {
 
                 // Finally, let's play a sample through the chain.
                 commands.spawn((
-                    SamplePlayer::new(server.load("caw.ogg")),
-                    PlaybackSettings::LOOP,
+                    SamplePlayer::new(server.load("caw.ogg")).looping(),
                     EffectsPool,
                 ));
 

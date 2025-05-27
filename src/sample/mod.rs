@@ -9,7 +9,7 @@ use bevy::{
 };
 use firewheel::{
     diff::Notify,
-    nodes::sampler::{PlaybackState, Playhead, RepeatMode, SamplerState},
+    nodes::sampler::{self, PlaybackState, Playhead, RepeatMode},
 };
 
 mod assets;
@@ -30,12 +30,13 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// }
 /// ```
 ///
-/// This queues up playback in a [*sampler pool*][crate::prelude::Pool].
-/// Without any effects applied, samples are played in the
+/// This queues playback in a [`SamplerPool`][crate::prelude::SamplerPool].
+/// When no effects are applied, samples are played in the
 /// [`DefaultPool`][crate::prelude::DefaultPool].
 ///
-/// To control playback, such as enabling looping, you can
-/// also provide a [`PlaybackSettings`] component.
+/// Playback is managed with two components: an immutable [`PlaybackStatic`]
+/// component, read once at the beginning of playback, and a [`PlaybackDynamic`]
+/// component, which can be updated dynamically.
 ///
 /// ```
 /// # use bevy::prelude::*;
@@ -123,11 +124,48 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// find yourself gravitating towards manually defined [`Pool`][crate::prelude::Pool]s as your
 /// requirements grow.
 #[derive(Debug, Component, Clone)]
-#[require(PlaybackSettings, PlaybackParams, SamplePriority, SampleQueueLifetime)]
-#[component(on_insert = on_insert_sample)]
+#[require(PlaybackSettings, SamplePriority, SampleQueueLifetime)]
+#[component(on_insert = on_insert_sample, immutable)]
 pub struct SamplePlayer {
-    pub(crate) sample: Handle<Sample>,
-    player: Option<Player>,
+    /// The sample to play.
+    pub sample: Handle<Sample>,
+
+    /// Sets the sample's [`RepeatMode`].
+    pub repeat_mode: RepeatMode,
+
+    /// Sets the volume of the sample.
+    pub volume: Volume,
+}
+
+fn example(mut commands: Commands, server: Res<AssetServer>) {
+    commands.spawn(SamplePlayer::new(server.load("caw.ogg")));
+
+    commands.spawn(
+        SamplePlayer::new(server.load("caw.ogg"))
+            .looping()
+            .with_volume(Volume::Decibels(-6.0)),
+    );
+
+    commands.spawn(SamplePlayer {
+        sample: server.load("caw.ogg"),
+        ..Default::default()
+    });
+
+    commands.spawn(SamplePlayer {
+        sample: server.load("caw.ogg"),
+        repeat_mode: RepeatMode::RepeatEndlessly,
+        volume: Volume::Decibels(-6.0),
+    });
+}
+
+impl Default for SamplePlayer {
+    fn default() -> Self {
+        Self {
+            sample: Default::default(),
+            repeat_mode: RepeatMode::PlayOnce,
+            volume: Volume::UNITY_GAIN,
+        }
+    }
 }
 
 fn on_insert_sample(mut world: DeferredWorld, context: HookContext) {
@@ -149,37 +187,41 @@ impl SamplePlayer {
     pub fn new(handle: Handle<Sample>) -> Self {
         Self {
             sample: handle,
-            player: None,
+            ..Default::default()
         }
     }
 
-    /// Get a shared reference to the inner sample handle.
-    pub fn sample(&self) -> &Handle<Sample> {
-        &self.sample
+    pub fn looping(self) -> Self {
+        Self {
+            repeat_mode: RepeatMode::RepeatEndlessly,
+            ..self
+        }
     }
 
+    pub fn with_volume(self, volume: Volume) -> Self {
+        Self { volume, ..self }
+    }
+}
+
+#[derive(Component, Clone)]
+#[component(immutable)]
+pub struct SampleState(pub(crate) sampler::SamplerState);
+
+impl core::fmt::Debug for SampleState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("SamplerState").finish_non_exhaustive()
+    }
+}
+
+impl SampleState {
     /// Returns whether this sample is currently playing.
     pub fn is_playing(&self) -> bool {
-        self.player
-            .as_ref()
-            .map(|p| !p.state.stopped())
-            .unwrap_or_default()
+        !self.0.stopped()
     }
 
     /// Returns the current playhead in frames.
-    ///
-    /// If this sample player has not yet been assigned to a pool,
-    /// this returns `None`.
-    pub fn playhead_frames(&self) -> Option<u64> {
-        self.player.as_ref().map(|p| p.state.playhead_frames())
-    }
-
-    pub(crate) fn set_sampler(&mut self, entity: Entity, state: SamplerState) {
-        self.player = Some(Player { state, entity });
-    }
-
-    pub(crate) fn clear_sampler(&mut self) {
-        self.player = None;
+    pub fn playhead_frames(&self) -> u64 {
+        self.0.playhead_frames()
     }
 }
 
@@ -203,78 +245,65 @@ impl Default for SampleQueueLifetime {
     }
 }
 
-#[derive(Clone)]
-struct Player {
-    state: SamplerState,
-    entity: Entity,
-}
-
-impl core::fmt::Debug for Player {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Player")
-            .field("entity", &self.entity)
-            .finish_non_exhaustive()
-    }
-}
-
-/// Controls the playback settings of a [`SamplePlayer`].
-///
-/// `repeate_mode` and `volume` are read _once_ at the beginning
-/// of playback. Changing them during playback will not
-/// affect playback.
-#[derive(Debug, Component, Clone)]
-pub struct PlaybackSettings {
-    /// Sets the sample's [`RepeatMode`].
-    pub repeat_mode: RepeatMode,
-
-    /// Determines this sample's behavior on playback completion.
-    pub on_complete: OnComplete,
-
-    /// Sets the volume of the sample.
-    pub volume: Volume,
-}
-
-impl Default for PlaybackSettings {
-    fn default() -> Self {
-        Self::ONCE
-    }
-}
-
-impl PlaybackSettings {
-    /// Play the audio source once, despawning
-    /// this entity when complete or interrupted.
-    pub const ONCE: Self = Self {
-        repeat_mode: RepeatMode::PlayOnce,
-        volume: Volume::Linear(1.0),
-        on_complete: OnComplete::Despawn,
-    };
-
-    /// Repeatedly loop the audio source until
-    /// this entity is despawned.
-    pub const LOOP: Self = Self {
-        repeat_mode: RepeatMode::RepeatEndlessly,
-        volume: Volume::Linear(1.0),
-        on_complete: OnComplete::Despawn,
-    };
-
-    /// Play the sample once, removing the audio-related components on completion.
-    pub const REMOVE: Self = Self {
-        repeat_mode: RepeatMode::PlayOnce,
-        volume: Volume::Linear(1.0),
-        on_complete: OnComplete::Remove,
-    };
-
-    /// Play the sample once, preserving the components and entity on completion.
-    pub const PRESERVE: Self = Self {
-        repeat_mode: RepeatMode::PlayOnce,
-        volume: Volume::Linear(1.0),
-        on_complete: OnComplete::Preserve,
-    };
-}
+///// Controls the playback settings of a [`SamplePlayer`].
+/////
+///// `repeate_mode` and `volume` are read _once_ at the beginning
+///// of playback. Changing them during playback will not
+///// affect playback.
+//#[derive(Debug, Component, Clone)]
+//pub struct PlaybackStatic {
+//    /// Sets the sample's [`RepeatMode`].
+//    pub repeat_mode: RepeatMode,
+//
+//    /// Determines this sample's behavior on playback completion.
+//    pub on_complete: OnComplete,
+//
+//    /// Sets the volume of the sample.
+//    pub volume: Volume,
+//}
+//
+//impl Default for PlaybackStatic {
+//    fn default() -> Self {
+//        Self::ONCE
+//    }
+//}
+//
+//impl PlaybackStatic {
+//    /// Play the audio source once, despawning
+//    /// this entity when complete or interrupted.
+//    pub const ONCE: Self = Self {
+//        repeat_mode: RepeatMode::PlayOnce,
+//        volume: Volume::Linear(1.0),
+//        on_complete: OnComplete::Despawn,
+//    };
+//
+//    /// Repeatedly loop the audio source until
+//    /// this entity is despawned.
+//    pub const LOOP: Self = Self {
+//        repeat_mode: RepeatMode::RepeatEndlessly,
+//        volume: Volume::Linear(1.0),
+//        on_complete: OnComplete::Despawn,
+//    };
+//
+//    /// Play the sample once, removing the audio-related components on completion.
+//    pub const REMOVE: Self = Self {
+//        repeat_mode: RepeatMode::PlayOnce,
+//        volume: Volume::Linear(1.0),
+//        on_complete: OnComplete::Remove,
+//    };
+//
+//    /// Play the sample once, preserving the components and entity on completion.
+//    pub const PRESERVE: Self = Self {
+//        repeat_mode: RepeatMode::PlayOnce,
+//        volume: Volume::Linear(1.0),
+//        on_complete: OnComplete::Preserve,
+//    };
+//}
+//
 
 /// Determines what happens when a sample completes playback.
 ///
-/// This will never trigger for looping samples.
+/// This will not trigger for looping samples unless they are stopped.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum OnComplete {
     /// Preserve the entity and components, leaving them untouched.
@@ -316,26 +345,29 @@ pub enum OnComplete {
 /// }
 /// ```
 #[derive(Component, Debug)]
-pub struct PlaybackParams {
+pub struct PlaybackSettings {
     /// Sets the playback state, allowing you to play, pause or stop samples.
     ///
     /// This field provides only one-way communication with the
     /// audio processor. To get whether the sample is playing,
-    /// see [`SamplePlayer::is_playing`].
+    /// see [`SamplerState::is_playing`].
     pub playback: Notify<PlaybackState>,
 
     /// Sets the playhead.
     ///
     /// This field provides only one-way communication with the
     /// audio processor. To get the current value of the playhead,
-    /// see [`SamplePlayer::playhead_frames`].
+    /// see [`SamplerState::playhead_frames`].
     pub playhead: Notify<Playhead>,
 
     /// Sets the playback speed.
     pub speed: f64,
+
+    /// Determines this sample's behavior on playback completion.
+    pub on_complete: OnComplete,
 }
 
-impl PlaybackParams {
+impl PlaybackSettings {
     /// Start or resume playback.
     ///
     /// ```
@@ -385,12 +417,13 @@ impl PlaybackParams {
     }
 }
 
-impl Default for PlaybackParams {
+impl Default for PlaybackSettings {
     fn default() -> Self {
         Self {
             playback: Notify::new(PlaybackState::Play { delay: None }),
             playhead: Notify::default(),
             speed: 1.0,
+            on_complete: OnComplete::Remove,
         }
     }
 }
@@ -409,7 +442,7 @@ pub(crate) use random::RandomPlugin;
 
 #[cfg(feature = "rand")]
 mod random {
-    use super::PlaybackParams;
+    use super::PlaybackSettings;
     use bevy::{
         ecs::{component::HookContext, world::DeferredWorld},
         prelude::*,
@@ -420,7 +453,7 @@ mod random {
 
     impl Plugin for RandomPlugin {
         fn build(&self, app: &mut App) {
-            app.insert_resource(PitchRng(SmallRng::from_os_rng()));
+            app.insert_resource(PitchRng(SmallRng::from_entropy()));
         }
     }
 
@@ -430,7 +463,7 @@ mod random {
     /// A component that applies a random pitch
     /// to a sample player when spawned.
     #[derive(Debug, Component, Default, Clone)]
-    #[require(PlaybackParams)]
+    #[require(PlaybackSettings)]
     #[component(immutable, on_add = Self::on_add_hook)]
     pub struct PitchRange(pub core::ops::Range<f64>);
 
@@ -443,12 +476,12 @@ mod random {
                 .clone();
 
             let mut rng = world.resource_mut::<PitchRng>();
-            let value = rng.0.random_range(range);
+            let value = rng.0.gen_range(range);
 
             world
                 .commands()
                 .entity(context.entity)
-                .entry::<PlaybackParams>()
+                .entry::<PlaybackSettings>()
                 .or_default()
                 .and_modify(move |mut params| params.speed = value);
         }

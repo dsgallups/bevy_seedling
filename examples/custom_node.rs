@@ -140,8 +140,7 @@ impl AudioNodeProcessor for VolumeProcessor {
 fn startup(server: Res<AssetServer>, mut commands: Commands) {
     // Let's spawn a looping sample.
     commands.spawn((
-        SamplePlayer::new(server.load("selfless_courage.ogg")),
-        PlaybackSettings::LOOP,
+        SamplePlayer::new(server.load("selfless_courage.ogg")).looping(),
         sample_effects![CustomVolumeNode {
             volume: Volume::Linear(1.0),
         }],

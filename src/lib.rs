@@ -116,6 +116,7 @@
 //!
 //! | Flag | Description | Default feature |
 //! | ---  | ----------- | --------------- |
+//! | `rand` | Enable the `PitchRange` component. | Yes |
 //! | `wav` | Enable WAV format and PCM encoding. | Yes |
 //! | `ogg` | Enable Ogg format and Vorbis encoding. | Yes |
 //! | `mp3` | Enable mp3 format and encoding. | No |
@@ -263,12 +264,12 @@ pub mod prelude {
         send::{SendConfig, SendNode},
     };
     pub use crate::pool::{
-        PlaybackCompletionEvent, PoolCommands, PoolDespawn, SamplerPool,
+        DefaultPoolSize, PlaybackCompletionEvent, PoolCommands, PoolDespawn, SamplerPool,
         label::{DefaultPool, PoolLabel},
         sample_effects::{EffectOf, EffectsQuery, SampleEffects},
     };
     pub use crate::sample::{
-        OnComplete, PlaybackParams, PlaybackSettings, SamplePlayer, SamplePriority,
+        OnComplete, PlaybackSettings, SamplePlayer, SamplePriority, SampleState,
     };
     pub use crate::sample_effects;
     pub use crate::spatial::{
@@ -380,7 +381,7 @@ where
             .init_resource::<edge::NodeMap>()
             .init_resource::<node::PendingRemovals>()
             .init_resource::<spatial::DefaultSpatialScale>()
-            .insert_resource(pool::DefaultPoolSize(self.pool_size.clone()))
+            .insert_resource(pool::DefaultPoolSize(4..=32))
             .init_asset::<sample::Sample>()
             .register_asset_loader(sample::SampleLoader { sample_rate })
             .register_node::<VolumeNode>()

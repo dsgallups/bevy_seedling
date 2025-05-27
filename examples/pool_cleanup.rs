@@ -28,8 +28,7 @@ fn startup(server: Res<AssetServer>, mut commands: Commands) {
     // And we start playing our sample in the pool.
     commands.spawn((
         AmbiencePool,
-        SamplePlayer::new(server.load("crow_ambience.ogg")),
-        PlaybackSettings::LOOP,
+        SamplePlayer::new(server.load("crow_ambience.ogg")).looping(),
     ));
 
     // Then, we queue up the pool's removal.

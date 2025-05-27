@@ -1,3 +1,13 @@
+use crate::{
+    SeedlingSystems,
+    context::AudioContext,
+    edge::{PendingConnections, PendingEdge},
+    error::SeedlingError,
+    node::{EffectId, FirewheelNode, RegisterNode},
+    pool::label::PoolLabelContainer,
+    prelude::PoolLabel,
+    sample::{OnComplete, PlaybackSettings, QueuedSample, SamplePlayer},
+};
 use bevy::{
     ecs::{
         component::{ComponentId, HookContext},
@@ -15,18 +25,7 @@ use firewheel::nodes::{
 use queue::SkipTimer;
 use sample_effects::{EffectOf, SampleEffects};
 
-use crate::{
-    SeedlingSystems,
-    context::AudioContext,
-    edge::{PendingConnections, PendingEdge},
-    error::SeedlingError,
-    node::{EffectId, FirewheelNode, RegisterNode},
-    pool::label::PoolLabelContainer,
-    prelude::PoolLabel,
-    sample::{OnComplete, PlaybackParams, PlaybackSettings, QueuedSample, SamplePlayer},
-};
-
-pub mod dynamic;
+mod dynamic;
 mod entity_set;
 pub mod label;
 mod queue;
@@ -90,22 +89,27 @@ impl<T: PoolLabel + Component + Clone> SamplerPool<T> {
 struct PoolMarker;
 
 #[derive(Debug, Component)]
-#[relationship(relationship_target = Samplers)]
-pub struct SamplerOf(pub Entity);
+#[relationship(relationship_target = PoolSamplers)]
+struct PoolSamplerOf(pub Entity);
 
 #[derive(Debug, Component)]
-#[relationship_target(relationship = SamplerOf, linked_spawn)]
-pub struct Samplers(Vec<Entity>);
+#[relationship_target(relationship = PoolSamplerOf, linked_spawn)]
+struct PoolSamplers(Vec<Entity>);
 
-#[derive(Component)]
+/// A wrapper for Firewheel's sampler state.
+#[derive(Component, Clone)]
 struct SamplerStateWrapper(SamplerState);
 
+/// A sampler assignment relatinoship.
+///
+/// This resides in the [`SamplerNode`] entity, pointing to the
+/// [`SamplerPlayer`] entity it has been allocated for.
 #[derive(Debug, Component)]
-#[relationship(relationship_target = SamplerAssignment)]
+#[relationship(relationship_target = Sampler)]
 #[component(on_remove = Self::on_remove_hook)]
-pub struct SamplerAssignmentOf(pub Entity);
+pub struct SamplerOf(pub Entity);
 
-impl SamplerAssignmentOf {
+impl SamplerOf {
     fn on_remove_hook(mut world: DeferredWorld, context: HookContext) {
         if let Some(mut sampler) = world.get_mut::<SamplerNode>(context.entity) {
             sampler.stop();
@@ -113,15 +117,74 @@ impl SamplerAssignmentOf {
     }
 }
 
-#[derive(Debug, Component)]
-#[relationship_target(relationship = SamplerAssignmentOf)]
-#[component(on_remove = Self::on_remove_hook)]
-pub struct SamplerAssignment(Entity);
+/// A relationship that provides information about a sample player's
+/// assigned [`SamplerNode`].
+///
+/// This component is inserted on a [`SamplePlayer`] entity when a
+/// sampler in the corresponding pool has been successfully allocated.
+/// [`Sampler`] provides precise information about a sample's playback
+/// status using shared atomics. Depending on the audio sample rate,
+/// the number of frames in a processing block, and frequency at which
+/// this data is checked, you may notice jitter in the playhead.
+#[derive(Component)]
+#[relationship_target(relationship = SamplerOf)]
+#[component(on_remove = Self::on_insert_hook)]
+pub struct Sampler {
+    #[relationship]
+    sampler: Entity,
+    state: Option<SamplerState>,
+}
 
-impl SamplerAssignment {
-    fn on_remove_hook(mut world: DeferredWorld, context: HookContext) {
-        if let Some(mut player) = world.get_mut::<SamplePlayer>(context.entity) {
-            player.clear_sampler();
+impl Sampler {
+    /// Returns the underlying sampler entity.
+    pub fn sampler(&self) -> Entity {
+        self.sampler
+    }
+
+    /// Returns whether this sample is currently playing.
+    pub fn is_playing(&self) -> bool {
+        self.state
+            .as_ref()
+            .map(|s| !s.stopped())
+            .unwrap_or_default()
+    }
+
+    /// Returns the current playhead in frames.
+    ///
+    /// # Panics
+    ///
+    /// If the sample player has not yet propagated to the audio
+    /// graph, this information may not yet be available. For a
+    /// fallible method, see [`try_playhead_frames`][Self::try_playhead_frames].
+    pub fn playhead_frames(&self) -> u64 {
+        self.try_playhead_frames().unwrap()
+    }
+
+    /// Returns the current playhead in frames.
+    ///
+    /// If the sample player has not yet propagated to the audio
+    /// graph, this returns `None`.
+    pub fn try_playhead_frames(&self) -> Option<u64> {
+        self.state.as_ref().map(|s| s.playhead_frames())
+    }
+}
+
+impl core::fmt::Debug for Sampler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SamplerAssignment")
+            .field("sampler", &self.sampler)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Sampler {
+    fn on_insert_hook(mut world: DeferredWorld, context: HookContext) {
+        let sampler = world.get::<Sampler>(context.entity).unwrap().sampler;
+
+        // We'll attempt to eagerly fill the state here, otherwise falling back when
+        // it's not ready.
+        if let Some(state) = world.get::<SamplerStateWrapper>(sampler).cloned() {
+            world.get_mut::<Sampler>(context.entity).unwrap().state = Some(state.0);
         }
     }
 }
@@ -174,8 +237,8 @@ fn retrieve_state(
 /// A kind of specialization of [`ParamFollower`] for
 /// sampler nodes.
 fn watch_sample_players(
-    mut q: Query<(&mut SamplerNode, &SamplerAssignmentOf)>,
-    samples: Query<&PlaybackParams>,
+    mut q: Query<(&mut SamplerNode, &SamplerOf)>,
+    samples: Query<&PlaybackSettings>,
 ) {
     for (mut sampler_node, sample) in q.iter_mut() {
         let Ok(settings) = samples.get(sample.0) else {
@@ -198,7 +261,7 @@ fn spawn_chain(
         .spawn((
             SamplerNode::default(),
             config.unwrap_or_default(),
-            SamplerOf(bus),
+            PoolSamplerOf(bus),
         ))
         .id();
 
@@ -241,11 +304,29 @@ fn spawn_chain(
     sampler
 }
 
+/// The size of a [`SamplerPool`].
+///
+/// This size is expressed as a range so that [`SamplerPool`]s can
+/// grow to meet demand when necessary, and otherwise claim as few
+/// resources as necessary.
+///
+/// Pools are grown quadratically, so the cost of queuing samples
+/// is roughly amortized constant.
 #[derive(Debug, Clone, Component)]
 pub struct PoolSize(pub RangeInclusive<usize>);
 
+/// The default [`PoolSize`] applied to [`SamplerPool`]s.
+///
+/// The default is `4..=32`.
+/// When set to `0..=0`, dynamic pools are disabled.
 #[derive(Debug, Clone, Resource)]
 pub struct DefaultPoolSize(pub RangeInclusive<usize>);
+
+impl Default for DefaultPoolSize {
+    fn default() -> Self {
+        Self(4..=32)
+    }
+}
 
 fn populate_pool(
     q: Query<
@@ -259,7 +340,7 @@ fn populate_pool(
         (
             With<PoolLabelContainer>,
             With<PoolMarker>,
-            Without<Samplers>,
+            Without<PoolSamplers>,
         ),
     >,
     mut effects: Query<&EffectId>,
@@ -315,7 +396,7 @@ fn remove_finished(
         OnComplete::Preserve => {
             commands
                 .entity(sample_entity)
-                .remove::<(SamplerAssignment, QueuedSample, SkipTimer)>();
+                .remove::<(Sampler, QueuedSample, SkipTimer)>();
         }
         OnComplete::Remove => {
             commands
@@ -325,7 +406,7 @@ fn remove_finished(
                     SampleEffects,
                     SamplePlayer,
                     PoolLabelContainer,
-                    SamplerAssignment,
+                    Sampler,
                     QueuedSample,
                     SkipTimer,
                 )>();
@@ -341,7 +422,7 @@ fn remove_finished(
 /// Automatically remove or despawn sample players when their
 /// sample has finished playing.
 fn poll_finished(
-    nodes: Query<(&SamplerNode, &SamplerAssignmentOf, &SamplerStateWrapper)>,
+    nodes: Query<(&SamplerNode, &SamplerOf, &SamplerStateWrapper)>,
     mut commands: Commands,
 ) {
     for (node, active, state) in nodes.iter() {
@@ -385,8 +466,11 @@ impl<T: PoolLabel + Component + Clone> PoolDespawn<T> {
 
 impl<T: PoolLabel + Component + Clone> Command for PoolDespawn<T> {
     fn apply(self, world: &mut World) {
-        let mut roots =
-            world.query_filtered::<(Entity, &PoolLabelContainer), (With<SamplerPool<T>>, With<Samplers>, With<FirewheelNode>)>();
+        let mut roots = world.query_filtered::<(Entity, &PoolLabelContainer), (
+            With<SamplerPool<T>>,
+            With<PoolSamplers>,
+            With<FirewheelNode>,
+        )>();
 
         let roots: Vec<_> = roots
             .iter(world)
@@ -444,7 +528,7 @@ mod test {
 
         run(
             &mut app,
-            |q: Query<&Samplers, With<SamplerPool<TestPool>>>| {
+            |q: Query<&PoolSamplers, With<SamplerPool<TestPool>>>| {
                 assert_eq!(q.iter().len(), 1);
             },
         );
@@ -486,16 +570,15 @@ mod test {
             ));
             commands.spawn((
                 TestPool,
-                SamplePlayer::new(server.load("caw.ogg")),
+                SamplePlayer::new(server.load("caw.ogg")).looping(),
                 EmptyComponent,
-                PlaybackSettings::LOOP,
             ));
         });
 
         loop {
             let players = run(
                 &mut app,
-                |q: Query<Entity, (With<SamplePlayer>, With<SamplerAssignment>)>| q.iter().len(),
+                |q: Query<Entity, (With<SamplePlayer>, With<Sampler>)>| q.iter().len(),
             );
 
             if players == 1 {
@@ -516,7 +599,10 @@ mod test {
             commands.spawn((
                 SamplePlayer::new(server.load("sine_440hz_1ms.wav")),
                 EmptyComponent,
-                PlaybackSettings::REMOVE,
+                PlaybackSettings {
+                    on_complete: OnComplete::Remove,
+                    ..Default::default()
+                },
                 sample_effects![LowPassNode::default()],
             ));
         });
@@ -558,7 +644,10 @@ mod test {
                 TestPool,
                 SamplePlayer::new(server.load("sine_440hz_1ms.wav")),
                 EmptyComponent,
-                PlaybackSettings::REMOVE,
+                PlaybackSettings {
+                    on_complete: OnComplete::Remove,
+                    ..Default::default()
+                },
             ));
         });
 

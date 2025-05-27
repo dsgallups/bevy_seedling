@@ -22,10 +22,10 @@ impl Plugin for DynamicPlugin {
 
 /// A label reserved for dynamic pools.
 #[derive(PoolLabel, Clone, Copy, PartialEq, Eq, Hash, Debug)]
-struct DynamicPoolId(usize);
+struct DynamicPoolLabel(usize);
 
 struct RegistryEntry {
-    label: DynamicPoolId,
+    label: DynamicPoolLabel,
 }
 
 #[derive(Resource, Default)]
@@ -45,6 +45,10 @@ fn update_dynamic_pools(
     mut commands: Commands,
     dynamic_range: Res<DefaultPoolSize>,
 ) -> Result {
+    if *dynamic_range.0.end() == 0 {
+        return Ok(());
+    }
+
     for (sample, sample_effects) in queued_samples.iter() {
         let component_ids =
             match super::fetch_effect_ids(sample_effects, &mut effects.as_query_lens()) {
@@ -61,7 +65,7 @@ fn update_dynamic_pools(
                 commands.entity(sample).insert(entry.label);
             }
             None => {
-                let label = DynamicPoolId(registries.0.len());
+                let label = DynamicPoolLabel(registries.0.len());
 
                 let bus = commands
                     .spawn((SamplerPool(label), PoolSize(dynamic_range.0.clone())))

@@ -1,13 +1,8 @@
-use std::{ops::Deref, time::Duration};
-
-use bevy::{
-    ecs::{entity::EntityCloner, relationship::Relationship},
-    platform::collections::HashMap,
-    prelude::*,
-    time::Stopwatch,
+use super::{
+    PlaybackCompletionEvent, PoolSamplerOf, PoolSamplers, PoolShape, PoolSize, SamplerOf,
+    SamplerStateWrapper,
+    sample_effects::{EffectOf, SampleEffects},
 };
-use firewheel::nodes::sampler::{RepeatMode, SamplerConfig, SamplerNode};
-
 use crate::{
     node::{EffectId, follower::FollowerOf},
     pool::label::PoolLabelContainer,
@@ -16,12 +11,14 @@ use crate::{
         PlaybackSettings, QueuedSample, Sample, SamplePlayer, SamplePriority, SampleQueueLifetime,
     },
 };
-
-use super::{
-    PlaybackCompletionEvent, PoolShape, PoolSize, SamplerAssignmentOf, SamplerOf,
-    SamplerStateWrapper, Samplers,
-    sample_effects::{EffectOf, SampleEffects},
+use bevy::{
+    ecs::{entity::EntityCloner, relationship::Relationship},
+    platform::collections::HashMap,
+    prelude::*,
+    time::Stopwatch,
 };
+use firewheel::nodes::sampler::{RepeatMode, SamplerConfig, SamplerNode};
+use std::ops::Deref;
 
 #[derive(PartialEq, Debug, Eq, PartialOrd, Ord, Copy, Clone)]
 struct SamplerScore {
@@ -48,18 +45,18 @@ pub(super) fn grow_pools(
     pools: Query<(
         Entity,
         &PoolLabelContainer,
-        &Samplers,
+        &PoolSamplers,
         &PoolSize,
         Option<&SampleEffects>,
         &SamplerConfig,
     )>,
-    nodes: Query<Option<&SamplerAssignmentOf>, With<SamplerOf>>,
+    nodes: Query<Option<&SamplerOf>, With<PoolSamplerOf>>,
     server: Res<AssetServer>,
     mut commands: Commands,
 ) -> Result {
     let queued_samples: HashMap<_, usize> = queued_samples
         .iter()
-        .filter_map(|(player, label)| server.is_loaded(player.sample()).then_some(label))
+        .filter_map(|(player, label)| server.is_loaded(&player.sample).then_some(label))
         .fold(HashMap::new(), |mut acc, label| {
             *acc.entry(label.label).or_default() += 1;
             acc
@@ -130,7 +127,7 @@ pub(super) fn assign_work(
     mut queued_samples: Query<
         (
             Entity,
-            &mut SamplePlayer,
+            &SamplePlayer,
             &PlaybackSettings,
             &PoolLabelContainer,
             Option<&SampleEffects>,
@@ -140,7 +137,7 @@ pub(super) fn assign_work(
     >,
     pools: Query<(
         &PoolLabelContainer,
-        &Samplers,
+        &PoolSamplers,
         &PoolSize,
         &PoolShape,
         Option<&SampleEffects>,
@@ -150,11 +147,11 @@ pub(super) fn assign_work(
             Entity,
             &mut SamplerNode,
             &SamplerStateWrapper,
-            Option<&SamplerAssignmentOf>,
+            Option<&SamplerOf>,
         ),
-        With<SamplerOf>,
+        With<PoolSamplerOf>,
     >,
-    active_samples: Query<(&PlaybackSettings, &SamplePriority)>,
+    active_samples: Query<(&SamplePlayer, &SamplePriority)>,
     mut effects: Query<&EffectId, With<EffectOf>>,
     assets: Res<Assets<Sample>>,
     mut commands: Commands,
@@ -222,8 +219,10 @@ pub(super) fn assign_work(
                 let (sampler_entity, mut params, state, _) =
                     nodes.get_mut(*inactive.next().unwrap())?;
 
-                params.set_sample(asset.get(), settings.volume, settings.repeat_mode);
-                player.set_sampler(sampler_entity, state.0.clone());
+                params.set_sample(asset.get(), player.volume, player.repeat_mode);
+                commands
+                    .entity(sample_entity)
+                    .insert(crate::prelude::SampleState(state.0.clone()));
                 state.0.clear_finished();
 
                 // normalize sample effects
@@ -325,7 +324,7 @@ pub(super) fn assign_work(
                 commands
                     .entity(sample_entity)
                     .remove::<QueuedSample>()
-                    .add_one_related::<SamplerAssignmentOf>(sampler_entity);
+                    .add_one_related::<SamplerOf>(sampler_entity);
             }
 
             continue;
@@ -366,7 +365,7 @@ pub(super) fn assign_work(
         queued_samples.sort_by_key(|s| {
             (
                 core::cmp::Reverse(s.5),
-                s.2.repeat_mode == RepeatMode::PlayOnce,
+                s.1.repeat_mode == RepeatMode::PlayOnce,
             )
         });
 
@@ -383,14 +382,16 @@ pub(super) fn assign_work(
 
             // We'll also skip over samples that won't loop
             // when the occupied sampler is currently looping.
-            if sampler_score.is_looping && settings.repeat_mode == RepeatMode::PlayOnce {
+            if sampler_score.is_looping && player.repeat_mode == RepeatMode::PlayOnce {
                 continue;
             }
 
             let (sampler_entity, mut params, state, _) = nodes.get_mut(sampler_entity)?;
 
-            params.set_sample(asset.get(), settings.volume, settings.repeat_mode);
-            player.set_sampler(sampler_entity, state.0.clone());
+            params.set_sample(asset.get(), player.volume, player.repeat_mode);
+            commands
+                .entity(sample_entity)
+                .insert(crate::prelude::SampleState(state.0.clone()));
             state.0.clear_finished();
 
             // normalize sample effects
@@ -492,7 +493,7 @@ pub(super) fn assign_work(
             commands
                 .entity(sample_entity)
                 .remove::<QueuedSample>()
-                .add_one_related::<SamplerAssignmentOf>(sampler_entity);
+                .add_one_related::<SamplerOf>(sampler_entity);
         }
     }
 
@@ -500,7 +501,7 @@ pub(super) fn assign_work(
 }
 
 pub(super) fn update_followers(
-    samplers: Query<(&Children, &SamplerAssignmentOf), Changed<SamplerAssignmentOf>>,
+    samplers: Query<(&Children, &SamplerOf), Changed<SamplerOf>>,
     samples: Query<&SampleEffects>,
     mut commands: Commands,
 ) {
@@ -524,7 +525,7 @@ pub(super) fn mark_skipped(
     mut commands: Commands,
 ) {
     for (sample, player) in &samples {
-        if server.is_loaded(player.sample()) {
+        if server.is_loaded(&player.sample) {
             commands.entity(sample).insert(SkipTimer(Stopwatch::new()));
         }
     }
