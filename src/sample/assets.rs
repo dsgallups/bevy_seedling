@@ -3,7 +3,14 @@ use firewheel::{collector::ArcGc, sample_resource::SampleResource};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-/// An audio sample.
+/// A type-erased audio sample.
+///
+/// Samples are loaded via [`symphonia`] and resampled eagerly.
+/// As a result, you may notice some latency when loading longer
+/// samples with low optimization levels.
+///
+/// The available containers and formats can be configured with
+/// this crate's feature flags.
 #[derive(Asset, TypePath, Clone)]
 pub struct Sample(ArcGc<dyn SampleResource>);
 

@@ -34,20 +34,11 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// When no effects are applied, samples are played in the
 /// [`DefaultPool`][crate::prelude::DefaultPool].
 ///
-/// Playback is managed with two components: an immutable [`PlaybackStatic`]
-/// component, read once at the beginning of playback, and a [`PlaybackDynamic`]
-/// component, which can be updated dynamically.
-///
-/// ```
-/// # use bevy::prelude::*;
-/// # use bevy_seedling::prelude::*;
-/// fn play_looping_sound(mut commands: Commands, server: Res<AssetServer>) {
-///     commands.spawn((
-///         SamplePlayer::new(server.load("my_sample.wav")),
-///         PlaybackSettings::LOOP,
-///     ));
-/// }
-/// ```
+/// The [`SamplePlayer`] component includes two fields that cannot change during
+/// playback: `repeat_mode` and `volume`. Because [`SamplePlayer`] is immutable,
+/// these can only be changed by re-inserting, which subsequently stops and restarts
+/// playback. To update a sample's volume dynamically, consider adding a
+/// [`VolumeNode`][crate::prelude::VolumeNode] as an effect.
 ///
 /// ## Lifecycle
 ///
@@ -62,66 +53,83 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// #[derive(Component)]
 /// struct Player;
 ///
-/// #[derive(Event)]
-/// struct SoundEvent;
-///
 /// fn play_sound_on_player(
 ///     q: Query<Entity, With<Player>>,
-///     mut sound_events: EventReader<SoundEvent>,
 ///     server: Res<AssetServer>,
 ///     mut commands: Commands,
 /// ) {
 ///     let player = q.single();
 ///
-///     for _ in sound_events.read() {
-///         commands.entity(player).insert((
-///             SamplePlayer::new(server.load("my_sample.wav")),
-///             PlaybackSettings {
-///                 on_complete: OnComplete::Remove,
-///                 ..Default::default()
-///             },
-///         ));
-///     }
+///     commands.entity(player).insert((
+///         SamplePlayer::new(server.load("my_sample.wav")),
+///         PlaybackSettings {
+///             on_complete: OnComplete::Remove,
+///             ..Default::default()
+///         },
+///     ));
 /// }
 /// ```
 ///
 /// ## Applying effects
 ///
-/// Effects can be applied directly to a sample entity with the
-/// [`PoolBuilder`][crate::prelude::PoolBuilder] trait.
+/// Effects can be applied directly to a sample entity with
+/// [`SampleEffects`][crate::prelude::SampleEffects].
 ///
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_seedling::prelude::*;
 /// fn play_with_effects(mut commands: Commands, server: Res<AssetServer>) {
 ///     commands
-///         .spawn(SamplePlayer::new(server.load("my_sample.wav")))
-///         .effect(SpatialBasicNode::default())
-///         .effect(LowPassNode::new(500.0));
+///         .spawn((
+///             SamplePlayer::new(server.load("my_sample.wav")),
+///             sample_effects![
+///                 SpatialBasicNode::default(),
+///                 LowPassNode::new(500.0),
+///             ],
+///         ));
 /// }
 /// ```
 ///
 /// In the above example, we connect a spatial and low-pass node in series with the sample player.
-/// Effects are arranged in the order of `effect` calls, so the output of the spatial node is
+/// Effects are arranged in the order they're spawned, so the output of the spatial node is
 /// connected to the input of the low-pass node.
 ///
-/// When you apply effects to a sample player, the node components are added directly to the
-/// entity as [*remote nodes*][crate::node::ExcludeNode]. That allows you to modulate node
-/// parameters directly on your sample player entity.
+/// When you apply effects to a sample player, the node components are added using the
+/// [`SampleEffects`][crate::prelude::SampleEffects] relatinoship. If you want to access
+/// the effects in terms of the sample they're applied to, you can break up your
+/// queries and use the [`EffectsQuery`][crate::prelude::EffectsQuery] trait.
 ///
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_seedling::prelude::*;
-/// fn modulate_remote_nodes(mut q: Query<&mut LowPassNode, With<SamplePlayer>>) {
-///     for mut low_pass_params in q.iter_mut() {
-///         low_pass_params.frequency.set(1000.0);
+/// # fn play_sound(mut commands: Commands, server: Res<AssetServer>) {
+/// commands.spawn((
+///     // We'll look for sample player entities with the name "dynamic"
+///     Name::new("dynamic"),
+///     SamplePlayer::new(server.load("my_sample.wav")),
+///     sample_effects![VolumeNode::default()],
+/// ));
+/// # }
+///
+/// fn update_volume(
+///     sample_players: Query<(&Name, &SampleEffects)>,
+///     mut volume: Query<&mut VolumeNode>,
+/// ) -> Result {
+///     for (name, effects) in &sample_players {
+///         if name.as_str() == "dynamic" {
+///             // Once we've found the target entity, we can get at
+///             // its effects with `EffectsQuery`
+///             volume.get_effect(effects)?.volume = Volume::Decibels(-6.0);
+///         }
 ///     }
+///
+///     Ok(())
 /// }
 /// ```
 ///
 /// Applying effects directly to a [`SamplePlayer`] is simple, but it
 /// [has some tradeoffs][crate::pool::dynamic#when-to-use-dynamic-pools], so you may
-/// find yourself gravitating towards manually defined [`Pool`][crate::prelude::Pool]s as your
+/// find yourself gravitating towards manually defined [`SamplerPool`][crate::prelude::SamplerPool]s as your
 /// requirements grow.
 #[derive(Debug, Component, Clone)]
 #[require(PlaybackSettings, SamplePriority, SampleQueueLifetime)]
@@ -131,9 +139,21 @@ pub struct SamplePlayer {
     pub sample: Handle<Sample>,
 
     /// Sets the sample's [`RepeatMode`].
+    ///
+    /// Defaults to [`RepeatMode::PlayOnce`].
+    ///
+    /// The [`RepeatMode`] can only be configured once at the beginning of playback.
     pub repeat_mode: RepeatMode,
 
     /// Sets the volume of the sample.
+    ///
+    /// Defaults to [`Volume::UNITY_GAIN`].
+    ///
+    /// This volume can only be configured once at the beginning of playback.
+    /// For dynamic volume, consider routing to buses or applying [`VolumeNode`]
+    /// as an effect.
+    ///
+    /// [`VolumeNode`]: crate::prelude::VolumeNode
     pub volume: Volume,
 }
 
@@ -191,6 +211,17 @@ impl SamplePlayer {
         }
     }
 
+    /// Enable looping playback.
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::prelude::*;
+    /// fn play_sound(mut commands: Commands, server: Res<AssetServer>) {
+    ///     commands.spawn(SamplePlayer::new(server.load("my_sample.wav")).looping());
+    /// }
+    /// ```
+    ///
+    /// Looping can only be configured once at the beginning of playback.
     pub fn looping(self) -> Self {
         Self {
             repeat_mode: RepeatMode::RepeatEndlessly,
@@ -198,6 +229,21 @@ impl SamplePlayer {
         }
     }
 
+    /// Set the overall sample volume.
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::prelude::*;
+    /// fn play_sound(mut commands: Commands, server: Res<AssetServer>) {
+    ///     commands.spawn(SamplePlayer::new(server.load("my_sample.wav")).with_volume(Volume::Decibels(-6.0)));
+    /// }
+    /// ```
+    ///
+    /// This volume can only be configured once at the beginning of playback.
+    /// For dynamic volume, consider routing to buses or applying [`VolumeNode`]
+    /// as an effect.
+    ///
+    /// [`VolumeNode`]: crate::prelude::VolumeNode
     pub fn with_volume(self, volume: Volume) -> Self {
         Self { volume, ..self }
     }
@@ -225,9 +271,27 @@ impl SampleState {
     }
 }
 
+/// Provide explicit priorities for samples.
+///
+/// Samples with higher priorities are queued before, and cannot
+/// be interrupted by, those with lower priorities. This allows you
+/// to confidently play music, stingers, and key sound effects even in
+/// highly congested pools.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn priority(mut commands: Commands, server: Res<AssetServer>) {
+/// commands.spawn((
+///     SamplePlayer::new(server.load("important_music.wav")).looping(),
+///     // Ensure this sample is definitely played and without interruption
+///     SamplePriority(10),
+/// ));
+/// # }
+/// ```
 #[derive(Debug, Default, Component, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[component(immutable)]
-pub struct SamplePriority(pub u32);
+pub struct SamplePriority(pub i32);
 
 /// The maximum duration of time that a sample will wait for an available sampler.
 ///
@@ -245,62 +309,6 @@ impl Default for SampleQueueLifetime {
     }
 }
 
-///// Controls the playback settings of a [`SamplePlayer`].
-/////
-///// `repeate_mode` and `volume` are read _once_ at the beginning
-///// of playback. Changing them during playback will not
-///// affect playback.
-//#[derive(Debug, Component, Clone)]
-//pub struct PlaybackStatic {
-//    /// Sets the sample's [`RepeatMode`].
-//    pub repeat_mode: RepeatMode,
-//
-//    /// Determines this sample's behavior on playback completion.
-//    pub on_complete: OnComplete,
-//
-//    /// Sets the volume of the sample.
-//    pub volume: Volume,
-//}
-//
-//impl Default for PlaybackStatic {
-//    fn default() -> Self {
-//        Self::ONCE
-//    }
-//}
-//
-//impl PlaybackStatic {
-//    /// Play the audio source once, despawning
-//    /// this entity when complete or interrupted.
-//    pub const ONCE: Self = Self {
-//        repeat_mode: RepeatMode::PlayOnce,
-//        volume: Volume::Linear(1.0),
-//        on_complete: OnComplete::Despawn,
-//    };
-//
-//    /// Repeatedly loop the audio source until
-//    /// this entity is despawned.
-//    pub const LOOP: Self = Self {
-//        repeat_mode: RepeatMode::RepeatEndlessly,
-//        volume: Volume::Linear(1.0),
-//        on_complete: OnComplete::Despawn,
-//    };
-//
-//    /// Play the sample once, removing the audio-related components on completion.
-//    pub const REMOVE: Self = Self {
-//        repeat_mode: RepeatMode::PlayOnce,
-//        volume: Volume::Linear(1.0),
-//        on_complete: OnComplete::Remove,
-//    };
-//
-//    /// Play the sample once, preserving the components and entity on completion.
-//    pub const PRESERVE: Self = Self {
-//        repeat_mode: RepeatMode::PlayOnce,
-//        volume: Volume::Linear(1.0),
-//        on_complete: OnComplete::Preserve,
-//    };
-//}
-//
-
 /// Determines what happens when a sample completes playback.
 ///
 /// This will not trigger for looping samples unless they are stopped.
@@ -311,6 +319,9 @@ pub enum OnComplete {
     /// Remove the [`SamplePlayer`] and related components.
     Remove,
     /// Despawn the [`SamplePlayer`] entity.
+    ///
+    /// Since spawning sounds as their own isolated entity is so
+    /// common, this is the default.
     #[default]
     Despawn,
 }
@@ -350,14 +361,14 @@ pub struct PlaybackSettings {
     ///
     /// This field provides only one-way communication with the
     /// audio processor. To get whether the sample is playing,
-    /// see [`SamplerState::is_playing`].
+    /// see [`SampleState::is_playing`].
     pub playback: Notify<PlaybackState>,
 
     /// Sets the playhead.
     ///
     /// This field provides only one-way communication with the
     /// audio processor. To get the current value of the playhead,
-    /// see [`SamplerState::playhead_frames`].
+    /// see [`SampleState::playhead_frames`].
     pub playhead: Notify<Playhead>,
 
     /// Sets the playback speed.
