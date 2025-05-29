@@ -39,10 +39,7 @@ bevy = { version = "0.16", default-features = false, features = [
   "std",
 ] }
 bevy_math = { version = "0.16", default-features = false, features = ["curve"] }
-firewheel = { git = "https://github.com/CorvusPrudens/Firewheel.git", branch = "bevy-16", features = [
-  "bevy",
-  "spatial_basic_node",
-] }
+firewheel = { version = "0.3.1", features = ["bevy", "spatial_basic_node"] }
 symphonium = { version = "0.4", default-features = false, features = [
   "opt-simd",
   "fft-resampler",
@@ -56,9 +53,7 @@ rand = { version = "0.8", default-features = false, features = [
 ], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-firewheel = { git = "https://github.com/CorvusPrudens/Firewheel.git", branch = "bevy-16", features = [
-  "wasm-bindgen",
-] }
+firewheel = { version = "0.3.1", features = ["wasm-bindgen"] }
 
 [dev-dependencies]
 bevy = { version = "0.16", default-features = false, features = [

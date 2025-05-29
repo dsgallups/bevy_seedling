@@ -127,8 +127,7 @@ fn get_playhead(players: Query<&Sampler>) {
 
 ```rs
 // 0.3
-Pool::new(DefaultPool, 24)
-    .spawn(&mut commands);
+Pool::new(DefaultPool, 24).spawn(&mut commands);
 
 // 0.4
 // The size does not need to be specified.
@@ -159,8 +158,9 @@ persistent drawbacks.
 `0.4` takes advantage of Bevy's new relationships feature and moves effects into
 separate, related entities. This removes all clashing problems and makes it easy to
 spawn effects declaratively and in order. The main drawback is that effects are
-now more cumbersome to query in terms of the sample they're applied to. The new
-`EffectsQuery` should help alleviate the degraded UX.
+now more cumbersome to query for in terms of the sample they're applied to. The new
+`EffectsQuery` should help alleviate the degraded UX, and eventually Bevy should
+gain more sophisticated relations queries.
 
 #### Migration guide
 
@@ -219,6 +219,7 @@ fn get_volume(mut players: Query<&mut VolumeNode, With<Marker>>) {
 
 // 0.4
 commands.spawn((
+    Marker,
     SamplePlayer::new(server.load("my_sample.wav")),
     sample_effects![
         VolumeNode::default(),
