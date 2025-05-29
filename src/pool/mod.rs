@@ -1,3 +1,5 @@
+//! Sampler pools, `bevy_seedling`'s primary sample playing mechanism.
+
 use crate::{
     SeedlingSystems,
     context::AudioContext,
@@ -25,7 +27,7 @@ use firewheel::nodes::{
 use queue::SkipTimer;
 use sample_effects::{EffectOf, SampleEffects};
 
-mod dynamic;
+pub mod dynamic;
 mod entity_set;
 pub mod label;
 mod queue;
@@ -100,7 +102,7 @@ impl Plugin for SamplePoolPlugin {
 /// # }
 /// ```
 ///
-/// You can also insert arbitrary effects.
+/// Finally, you can insert arbitrary effects.
 ///
 /// ```
 /// # use bevy::prelude::*;
@@ -110,7 +112,7 @@ impl Plugin for SamplePoolPlugin {
 /// struct EffectsPool;
 ///
 /// commands.spawn((
-///     SamplerPool(SimplePool),
+///     SamplerPool(EffectsPool),
 ///     sample_effects![LowPassNode::default(), SpatialBasicNode::default()],
 /// ));
 /// # }
@@ -144,18 +146,15 @@ impl Plugin for SamplePoolPlugin {
 /// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
 /// struct SimplePool;
 ///
-/// fn spawn_pool(mut commands: Commands) {
+/// fn spawn_pool_and_play(mut commands: Commands, server: Res<AssetServer>) {
 ///     commands.spawn(SamplerPool(SimplePool));
-/// }
 ///
-/// fn play_sample(mut commands: Commands, server: Res<AssetServer>) {
 ///     commands.spawn((SimplePool, SamplePlayer::new(server.load("my_sample.wav"))));
 /// }
 /// ```
 ///
-/// Pools with effects will automatically insert [`SampleEffects`][crate::prelude::SampleEffects]
-/// into queued [`SamplePlayer`][crate::prelude::SamplePlayer]s.
-/// You can easily override these defaults.
+/// Pools with effects will automatically insert [`SampleEffects`]
+/// into queued [`SamplePlayer`]s.
 ///
 /// ```
 /// # use bevy::prelude::*;
@@ -169,16 +168,13 @@ impl Plugin for SamplePoolPlugin {
 ///     sample_effects![SpatialBasicNode::default()],
 /// ));
 ///
-/// commands.spawn((
-///     SpatialPool,
-///     SamplePlayer::new(server.load("my_sample.wav")),
-///     sample_effects![SpatialBasicNode {
-///         panning_threshold: 0.75,
-///         ..Default::default()
-///     }],
-/// ));
+/// // Once spawned, this entity will receive a
+/// // `SamplerEffects` pointing to a `SpatialBasicNode`
+/// commands.spawn((SpatialPool, SamplePlayer::new(server.load("my_sample.wav"))));
 /// # }
 /// ```
+///
+/// See [`SampleEffects`][crate::pool::sample_effects::SampleEffects#static-pools] for more details.
 ///
 /// ## Architecture
 ///
@@ -290,7 +286,7 @@ struct SamplerStateWrapper(SamplerState);
 /// A sampler assignment relatinoship.
 ///
 /// This resides in the [`SamplerNode`] entity, pointing to the
-/// [`SamplerPlayer`] entity it has been allocated for.
+/// [`SamplePlayer`] entity it has been allocated for.
 #[derive(Debug, Component)]
 #[relationship(relationship_target = Sampler)]
 #[component(on_remove = Self::on_remove_hook)]
@@ -493,9 +489,21 @@ fn spawn_chain(
 
 /// The size of a [`SamplerPool`].
 ///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn spawn_pool_and_play(mut commands: Commands, server: Res<AssetServer>) {
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct SimplePool;
+///
+/// commands.spawn((SamplerPool(SimplePool), PoolSize(4..=16)));
+/// # }
+/// ```
+///
 /// This size is expressed as a range so that [`SamplerPool`]s can
 /// grow to meet demand when necessary, and otherwise claim as few
-/// resources as necessary.
+/// resources as necessary. If a size isn't explicitly provided,
+/// it'll be initialized according to the [`DefaultPoolSize`] resource.
 ///
 /// Pools are grown quadratically, so the cost of queuing samples
 /// is roughly amortized constant.
@@ -567,6 +575,13 @@ fn populate_pool(
     Ok(())
 }
 
+/// An event triggered on [`SamplePlayer`] entities when
+/// their playback completes.
+///
+/// Note that this may be triggered even when the sample isn't
+/// played, including when its playback is set to
+/// [`PlaybackState::Stop`][crate::prelude::PlaybackState] or
+/// when it can't find space in a sampler pool.
 #[derive(Debug, Event)]
 pub struct PlaybackCompletionEvent;
 
@@ -632,7 +647,7 @@ fn poll_finished(
 /// This can be used directly or via the [`PoolCommands`] trait.
 ///
 /// ```
-/// # use bevy_ecs::prelude::*;
+/// # use bevy::prelude::*;
 /// # use bevy_seedling::prelude::*;
 /// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
 /// struct MyLabel;

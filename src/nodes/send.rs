@@ -34,9 +34,10 @@ use firewheel::{
 /// struct ExpensiveChain;
 ///
 /// fn dynamic_send(mut commands: Commands, server: Res<AssetServer>) {
-///     commands
-///         .spawn(SamplePlayer::new(server.load("my_sample.wav")))
-///         .effect(SendNode::new(Volume::UNITY_GAIN, ExpensiveChain));
+///     commands.spawn((
+///         SamplePlayer::new(server.load("my_sample.wav")),
+///         sample_effects![SendNode::new(Volume::UNITY_GAIN, ExpensiveChain)],
+///     ));
 /// }
 /// ```
 ///

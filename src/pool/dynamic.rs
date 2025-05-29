@@ -1,3 +1,53 @@
+//! Dynamic sampler pools.
+//!
+//! *Sampler pools* are `bevy_seedling`'s primary mechanism for playing
+//! multiple sounds at once. [`SampleEffects`] can be used to create effectful pools on-the-fly.
+//!
+//! ```
+//! # use bevy::prelude::*;
+//! # use bevy_seedling::prelude::*;
+//! fn effects(mut commands: Commands, server: Res<AssetServer>) {
+//!     commands.spawn((
+//!         SamplePlayer::new(server.load("my_sample.wav")),
+//!         sample_effects![
+//!             SpatialBasicNode::default(),
+//!             LowPassNode { frequency: 500.0 }
+//!         ],
+//!     ));
+//! }
+//! ```
+//!
+//! In the above example, we connect a spatial and low-pass node in series with the sample player.
+//! Effects are arranged in the order they're spawned, so the output of the spatial node is
+//! connected to the input of the low-pass node.
+//!
+//! Once per frame, `bevy_seedling` will scan for [`SamplePlayer`]s that request dynamic pools, assigning
+//! the sample to an existing dynamic pool or creating a new one if none match. The number of
+//! samplers in a dynamic pool is determined by the [`PoolSize`] component, which defaults to
+//! [`DefaultPoolSize`].
+//! The pool is spawned with the range's `start` value, and as demand increases, the pool
+//! grows quadratically until the range's `end`.
+//!
+//! ## When to use dynamic pools
+//!
+//! Dynamic pools are a convenient abstraction, but they may not be appropriate for all use-cases.
+//! They have three main drawbacks:
+//!
+//! 1. Dynamic pools cannot be routed anywhere.
+//! 2. The number of pools corresponds to the total permutations of effects your project uses,
+//!    which could grow fairly large. Silent sampler nodes shouldn't take much CPU time,
+//!    but many unused nodes could grow your memory usage by a few megabytes.
+//! 3. Dynamic pools are spawned on-the-fly, so you may see a small amount of additional
+//!    playback latency as the pool propagates to the audio graph.
+//!
+//! Dynamic pool are best-suited for sounds that do not need complicated routing or
+//! bus configurations and when the kinds of effects you apply are simple and regular.
+//! Keep in mind that you can freely mix dynamic and static pools, so you're not restricted
+//! to only one or the other!
+//!
+//! Note that when no effects are applied, your samples will be queued in the
+//! [`DefaultPool`][crate::prelude::DefaultPool], not a dynamic pool.
+
 use super::{DefaultPoolSize, PoolSize, SamplerPool, sample_effects::EffectOf};
 use crate::{
     node::EffectId,

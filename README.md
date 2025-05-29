@@ -99,6 +99,7 @@ should help you get up to speed on common usage patterns.
 
 | `bevy` | `bevy_seedling` |
 | ------ | --------------- |
+| 0.16   | 0.4             |
 | 0.15   | 0.3             |
 
 #### License

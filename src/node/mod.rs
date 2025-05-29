@@ -183,8 +183,8 @@ fn acquire_id<T>(
 /// synchronized with the audio graph.
 ///
 /// This *diffing* isn't just useful for ECS-to-Audio communications; `bevy_seedling`
-/// also uses it to power the [*remote node*][crate::node::ExcludeNode] abstraction,
-/// which makes it easy to modify parameters directly on sample players.
+/// also uses it to power the [`SampleEffects`][crate::prelude::SampleEffects] abstraction,
+/// which makes it easy to modify parameters directly adjacent to sample players.
 ///
 /// Diffing occurs in the [`SeedlingSystems::Queue`] system set during
 /// the [`Last`] schedule. Diffing will only be applied to nodes that have

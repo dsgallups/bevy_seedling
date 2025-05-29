@@ -132,7 +132,7 @@ impl PendingConnections {
 /// # }
 /// ```
 ///
-/// [`EntityCommands`]: bevy_ecs::prelude::EntityCommands
+/// [`EntityCommands`]: bevy::prelude::EntityCommands
 /// [`NodeLabel`]: crate::prelude::NodeLabel
 pub trait Connect<'a>: Sized {
     /// Queue a connection from this entity to the target.
@@ -216,9 +216,10 @@ pub trait Connect<'a>: Sized {
     ///         .chain_node(VolumeNode::default())
     ///         .head();
     ///
-    ///     commands
-    ///         .spawn(SamplePlayer::new(server.load("my_sample.wav")))
-    ///         .effect(SendNode::new(Volume::UNITY_GAIN, chain_input));
+    ///     commands.spawn((
+    ///         SamplePlayer::new(server.load("my_sample.wav")),
+    ///         sample_effects![SendNode::new(Volume::UNITY_GAIN, chain_input)],
+    ///     ));
     /// }
     /// ```
     #[must_use]

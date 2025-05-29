@@ -14,7 +14,7 @@ use smallvec::SmallVec;
 /// those nodes will be automatically inserted on
 /// [`SamplePlayer`][crate::prelude::SamplePlayer] entities
 /// queued for that pool. Then, each effect node will
-/// have a [`ParamFollower`] component inserted that
+/// have a [`FollowerOf`] component inserted that
 /// tracks the [`SamplePlayer`][crate::prelude::SamplePlayer].
 ///
 /// ```
@@ -23,15 +23,17 @@ use smallvec::SmallVec;
 /// # #[derive(PoolLabel, Clone, Debug, PartialEq, Eq, Hash)]
 /// # struct MyLabel;
 /// # fn system(mut commands: Commands, server: Res<AssetServer>) {
-/// Pool::new(MyLabel, 1)
-///     .effect(SpatialBasicNode::default())
-///     .spawn(&mut commands);
+/// commands.spawn((
+///     SamplerPool(MyLabel),
+///     sample_effects![SpatialBasicNode::default()],
+/// ));
 ///
 /// commands.spawn((MyLabel, SamplePlayer::new(server.load("my_sample.wav"))));
 ///
 /// // Once spawned, these will look something like
-/// // Pool: (SamplePlayer) -> (SpatialBasicNode, ParamFollower) -> (VolumeNode) -> (MainBus)
-/// // SamplePlayer: (SamplePlayer, SpatialBasicNode, ExcludeNode)
+/// // Pool: (SamplePlayer) -> (SpatialBasicNode, FollowerOf) -> (VolumeNode) -> (MainBus)
+/// // SamplePlayer: (SamplePlayer, SampleEffects)
+/// // SpatialBasicNode: (SpatialBasicNode, EffectOf, Followers)
 /// # }
 /// ```
 #[derive(Debug, Component)]

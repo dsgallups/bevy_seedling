@@ -1,7 +1,7 @@
 //! Types and traits for managing per-sample effects.
 
 use bevy::{
-    ecs::query::{QueryData, QueryFilter, QueryManyIter, QueryManyUniqueIter, ROQueryItem},
+    ecs::query::{QueryData, QueryFilter, QueryManyUniqueIter, ROQueryItem},
     prelude::*,
 };
 
@@ -18,7 +18,7 @@ pub struct EffectOf(pub Entity);
 /// -- are applied in the order they're spawned. There are two main
 /// ways to use [`SampleEffects`].
 ///
-/// ## Dynamic effects
+/// ## Dynamic pools
 ///
 /// When applied to a [`SamplePlayer`][crate::prelude::SamplePlayer] without an explicit pool asignment,
 /// a pool is dynamically created according to the shape of the effects.
@@ -52,15 +52,15 @@ pub struct EffectOf(pub Entity);
 ///
 /// [`DefaultPoolSize`]: crate::prelude::DefaultPoolSize
 ///
-/// ## Pool effects
+/// ## Static pools
 ///
 /// When applied to a [`SamplerPool`][crate::prelude::SamplerPool], [`SampleEffects`]
-/// serve as a template for all samples played in the pool.
+/// serves as a template for all samples played in the pool.
 /// ```
 /// # use bevy::prelude::*;
 /// # use bevy_seedling::prelude::*;
 /// # fn pools(mut commands: Commands, server: Res<AssetServer>) {
-/// #[derive(PoolLabel, Component, PartialEq, Eq, Debug, Hash)]
+/// #[derive(PoolLabel, Clone, PartialEq, Eq, Debug, Hash)]
 /// struct MusicPool;
 ///
 /// // Creates a pool where all samplers have volume and spatial processors.
@@ -79,7 +79,7 @@ pub struct EffectOf(pub Entity);
 /// // Samples don't need to mention effects.
 /// commands.spawn((MusicPool, SamplePlayer::new(server.load("track_one.wav"))));
 ///
-/// // Overwriting a subset also works.
+/// // Overwriting just a subset works, too.
 /// commands.spawn((
 ///     SamplePlayer::new(server.load("my_other_sample.wav")),
 ///     sample_effects![VolumeNode {
@@ -213,7 +213,7 @@ where
     /// struct UnderwaterSound;
     ///
     /// fn log_underwater_freq(
-    ///     samples: Query<&SampleEffects, With<PrintFrequency>>,
+    ///     samples: Query<&SampleEffects, With<UnderwaterSound>>,
     ///     low_pass: Query<&LowPassNode>,
     /// ) -> Result {
     ///     for effects in samples {
@@ -240,10 +240,10 @@ where
     ///
     /// fn set_underwater_freq(
     ///     samples: Query<&SampleEffects, With<UnderwaterSound>>,
-    ///     low_pass: Query<&mut LowPassNode>,
+    ///     mut low_pass: Query<&mut LowPassNode>,
     /// ) -> Result {
     ///     for effects in samples {
-    ///         low_pass.get_effect(effects)?.frequency = 500.0;
+    ///         low_pass.get_effect_mut(effects)?.frequency = 500.0;
     ///     }
     ///
     ///     Ok(())
@@ -256,6 +256,8 @@ where
     /// Iterate over all effects entities that match the query.
     ///
     /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::prelude::*;
     /// #[derive(Component)]
     /// struct UnderwaterSound;
     ///
@@ -276,24 +278,26 @@ where
     /// Mutably iterate over all effects entities that match the query.
     ///
     /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::prelude::*;
     /// #[derive(Component)]
     /// struct UnderwaterSound;
     ///
     /// fn set_underwater_freq(
     ///     samples: Query<&SampleEffects, With<UnderwaterSound>>,
-    ///     low_pass: Query<&mut LowPassNode>,
+    ///     mut low_pass: Query<&mut LowPassNode>,
     /// ) {
     ///     for effects in samples {
-    ///         for node in low_pass.iter_effects_mut(effects) {
+    ///         for mut node in low_pass.iter_effects_mut(effects) {
     ///             node.frequency = 500.0;
     ///         }
     ///     }
     /// }
     /// ```
-    fn iter_mut(
+    fn iter_effects_mut<'a>(
         &mut self,
-        effects: &SampleEffects,
-    ) -> QueryManyIter<'_, 's, D, F, impl Iterator<Item = Entity>>;
+        effects: &'a SampleEffects,
+    ) -> QueryManyUniqueIter<'_, 's, D, F, EffectsSetIter<'a>>;
 }
 
 impl<'s, D, F> EffectsQuery<'s, D, F> for Query<'_, 's, D, F>
@@ -331,10 +335,10 @@ where
         self.iter_many_unique(effects.iter())
     }
 
-    fn iter_mut(
+    fn iter_effects_mut<'a>(
         &mut self,
-        effects: &SampleEffects,
-    ) -> QueryManyIter<'_, 's, D, F, impl Iterator<Item = Entity>> {
-        self.iter_many_mut(effects.iter())
+        effects: &'a SampleEffects,
+    ) -> QueryManyUniqueIter<'_, 's, D, F, EffectsSetIter<'a>> {
+        self.iter_many_unique_mut(effects.iter())
     }
 }

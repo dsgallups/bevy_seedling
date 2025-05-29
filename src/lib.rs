@@ -73,7 +73,7 @@
 //!     // Play a sound... with effects :O
 //!     commands.spawn((
 //!         SamplePlayer::new(server.load("my_ambience.wav")).looping(),
-//!         sample_effects![LowPassNode::new(500.0)],
+//!         sample_effects![LowPassNode { frequency: 500.0 }],
 //!     ));
 //! }
 //! ```
@@ -262,13 +262,11 @@ pub mod prelude {
         send::{SendConfig, SendNode},
     };
     pub use crate::pool::{
-        DefaultPoolSize, PlaybackCompletionEvent, PoolCommands, PoolDespawn, SamplerPool,
+        DefaultPoolSize, PlaybackCompletionEvent, PoolCommands, PoolDespawn, PoolSize, SamplerPool,
         label::{DefaultPool, PoolLabel},
         sample_effects::{EffectOf, EffectsQuery, SampleEffects},
     };
-    pub use crate::sample::{
-        OnComplete, PlaybackSettings, SamplePlayer, SamplePriority, SampleState,
-    };
+    pub use crate::sample::{OnComplete, PlaybackSettings, SamplePlayer, SamplePriority};
     pub use crate::sample_effects;
     pub use crate::spatial::{
         DefaultSpatialScale, SpatialListener2D, SpatialListener3D, SpatialScale,
@@ -301,7 +299,7 @@ pub mod prelude {
 ///
 /// These are all inserted into the [`Last`] schedule.
 ///
-/// [`Last`]: bevy_app::Last
+/// [`Last`]: bevy::prelude::Last
 #[derive(Debug, SystemSet, PartialEq, Eq, Hash, Clone)]
 pub enum SeedlingSystems {
     /// Entities without audio nodes acquire them from the audio context.
@@ -332,7 +330,7 @@ pub struct SeedlingPlugin<B: AudioBackend = CpalBackend> {
     /// The stream settings, forwarded directly to the backend.
     pub stream_config: B::Config,
 
-    /// Set whether to spawn the [`DefaultPool`].
+    /// Set whether to spawn the [`DefaultPool`][crate::prelude::DefaultPool].
     ///
     /// This allows you to define the default pool manually.
     pub spawn_default_pool: bool,

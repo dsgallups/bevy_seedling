@@ -50,7 +50,7 @@ impl AudioContext {
     /// ```
     /// # use bevy::prelude::*;
     /// # use bevy_seedling::prelude::*;
-    /// fn mute_all(mut q: Query<&mut LowPassNode>, mut context: ResMut<AudioContext>) {
+    /// fn mute_all(mut q: Query<&mut BandPassNode>, mut context: ResMut<AudioContext>) {
     ///     let now = context.now();
     ///     for mut filter in q.iter_mut() {
     ///         filter

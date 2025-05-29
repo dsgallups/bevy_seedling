@@ -7,9 +7,7 @@ use crate::{
     node::{EffectId, follower::FollowerOf},
     pool::label::PoolLabelContainer,
     prelude::DefaultPool,
-    sample::{
-        PlaybackSettings, QueuedSample, Sample, SamplePlayer, SamplePriority, SampleQueueLifetime,
-    },
+    sample::{QueuedSample, Sample, SamplePlayer, SamplePriority, SampleQueueLifetime},
 };
 use bevy::{
     ecs::{entity::EntityCloner, relationship::Relationship},
@@ -128,7 +126,6 @@ pub(super) fn assign_work(
         (
             Entity,
             &SamplePlayer,
-            &PlaybackSettings,
             &PoolLabelContainer,
             Option<&SampleEffects>,
             &SamplePriority,
@@ -158,13 +155,10 @@ pub(super) fn assign_work(
 ) -> Result {
     let mut queued_samples: HashMap<_, Vec<_>> = queued_samples
         .iter_mut()
-        .filter_map(|(entity, player, settings, label, effects, priority)| {
+        .filter_map(|(entity, player, label, effects, priority)| {
             let asset = assets.get(&player.sample)?;
 
-            Some((
-                label.label,
-                (entity, player, settings, asset, effects, priority),
-            ))
+            Some((label.label, (entity, player, asset, effects, priority)))
         })
         .fold(HashMap::new(), |mut acc, (key, value)| {
             acc.entry(key).or_default().push(value);
@@ -213,16 +207,14 @@ pub(super) fn assign_work(
         if inactive_samplers.len() >= queued_samples.len() {
             let mut inactive = inactive_samplers.iter();
 
-            for (sample_entity, mut player, settings, asset, sample_effects, priority) in
-                queued_samples
-            {
+            for (sample_entity, player, asset, sample_effects, _priority) in queued_samples {
                 let (sampler_entity, mut params, state, _) =
                     nodes.get_mut(*inactive.next().unwrap())?;
 
                 params.set_sample(asset.get(), player.volume, player.repeat_mode);
-                commands
-                    .entity(sample_entity)
-                    .insert(crate::prelude::SampleState(state.0.clone()));
+                // commands
+                //     .entity(sample_entity)
+                //     .insert(crate::prelude::SampleState(state.0.clone()));
                 state.0.clear_finished();
 
                 // normalize sample effects
@@ -364,7 +356,7 @@ pub(super) fn assign_work(
         // then sort the queued samples
         queued_samples.sort_by_key(|s| {
             (
-                core::cmp::Reverse(s.5),
+                core::cmp::Reverse(s.4),
                 s.1.repeat_mode == RepeatMode::PlayOnce,
             )
         });
@@ -372,7 +364,7 @@ pub(super) fn assign_work(
         for ((sampler_entity, sampler_score), queued) in
             sampler_scores.into_iter().zip(queued_samples.into_iter())
         {
-            let (sample_entity, mut player, settings, asset, sample_effects, priority) = queued;
+            let (sample_entity, player, asset, sample_effects, priority) = queued;
 
             // Due to the sorting, if any queued sample has a lower priority then a currently playing sample,
             // then every subsequent sample must also have a lower priority than its corresponding player.
@@ -389,9 +381,9 @@ pub(super) fn assign_work(
             let (sampler_entity, mut params, state, _) = nodes.get_mut(sampler_entity)?;
 
             params.set_sample(asset.get(), player.volume, player.repeat_mode);
-            commands
-                .entity(sample_entity)
-                .insert(crate::prelude::SampleState(state.0.clone()));
+            // commands
+            //     .entity(sample_entity)
+            //     .insert(crate::prelude::SampleState(state.0.clone()));
             state.0.clear_finished();
 
             // normalize sample effects

@@ -1,7 +1,5 @@
 //! Audio sample components.
 
-use std::time::Duration;
-
 use crate::prelude::Volume;
 use bevy::{
     ecs::{component::HookContext, world::DeferredWorld},
@@ -9,8 +7,9 @@ use bevy::{
 };
 use firewheel::{
     diff::Notify,
-    nodes::sampler::{self, PlaybackState, Playhead, RepeatMode},
+    nodes::sampler::{PlaybackState, Playhead, RepeatMode},
 };
+use std::time::Duration;
 
 mod assets;
 
@@ -54,13 +53,11 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// struct Player;
 ///
 /// fn play_sound_on_player(
-///     q: Query<Entity, With<Player>>,
+///     player: Single<Entity, With<Player>>,
 ///     server: Res<AssetServer>,
 ///     mut commands: Commands,
 /// ) {
-///     let player = q.single();
-///
-///     commands.entity(player).insert((
+///     commands.entity(*player).insert((
 ///         SamplePlayer::new(server.load("my_sample.wav")),
 ///         PlaybackSettings {
 ///             on_complete: OnComplete::Remove,
@@ -81,7 +78,7 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// fn play_with_effects(mut commands: Commands, server: Res<AssetServer>) {
 ///     commands.spawn((
 ///         SamplePlayer::new(server.load("my_sample.wav")),
-///         sample_effects![SpatialBasicNode::default(), LowPassNode::new(500.0)],
+///         sample_effects![SpatialBasicNode::default(), LowPassNode { frequency: 500.0 }],
 ///     ));
 /// }
 /// ```
@@ -115,7 +112,7 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 ///         if name.as_str() == "dynamic" {
 ///             // Once we've found the target entity, we can get at
 ///             // its effects with `EffectsQuery`
-///             volume.get_effect(effects)?.volume = Volume::Decibels(-6.0);
+///             volume.get_effect_mut(effects)?.volume = Volume::Decibels(-6.0);
 ///         }
 ///     }
 ///
@@ -127,6 +124,45 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// [has some tradeoffs][crate::pool::dynamic#when-to-use-dynamic-pools], so you may
 /// find yourself gravitating towards manually defined [`SamplerPool`][crate::prelude::SamplerPool]s as your
 /// requirements grow.
+///
+/// ## Supporting components
+///
+/// A [`SamplePlayer`] can be spawned with a number of components:
+/// - Any component that implements [`PoolLabel`][crate::prelude::PoolLabel]
+/// - [`PlaybackSettings`]
+/// - [`SamplePriority`]
+/// - [`SampleQueueLifetime`]
+/// - [`SampleEffects`][crate::prelude::SampleEffects]
+///
+/// Altogether, that would look like:
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::{prelude::*, sample::SampleQueueLifetime};
+/// # fn spatial_pool(mut commands: Commands, server: Res<AssetServer>) {
+/// commands.spawn((
+///     DefaultPool,
+///     SamplePlayer {
+///         sample: server.load("my_sample.wav"),
+///         repeat_mode: RepeatMode::PlayOnce,
+///         volume: Volume::UNITY_GAIN,
+///     },
+///     PlaybackSettings {
+///         playback: Notify::new(PlaybackState::Play { delay: None }),
+///         playhead: Notify::new(Playhead::Seconds(0.0)),
+///         speed: 1.0,
+///         on_complete: OnComplete::Remove,
+///     },
+///     SamplePriority(0),
+///     SampleQueueLifetime(std::time::Duration::from_millis(100)),
+///     sample_effects![SpatialBasicNode::default()],
+/// ));
+/// # }
+/// ```
+///
+/// Once a sample has been queued in a pool, the [`Sampler`][crate::pool::Sampler] component
+/// will be inserted, which provides information about the
+/// playhead position and playback status.
 #[derive(Debug, Component, Clone)]
 #[require(PlaybackSettings, SamplePriority, SampleQueueLifetime)]
 #[component(on_insert = on_insert_sample, immutable)]
@@ -151,27 +187,6 @@ pub struct SamplePlayer {
     ///
     /// [`VolumeNode`]: crate::prelude::VolumeNode
     pub volume: Volume,
-}
-
-fn example(mut commands: Commands, server: Res<AssetServer>) {
-    commands.spawn(SamplePlayer::new(server.load("caw.ogg")));
-
-    commands.spawn(
-        SamplePlayer::new(server.load("caw.ogg"))
-            .looping()
-            .with_volume(Volume::Decibels(-6.0)),
-    );
-
-    commands.spawn(SamplePlayer {
-        sample: server.load("caw.ogg"),
-        ..Default::default()
-    });
-
-    commands.spawn(SamplePlayer {
-        sample: server.load("caw.ogg"),
-        repeat_mode: RepeatMode::RepeatEndlessly,
-        volume: Volume::Decibels(-6.0),
-    });
 }
 
 impl Default for SamplePlayer {
@@ -247,28 +262,6 @@ impl SamplePlayer {
     }
 }
 
-#[derive(Component, Clone)]
-#[component(immutable)]
-pub struct SampleState(pub(crate) sampler::SamplerState);
-
-impl core::fmt::Debug for SampleState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("SamplerState").finish_non_exhaustive()
-    }
-}
-
-impl SampleState {
-    /// Returns whether this sample is currently playing.
-    pub fn is_playing(&self) -> bool {
-        !self.0.stopped()
-    }
-
-    /// Returns the current playhead in frames.
-    pub fn playhead_frames(&self) -> u64 {
-        self.0.playhead_frames()
-    }
-}
-
 /// Provide explicit priorities for samples.
 ///
 /// Samples with higher priorities are queued before, and cannot
@@ -299,6 +292,7 @@ pub struct SamplePriority(pub i32);
 ///
 /// The default lifetime is 100ms.
 #[derive(Debug, Component, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[component(immutable)]
 pub struct SampleQueueLifetime(pub Duration);
 
 impl Default for SampleQueueLifetime {
@@ -337,7 +331,7 @@ pub enum OnComplete {
 ///     commands.spawn((
 ///         SamplePlayer::new(server.load("my_sample.wav")),
 ///         // You can start one second in
-///         PlaybackParams {
+///         PlaybackSettings {
 ///             playhead: Notify::new(Playhead::Seconds(1.0)),
 ///             ..Default::default()
 ///         },
@@ -346,7 +340,7 @@ pub enum OnComplete {
 ///     commands.spawn((
 ///         SamplePlayer::new(server.load("my_sample.wav")),
 ///         // Or even spawn with paused playback
-///         PlaybackParams {
+///         PlaybackSettings {
 ///             playback: Notify::new(PlaybackState::Pause),
 ///             ..Default::default()
 ///         },
@@ -359,14 +353,14 @@ pub struct PlaybackSettings {
     ///
     /// This field provides only one-way communication with the
     /// audio processor. To get whether the sample is playing,
-    /// see [`SampleState::is_playing`].
+    /// see [`Sampler::is_playing`][crate::pool::Sampler::is_playing].
     pub playback: Notify<PlaybackState>,
 
     /// Sets the playhead.
     ///
     /// This field provides only one-way communication with the
     /// audio processor. To get the current value of the playhead,
-    /// see [`SampleState::playhead_frames`].
+    /// see [`Sampler::playhead_frames`][crate::pool::Sampler::playhead_frames].
     pub playhead: Notify<Playhead>,
 
     /// Sets the playback speed.
@@ -382,9 +376,9 @@ impl PlaybackSettings {
     /// ```
     /// # use bevy_seedling::prelude::*;
     /// # use bevy::prelude::*;
-    /// fn resume_paused_samples(mut samples: Query<&mut PlaybackParams>) {
+    /// fn resume_paused_samples(mut samples: Query<&mut PlaybackSettings>) {
     ///     for mut params in samples.iter_mut() {
-    ///         if !matches!(*params.playback, PlaybackState::Play { .. }) {
+    ///         if matches!(*params.playback, PlaybackState::Pause) {
     ///             params.play();
     ///         }
     ///     }
@@ -399,7 +393,7 @@ impl PlaybackSettings {
     /// ```
     /// # use bevy_seedling::prelude::*;
     /// # use bevy::prelude::*;
-    /// fn pause_all_samples(mut samples: Query<&mut PlaybackParams>) {
+    /// fn pause_all_samples(mut samples: Query<&mut PlaybackSettings>) {
     ///     for mut params in samples.iter_mut() {
     ///         params.pause();
     ///     }
@@ -414,7 +408,7 @@ impl PlaybackSettings {
     /// ```
     /// # use bevy_seedling::prelude::*;
     /// # use bevy::prelude::*;
-    /// fn stop_all_samples(mut samples: Query<&mut PlaybackParams>) {
+    /// fn stop_all_samples(mut samples: Query<&mut PlaybackSettings>) {
     ///     for mut params in samples.iter_mut() {
     ///         params.stop();
     ///     }
