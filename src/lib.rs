@@ -71,12 +71,10 @@
 //!     commands.spawn(SamplePlayer::new(server.load("my_sample.wav")));
 //!
 //!     // Play a sound... with effects :O
-//!     commands
-//!         .spawn((
-//!             SamplePlayer::new(server.load("my_ambience.wav")),
-//!             PlaybackSettings::LOOP,
-//!         ))
-//!         .effect(LowPassNode::new(500.0));
+//!     commands.spawn((
+//!         SamplePlayer::new(server.load("my_ambience.wav")).looping(),
+//!         sample_effects![LowPassNode::new(500.0)],
+//!     ));
 //! }
 //! ```
 //!
@@ -116,7 +114,7 @@
 //!
 //! | Flag | Description | Default feature |
 //! | ---  | ----------- | --------------- |
-//! | `rand` | Enable the `PitchRange` component. | Yes |
+//! | `rand` | Enable the [`PitchRange`][crate::prelude::PitchRange] component. | Yes |
 //! | `wav` | Enable WAV format and PCM encoding. | Yes |
 //! | `ogg` | Enable Ogg format and Vorbis encoding. | Yes |
 //! | `mp3` | Enable mp3 format and encoding. | No |

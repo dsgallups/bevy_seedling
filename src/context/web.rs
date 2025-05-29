@@ -1,6 +1,6 @@
 use crate::context::SeedlingContext;
 use core::cell::RefCell;
-use firewheel::{backend::AudioBackend, FirewheelConfig, FirewheelCtx};
+use firewheel::{FirewheelConfig, FirewheelCtx, backend::AudioBackend};
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {

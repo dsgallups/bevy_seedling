@@ -61,6 +61,180 @@ impl Plugin for SamplePoolPlugin {
     }
 }
 
+/// A component for building sampler pools.
+///
+/// *Sampler pools* are `bevy_seedling`'s primary mechanism for playing
+/// multiple sounds at once. [`SamplerPool`] allows you to precisely define pools
+/// and their routing.
+///
+/// ## Constructing pools
+///
+/// To construct a pool, you'll need to provide a [`PoolLabel`].
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// // Note that you'll need a few additional traits to support `PoolLabel`
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct SimplePool;
+///
+/// fn spawn_pool(mut commands: Commands) {
+///     commands.spawn(SamplerPool(SimplePool));
+/// }
+/// ```
+///
+/// You can also insert arbitrary effects.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn spawn_pools(mut commands: Commands) {
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct EffectsPool;
+///
+/// commands.spawn((
+///     SamplerPool(SimplePool),
+///     sample_effects![LowPassNode::default(), SpatialBasicNode::default(),],
+/// ));
+/// # }
+/// ```
+///
+/// By default, pools will insert a volume node in the root [`SamplerPool`]
+/// entity and connect all its samplers to it. As a result, you
+/// can easily route the entire pool with a single [`connect`][crate::prelude::Connect::connect]
+/// call.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn spawn_pools(mut commands: Commands) {
+/// let filter = commands.spawn(LowPassNode::default()).id();
+///
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct SimplePool;
+///
+/// commands.spawn(SamplerPool(SimplePool)).connect(filter);
+/// # }
+/// ```
+///
+/// ## Playing samples in a pool
+///
+/// Once you've spawned a pool, playing samples in it is easy!
+/// Just spawn your sample players with the label.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct SimplePool;
+///
+/// fn spawn_pool(mut commands: Commands) {
+///     commands.spawn(SamplerPool(SimplePool));
+/// }
+///
+/// fn play_sample(mut commands: Commands, server: Res<AssetServer>) {
+///     commands.spawn((SimplePool, SamplePlayer::new(server.load("my_sample.wav"))));
+/// }
+/// ```
+///
+/// Pools with effects will automatically insert [`SampleEffects`][crate::prelude::SampleEffects]
+/// into the [`SamplePlayer`][crate::prelude::SamplePlayer] entity when queued.
+/// You can easily override these defaults by including them yourself.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn overriding_effects(mut commands: Commands, server: Res<AssetServer>) {
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct SpatialPool;
+///
+/// commands.spawn((
+///     SamplerPool(SpatialPool),
+///     sample_effects![SpatialBasicNode::default()],
+/// ));
+///
+/// commands.spawn((
+///     SpatialPool,
+///     SamplePlayer::new(server.load("my_sample.wav")),
+///     sample_effects![SpatialBasicNode {
+///         panning_threshold: 0.75,
+///         ..Default::default()
+///     },],
+/// ));
+/// # }
+/// ```
+///
+/// ## Architecture
+///
+/// Sampler pools are collections of individual
+/// sampler nodes, each of which can play a single sample at a time.
+/// When samples are queued up for playback, `bevy_seedling` will
+/// look for the best sampler in the corresponding pool. If a suitable
+/// sampler is found, the sample will begin playback, otherwise
+/// waiting until a slot opens up. If the time spent waiting exceeds
+/// a sample's [`SampleQueueLifetime`][crate::sample::SampleQueueLifetime],
+/// the sample's playback is considered complete, and the [`OnComplete`] effect
+/// is applied.
+///
+/// Each sampler node is routed to a final volume node. For a simple pool:
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn simple_pool(mut commands: Commands) {
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct SimplePool;
+///
+/// commands.spawn(SamplerPool(SimplePool));
+/// # }
+/// ```
+///
+/// We end up with a graph like:
+///
+/// ```text
+/// ┌───────┐┌───────┐┌───────┐┌───────┐
+/// │Sampler││Sampler││Sampler││Sampler│
+/// └┬──────┘└┬──────┘└┬──────┘└┬──────┘
+/// ┌▽────────▽────────▽────────▽┐
+/// │Volume                      │
+/// └┬───────────────────────────┘
+/// ┌▽──────┐
+/// │MainBus│
+/// └───────┘
+/// ```
+///
+/// If a pool includes effects, these are inserted in series with each sampler. For a pool
+/// with spatial processing:
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn spatial_pool(mut commands: Commands) {
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct SpatialPool;
+///
+/// Pool::new(SpatialPool,
+///     .effect(SpatialBasicNode::default())
+///     .spawn(&mut commands);
+/// # }
+/// ```
+///
+/// We end up with a graph like:
+///
+/// ```text
+/// ┌───────┐┌───────┐┌───────┐┌───────┐
+/// │Sampler││Sampler││Sampler││Sampler│
+/// └┬──────┘└┬──────┘└┬──────┘└┬──────┘
+/// ┌▽──────┐┌▽──────┐┌▽──────┐┌▽──────┐
+/// │Spatial││Spatial││Spatial││Spatial│
+/// └┬──────┘└┬──────┘└┬──────┘└┬──────┘
+/// ┌▽────────▽────────▽────────▽┐
+/// │Volume                      │
+/// └┬───────────────────────────┘
+/// ┌▽──────┐
+/// │MainBus│
+/// └───────┘
+/// ```
 #[derive(Debug, Component)]
 #[component(immutable, on_insert = Self::on_insert_hook)]
 #[require(PoolMarker)]

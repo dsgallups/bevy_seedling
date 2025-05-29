@@ -79,14 +79,10 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// # use bevy::prelude::*;
 /// # use bevy_seedling::prelude::*;
 /// fn play_with_effects(mut commands: Commands, server: Res<AssetServer>) {
-///     commands
-///         .spawn((
-///             SamplePlayer::new(server.load("my_sample.wav")),
-///             sample_effects![
-///                 SpatialBasicNode::default(),
-///                 LowPassNode::new(500.0),
-///             ],
-///         ));
+///     commands.spawn((
+///         SamplePlayer::new(server.load("my_sample.wav")),
+///         sample_effects![SpatialBasicNode::default(), LowPassNode::new(500.0)],
+///     ));
 /// }
 /// ```
 ///
@@ -235,7 +231,9 @@ impl SamplePlayer {
     /// # use bevy::prelude::*;
     /// # use bevy_seedling::prelude::*;
     /// fn play_sound(mut commands: Commands, server: Res<AssetServer>) {
-    ///     commands.spawn(SamplePlayer::new(server.load("my_sample.wav")).with_volume(Volume::Decibels(-6.0)));
+    ///     commands.spawn(
+    ///         SamplePlayer::new(server.load("my_sample.wav")).with_volume(Volume::Decibels(-6.0)),
+    ///     );
     /// }
     /// ```
     ///

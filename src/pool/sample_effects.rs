@@ -77,10 +77,7 @@ pub struct EffectOf(pub Entity);
 /// ));
 ///
 /// // Samples don't need to mention effects.
-/// commands.spawn((
-///     MusicPool,
-///     SamplePlayer::new(server.load("track_one.wav")),
-/// ));
+/// commands.spawn((MusicPool, SamplePlayer::new(server.load("track_one.wav"))));
 ///
 /// // Overwriting a subset also works.
 /// commands.spawn((

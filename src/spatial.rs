@@ -15,12 +15,11 @@
 //! # use bevy::prelude::*;
 //! fn spawn_spatial(mut commands: Commands, server: Res<AssetServer>) {
 //!     // Spawn a player with a transform (1).
-//!     commands
-//!         .spawn((
-//!             SamplePlayer::new(server.load("my_sample.wav")),
-//!             Transform::default(),
-//!         ))
-//!         .effect(SpatialBasicNode::default());
+//!     commands.spawn((
+//!         SamplePlayer::new(server.load("my_sample.wav")),
+//!         Transform::default(),
+//!         sample_effects![SpatialBasicNode::default()],
+//!     ));
 //!
 //!     // Then, spawn a listener (2), which automatically inserts
 //!     // a transform if it doesn't already exist (3).
@@ -46,13 +45,11 @@ use crate::pool::sample_effects::EffectOf;
 /// # use bevy::prelude::*;
 /// # use bevy_seedling::prelude::*;
 /// fn set_scale(mut commands: Commands, server: Res<AssetServer>) {
-///     commands
-///         .spawn((
-///             SamplePlayer::new(server.load("my_sample.wav")),
-///             Transform::default(),
-///             SpatialScale(Vec3::splat(0.25)),
-///         ))
-///         .effect(SpatialBasicNode::default());
+///     commands.spawn((
+///         SamplePlayer::new(server.load("my_sample.wav")),
+///         Transform::default(),
+///         sample_effects![(SpatialBasicNode::default(), SpatialScale(Vec3::splat(0.25)))],
+///     ));
 /// }
 /// ```
 ///
