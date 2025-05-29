@@ -94,10 +94,10 @@
 //!
 //! ### Sampler pools
 //! - [Dynamic pools][pool::dynamic]
-//! - [Static pools][prelude::Pool]
-//!   - [Constructing pools][prelude::Pool#constructing-pools]
-//!   - [Playing samples in a pool][prelude::Pool#playing-samples-in-a-pool]
-//!   - [Pool architecture][prelude::Pool#architecture]
+//! - [Static pools][prelude::SamplerPool]
+//!   - [Constructing pools][prelude::SamplerPool#constructing-pools]
+//!   - [Playing samples in a pool][prelude::SamplerPool#playing-samples-in-a-pool]
+//!   - [Pool architecture][prelude::SamplerPool#architecture]
 //! - [The default pool][prelude::DefaultPool]
 //!
 //! ### Routing audio

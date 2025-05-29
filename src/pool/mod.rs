@@ -83,6 +83,23 @@ impl Plugin for SamplePoolPlugin {
 /// }
 /// ```
 ///
+/// You can also provide an explicit [`PoolSize`], overriding the [`DefaultPoolSize`]
+/// resource.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// # struct SimplePool;
+/// # fn spawn_pool(mut commands: Commands) {
+/// commands.spawn((
+///     SamplerPool(SimplePool),
+///     // A pool of exactly 16 samplers that cannot grow
+///     PoolSize(16..=16),
+/// ));
+/// # }
+/// ```
+///
 /// You can also insert arbitrary effects.
 ///
 /// ```
@@ -94,7 +111,7 @@ impl Plugin for SamplePoolPlugin {
 ///
 /// commands.spawn((
 ///     SamplerPool(SimplePool),
-///     sample_effects![LowPassNode::default(), SpatialBasicNode::default(),],
+///     sample_effects![LowPassNode::default(), SpatialBasicNode::default()],
 /// ));
 /// # }
 /// ```
@@ -108,10 +125,9 @@ impl Plugin for SamplePoolPlugin {
 /// # use bevy::prelude::*;
 /// # use bevy_seedling::prelude::*;
 /// # fn spawn_pools(mut commands: Commands) {
+/// # #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// # struct SimplePool;
 /// let filter = commands.spawn(LowPassNode::default()).id();
-///
-/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
-/// struct SimplePool;
 ///
 /// commands.spawn(SamplerPool(SimplePool)).connect(filter);
 /// # }
@@ -138,8 +154,8 @@ impl Plugin for SamplePoolPlugin {
 /// ```
 ///
 /// Pools with effects will automatically insert [`SampleEffects`][crate::prelude::SampleEffects]
-/// into the [`SamplePlayer`][crate::prelude::SamplePlayer] entity when queued.
-/// You can easily override these defaults by including them yourself.
+/// into queued [`SamplePlayer`][crate::prelude::SamplePlayer]s.
+/// You can easily override these defaults.
 ///
 /// ```
 /// # use bevy::prelude::*;
@@ -159,7 +175,7 @@ impl Plugin for SamplePoolPlugin {
 ///     sample_effects![SpatialBasicNode {
 ///         panning_threshold: 0.75,
 ///         ..Default::default()
-///     },],
+///     }],
 /// ));
 /// # }
 /// ```
@@ -210,12 +226,9 @@ impl Plugin for SamplePoolPlugin {
 /// # use bevy::prelude::*;
 /// # use bevy_seedling::prelude::*;
 /// # fn spatial_pool(mut commands: Commands) {
-/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
-/// struct SpatialPool;
-///
-/// Pool::new(SpatialPool,
-///     .effect(SpatialBasicNode::default())
-///     .spawn(&mut commands);
+/// # #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// # struct SpatialPool;
+/// commands.spawn((SpatialPool, sample_effects![SpatialBasicNode::default()]));
 /// # }
 /// ```
 ///
