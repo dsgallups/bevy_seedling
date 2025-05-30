@@ -1,10 +1,16 @@
-use bevy_asset::{Asset, AssetLoader};
-use bevy_reflect::TypePath;
+use bevy::{asset::AssetLoader, prelude::*};
 use firewheel::{collector::ArcGc, sample_resource::SampleResource};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-/// An audio sample.
+/// A type-erased audio sample.
+///
+/// Samples are loaded via [`symphonia`] and resampled eagerly.
+/// As a result, you may notice some latency when loading longer
+/// samples with low optimization levels.
+///
+/// The available containers and formats can be configured with
+/// this crate's feature flags.
 #[derive(Asset, TypePath, Clone)]
 pub struct Sample(ArcGc<dyn SampleResource>);
 
@@ -70,9 +76,9 @@ impl AssetLoader for SampleLoader {
 
     async fn load(
         &self,
-        reader: &mut dyn bevy_asset::io::Reader,
+        reader: &mut dyn bevy::asset::io::Reader,
         _settings: &Self::Settings,
-        load_context: &mut bevy_asset::LoadContext<'_>,
+        load_context: &mut bevy::asset::LoadContext<'_>,
     ) -> Result<Self::Asset, Self::Error> {
         // Unfortunately, we need to bridge the gap between sync and async APIs here.
         let mut bytes = Vec::new();

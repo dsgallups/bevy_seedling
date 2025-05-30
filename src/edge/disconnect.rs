@@ -1,7 +1,6 @@
-use super::{EdgeTarget, NodeMap, PendingEdge, DEFAULT_CONNECTION};
+use super::{DEFAULT_CONNECTION, EdgeTarget, NodeMap, PendingEdge};
 use crate::{context::AudioContext, node::FirewheelNode};
-use bevy_ecs::prelude::*;
-use bevy_log::error_once;
+use bevy::prelude::*;
 
 #[cfg(debug_assertions)]
 use core::panic::Location;
@@ -58,7 +57,7 @@ impl PendingDisconnections {
 /// [`SeedlingSystems::Connect`][crate::SeedlingSystems::Connect] set immediately
 /// after connections.
 ///
-/// [`EntityCommands`]: bevy_ecs::prelude::EntityCommands
+/// [`EntityCommands`]: bevy::prelude::EntityCommands
 /// [`NodeLabel`]: crate::prelude::NodeLabel
 pub trait Disconnect: Sized {
     /// Queue a disconnection from this entity to the target.
@@ -126,8 +125,17 @@ pub(crate) fn process_disconnections(
     node_map: Res<NodeMap>,
     mut context: ResMut<AudioContext>,
 ) {
+    let disconnections = disconnections
+        .iter_mut()
+        .filter(|(pending, _)| !pending.0.is_empty())
+        .collect::<Vec<_>>();
+
+    if disconnections.is_empty() {
+        return;
+    }
+
     context.with(|context| {
-        for (mut pending, source_node) in disconnections.iter_mut() {
+        for (mut pending, source_node) in disconnections.into_iter() {
             pending.0.retain(|disconnections| {
                 let ports = disconnections.ports.as_deref().unwrap_or(DEFAULT_CONNECTION);
 
@@ -184,44 +192,19 @@ pub(crate) fn process_disconnections(
 #[cfg(test)]
 mod test {
     use crate::{
-        context::AudioContext, edge::Connect, prelude::MainBus, profiling::ProfilingBackend,
-        SeedlingPlugin,
+        context::AudioContext,
+        edge::Connect,
+        prelude::MainBus,
+        test::{prepare_app, run},
     };
 
     use super::*;
-    use bevy::prelude::*;
-    use bevy_ecs::system::RunSystemOnce;
     use firewheel::nodes::volume::VolumeNode;
 
     #[derive(Component)]
     struct One;
     #[derive(Component)]
     struct Two;
-
-    fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
-        let mut app = App::new();
-
-        app.add_plugins((
-            MinimalPlugins,
-            AssetPlugin::default(),
-            SeedlingPlugin::<ProfilingBackend> {
-                default_pool_size: None,
-                ..SeedlingPlugin::<ProfilingBackend>::new()
-            },
-        ))
-        .add_systems(Startup, startup);
-
-        app.finish();
-        app.cleanup();
-        app.update();
-
-        app
-    }
-
-    fn run<F: IntoSystem<(), O, M>, O, M>(app: &mut App, system: F) -> O {
-        let world = app.world_mut();
-        world.run_system_once(system).unwrap()
-    }
 
     #[test]
     fn test_disconnect() {

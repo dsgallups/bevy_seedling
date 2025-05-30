@@ -1,51 +1,35 @@
 //! One-pole, low-pass filter.
 
-use crate::timeline::Timeline;
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 use firewheel::{
     channel_config::{ChannelConfig, NonZeroChannelCount},
-    clock::ClockSeconds,
     diff::{Diff, Patch},
     event::NodeEventList,
     node::{
         AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, ProcBuffers,
         ProcInfo, ProcessStatus,
     },
+    param::smoother::{SmoothedParam, SmootherConfig},
 };
 
 /// A one-pole, low-pass filter.
 #[derive(Diff, Patch, Debug, Clone, Component)]
 pub struct LowPassNode {
     /// The cutoff frequency in hertz.
-    pub frequency: Timeline<f32>,
+    pub frequency: f32,
 }
 
 impl Default for LowPassNode {
     fn default() -> Self {
-        Self::new(1000.)
-    }
-}
-
-impl LowPassNode {
-    /// Create a new [`LowPassNode`] with an initial cutoff frequency.
-    ///
-    /// ```
-    /// # use bevy_seedling::prelude::*;
-    /// # use bevy::prelude::*;
-    /// # fn system(mut commands: Commands) {
-    /// commands.spawn(LowPassNode::new(1000.0));
-    /// # }
-    /// ```
-    pub fn new(frequency: f32) -> Self {
-        Self {
-            frequency: Timeline::new(frequency),
-        }
+        Self { frequency: 1000.0 }
     }
 }
 
 /// [`LowPassNode`]'s configuration.
 #[derive(Debug, Component, Clone)]
 pub struct LowPassConfig {
+    /// The parameter smoothing config used for frequency.
+    pub smoother_config: SmootherConfig,
     /// The number of input and output channels.
     pub channels: NonZeroChannelCount,
 }
@@ -53,6 +37,7 @@ pub struct LowPassConfig {
 impl Default for LowPassConfig {
     fn default() -> Self {
         Self {
+            smoother_config: Default::default(),
             channels: NonZeroChannelCount::STEREO,
         }
     }
@@ -77,12 +62,13 @@ impl AudioNode for LowPassNode {
         cx: ConstructProcessorContext,
     ) -> impl AudioNodeProcessor {
         LowPassProcessor {
-            params: self.clone(),
+            frequency: SmoothedParam::new(
+                self.frequency,
+                config.smoother_config,
+                cx.stream_info.sample_rate,
+            ),
             channels: vec![
-                Lpf::new(
-                    cx.stream_info.sample_rate.get() as f32,
-                    self.frequency.get()
-                );
+                Lpf::new(cx.stream_info.sample_rate.get() as f32, self.frequency);
                 config.channels.get().get() as usize
             ],
         }
@@ -132,7 +118,7 @@ impl Lpf {
 }
 
 struct LowPassProcessor {
-    params: LowPassNode,
+    frequency: SmoothedParam,
     channels: Vec<Lpf>,
 }
 
@@ -143,9 +129,11 @@ impl AudioNodeProcessor for LowPassProcessor {
             inputs, outputs, ..
         }: ProcBuffers,
         proc_info: &ProcInfo,
-        events: NodeEventList,
+        mut events: NodeEventList,
     ) -> ProcessStatus {
-        self.params.patch_list(events);
+        events.for_each_patch::<LowPassNode>(|p| match p {
+            LowPassNodePatch::Frequency(f) => self.frequency.set_value(f.clamp(0.0, 20_000.0)),
+        });
 
         // Actually this won't _technically_ be true, since
         // the filter may cary over a bit of energy from
@@ -153,29 +141,43 @@ impl AudioNodeProcessor for LowPassProcessor {
         //
         // Allowing a bit of settling time would resolve this.
         if proc_info.in_silence_mask.all_channels_silent(inputs.len()) {
+            self.frequency.reset();
+
             // All inputs are silent.
             return ProcessStatus::ClearAllOutputs;
         }
 
-        let seconds = proc_info.clock_seconds.start;
-        let frame_time = (proc_info.clock_seconds.end.0 - proc_info.clock_seconds.start.0)
-            / proc_info.frames as f64;
-        for sample in 0..inputs[0].len() {
-            if sample % 32 == 0 {
-                let seconds = seconds + ClockSeconds(sample as f64 * frame_time);
-                self.params.frequency.tick(seconds);
-                let frequency = self.params.frequency.get();
+        if self.frequency.is_smoothing() {
+            for sample in 0..inputs[0].len() {
+                let freq = self.frequency.next_smoothed();
 
                 for channel in self.channels.iter_mut() {
-                    channel.set_frequency(frequency);
+                    channel.set_frequency(freq);
+                }
+
+                for (i, channel) in self.channels.iter_mut().enumerate() {
+                    outputs[i][sample] = channel.process(inputs[i][sample]);
                 }
             }
 
-            for (i, channel) in self.channels.iter_mut().enumerate() {
-                outputs[i][sample] = channel.process(inputs[i][sample]);
+            self.frequency.settle();
+        } else {
+            let freq = self.frequency.target_value();
+            for channel in self.channels.iter_mut() {
+                channel.set_frequency(freq);
+            }
+
+            for sample in 0..inputs[0].len() {
+                for (i, channel) in self.channels.iter_mut().enumerate() {
+                    outputs[i][sample] = channel.process(inputs[i][sample]);
+                }
             }
         }
 
         ProcessStatus::outputs_not_silent()
+    }
+
+    fn new_stream(&mut self, stream_info: &firewheel::StreamInfo) {
+        self.frequency.update_sample_rate(stream_info.sample_rate);
     }
 }

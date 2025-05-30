@@ -30,20 +30,17 @@ fn main() {
                 commands
                     .spawn((VolumeNode::default(), EffectsBus))
                     // Any arbitrary effects chain can go here, but
-                    // let's just insert a reverb node.
-                    //
+                    // let's just insert some reverb and a low-pass filter.
+                    .chain_node(LowPassNode::default())
                     // This node is implicitly connected to the `MainBus`.
                     .chain_node(FreeverbNode::default());
 
                 // Let's create a new sample player pool and route it to our effects bus.
-                Pool::new(EffectsPool, 4)
-                    .spawn(&mut commands)
-                    .connect(EffectsBus);
+                commands.spawn(SamplerPool(EffectsPool)).connect(EffectsBus);
 
                 // Finally, let's play a sample through the chain.
                 commands.spawn((
-                    SamplePlayer::new(server.load("caw.ogg")),
-                    PlaybackSettings::LOOP,
+                    SamplePlayer::new(server.load("caw.ogg")).looping(),
                     EffectsPool,
                 ));
 
@@ -58,29 +55,14 @@ fn main() {
             },
         )
         .add_systems(
-            PostStartup,
+            Update,
             // Here we apply some modulation to the frequency of the low-pass filter.
-            |q: Single<&mut LowPassNode>, mut context: ResMut<AudioContext>| {
-                let now = context.now();
-                let mut node = q.into_inner();
+            |mut node: Single<&mut LowPassNode>, mut angle: Local<f32>, time: Res<Time>| {
+                let period = 10.0;
+                *angle += time.delta_secs() * core::f32::consts::TAU / period;
 
-                node.frequency
-                    .push_curve(
-                        80.,
-                        now,
-                        now + ClockSeconds(4.0),
-                        EaseFunction::ExponentialOut,
-                    )
-                    .unwrap();
-
-                node.frequency
-                    .push_curve(
-                        10000.,
-                        now + ClockSeconds(4.0),
-                        now + ClockSeconds(8.0),
-                        EaseFunction::ExponentialOut,
-                    )
-                    .unwrap();
+                let sin = angle.sin() * 0.5 + 0.5;
+                node.frequency = 200.0 + sin * sin * 3500.0;
             },
         )
         .run();

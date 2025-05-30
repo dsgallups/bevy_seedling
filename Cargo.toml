@@ -1,8 +1,8 @@
 [package]
 name = "bevy_seedling"
-version = "0.3.1"
-edition = "2021"
-rust-version = "1.83.0"
+version = "0.4.0"
+edition = "2024"
+rust-version = "1.85.0"
 license = "MIT OR Apache-2.0"
 authors = ["Corvus Prudens <corvusprudens@gmail.com>"]
 description = "A sprouting integration of the Firewheel audio engine"
@@ -14,8 +14,9 @@ categories = ["game-development", "multimedia::audio"]
 exclude = ["/assets"]
 
 [features]
-default = ["stream", "wav", "ogg"]
+default = ["stream", "wav", "ogg", "rand"]
 stream = ["firewheel/stream_nodes"]
+rand = ["dep:rand"]
 
 # formats
 wav = ["symphonium/wav", "symphonium/pcm"]
@@ -27,19 +28,18 @@ mkv = ["symphonium/mkv"]
 mp3 = ["symphonium/mp3"]
 adpcm = ["symphonium/adpcm"]
 
+# Enables profiling and testing backend compilation.
+# This is mainly intended for internal use.
 profiling = []
 
 [dependencies]
-bevy_reflect = { version = "0.15" }
-bevy_ecs = "0.15"
-bevy_app = "0.15"
-bevy_utils = "0.15"
-bevy_log = "0.15"
-bevy_hierarchy = "0.15"
-bevy_asset = "0.15"
-bevy_math = "0.15"
-bevy_transform = "0.15"
-firewheel = { version = "0.3", features = ["bevy", "spatial_basic_node"] }
+bevy = { version = "0.16", default-features = false, features = [
+  "bevy_asset",
+  "bevy_log",
+  "std",
+] }
+bevy_math = { version = "0.16", default-features = false, features = ["curve"] }
+firewheel = { version = "0.4.0", features = ["bevy", "spatial_basic_node"] }
 symphonium = { version = "0.4", default-features = false, features = [
   "opt-simd",
   "fft-resampler",
@@ -47,22 +47,25 @@ symphonium = { version = "0.4", default-features = false, features = [
 symphonia = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 smallvec = "1.13"
-arrayvec = "0.7"
-bevy_seedling_macros = { path = "./seedling_macros", version = "0.3.0" }
+bevy_seedling_macros = { path = "./seedling_macros", version = "0.4.0" }
+rand = { version = "0.8", default-features = false, features = [
+  "small_rng",
+  "getrandom",
+], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-firewheel = { version = "0.3", features = ["wasm-bindgen"] }
+firewheel = { version = "0.4.0", features = ["wasm-bindgen"] }
 
 [dev-dependencies]
-bevy = { version = "0.15", default-features = false, features = [
+bevy = { version = "0.16", default-features = false, features = [
   "bevy_debug_stepping",
   "bevy_asset",
   "bevy_color",
   "bevy_state",
   "multi_threaded",
   "sysinfo_plugin",
+  "std",
 ] }
-
 criterion = { version = "0.5", default-features = false, features = [
   "plotters",
   "cargo_bench_support",

@@ -1,7 +1,7 @@
 //! A simple band-pass filter.
 
 use crate::timeline::Timeline;
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 use firewheel::{
     channel_config::ChannelConfig,
     core::{channel_config::NonZeroChannelCount, clock::ClockSeconds, node::ProcInfo},
@@ -161,9 +161,9 @@ impl AudioNodeProcessor for BandPassProcessor {
             inputs, outputs, ..
         }: ProcBuffers,
         proc_info: &ProcInfo,
-        events: NodeEventList,
+        mut events: NodeEventList,
     ) -> ProcessStatus {
-        self.params.patch_list(events);
+        events.for_each_patch::<BandPassNode>(|p| self.params.apply(p));
 
         if proc_info.in_silence_mask.all_channels_silent(inputs.len()) {
             // All inputs are silent.

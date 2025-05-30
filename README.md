@@ -48,9 +48,9 @@ bevy = { version = "0.15", default-features = false, features = [
 ] }
 ```
 
-Then, you'll need to add the `SeedlingPlugin` to your app.
+Then, you'll need to add the [`SeedlingPlugin`] to your app.
 
-```rust
+```rs
 use bevy::prelude::*;
 use bevy_seedling::prelude::*;
 
@@ -63,18 +63,16 @@ fn main() {
 
 Once you've set it all up, playing sounds is easy!
 
-```rust
+```rs
 fn play_sound(mut commands: Commands, server: Res<AssetServer>) {
     // Play a sound!
     commands.spawn(SamplePlayer::new(server.load("my_sample.wav")));
 
     // Play a sound... with effects :O
-    commands
-        .spawn((
-            SamplePlayer::new(server.load("my_ambience.wav")),
-            PlaybackSettings::LOOP,
-        ))
-        .effect(LowPassNode::new(500.0));
+    commands.spawn((
+        SamplePlayer::new(server.load("my_ambience.wav")).looping(),
+        sample_effects![LowPassNode { frequency: 500.0 }],
+    ));
 }
 ```
 
@@ -87,6 +85,7 @@ should help you get up to speed on common usage patterns.
 
 | Flag     | Description                                | Default feature |
 | -------- | ------------------------------------------ | --------------- |
+| `rand`   | Enable the `PitchRange` component.         | Yes             |
 | `wav`    | Enable WAV format and PCM encoding.        | Yes             |
 | `ogg`    | Enable Ogg format and Vorbis encoding.     | Yes             |
 | `mp3`    | Enable mp3 format and encoding.            | No              |
@@ -99,6 +98,7 @@ should help you get up to speed on common usage patterns.
 
 | `bevy` | `bevy_seedling` |
 | ------ | --------------- |
+| 0.16   | 0.4             |
 | 0.15   | 0.3             |
 
 #### License

@@ -1,11 +1,11 @@
 //! Profiling utilities.
 
 use firewheel::{
+    StreamInfo,
     backend::{AudioBackend, DeviceInfo},
     clock::ClockSeconds,
     node::StreamStatus,
     processor::FirewheelProcessor,
-    StreamInfo,
 };
 use std::{
     num::NonZeroU32,

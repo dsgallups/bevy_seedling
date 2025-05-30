@@ -1,7 +1,7 @@
 //! This example demonstrates sample lifetimes.
 
 use bevy::{
-    ecs::{component::ComponentId, world::DeferredWorld},
+    ecs::{component::HookContext, world::DeferredWorld},
     log::LogPlugin,
     prelude::*,
 };
@@ -37,10 +37,7 @@ fn play_event(
         // A looping sample, on the other hand, will continue
         // playing indefinitely until the sample entity is despawned.
         let sample = commands
-            .spawn((
-                SamplePlayer::new(server.load("caw.ogg")),
-                PlaybackSettings::LOOP,
-            ))
+            .spawn(SamplePlayer::new(server.load("caw.ogg")).looping())
             .id();
 
         // Here we kick off a timer that will remove the looping sample, stopping playback.
@@ -55,7 +52,7 @@ fn play_event(
 #[component(on_remove = on_remove)]
 struct OnFinished;
 
-fn on_remove(mut world: DeferredWorld, _: Entity, _: ComponentId) {
+fn on_remove(mut world: DeferredWorld, _ctx: HookContext) {
     info!("One-shot sample finished!");
 
     world.send_event(PlayEvent);

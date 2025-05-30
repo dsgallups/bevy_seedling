@@ -2,19 +2,21 @@
 
 use crate::{
     edge::{Disconnect, EdgeTarget, PendingConnections, PendingEdge},
-    node::ParamFollower,
+    node::follower::FollowerOf,
     prelude::MainBus,
 };
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 use firewheel::{
+    SilenceMask, Volume,
     channel_config::{ChannelConfig, ChannelCount, NonZeroChannelCount},
     diff::{Diff, Patch},
+    dsp::volume::DEFAULT_AMP_EPSILON,
     event::NodeEventList,
     node::{
         AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, ProcBuffers,
         ProcInfo, ProcessStatus,
     },
-    Volume,
+    param::smoother::{SmoothedParamBuffer, SmootherConfig},
 };
 
 /// A convenient node for routing to sends.
@@ -32,9 +34,10 @@ use firewheel::{
 /// struct ExpensiveChain;
 ///
 /// fn dynamic_send(mut commands: Commands, server: Res<AssetServer>) {
-///     commands
-///         .spawn(SamplePlayer::new(server.load("my_sample.wav")))
-///         .effect(SendNode::new(Volume::UNITY_GAIN, ExpensiveChain));
+///     commands.spawn((
+///         SamplePlayer::new(server.load("my_sample.wav")),
+///         sample_effects![SendNode::new(Volume::UNITY_GAIN, ExpensiveChain)],
+///     ));
 /// }
 /// ```
 ///
@@ -98,7 +101,7 @@ pub(crate) fn update_remote_sends(
         (
             Entity,
             &SendNode,
-            &ParamFollower,
+            &FollowerOf,
             &SendConfig,
             &mut PendingConnections,
         ),
@@ -145,12 +148,18 @@ impl SendNode {
 pub struct SendConfig {
     /// The number of channels in this node's direct output and send output.
     pub channels: NonZeroChannelCount,
+
+    /// The amount of smoothing to apply to the send volume.
+    ///
+    /// This defaults to 5 milliseconds.
+    pub smooth_config: SmootherConfig,
 }
 
 impl Default for SendConfig {
     fn default() -> Self {
         Self {
             channels: NonZeroChannelCount::STEREO,
+            smooth_config: Default::default(),
         }
     }
 }
@@ -172,20 +181,29 @@ impl AudioNode for SendNode {
 
     fn construct_processor(
         &self,
-        _: &Self::Configuration,
-        _: ConstructProcessorContext,
+        config: &Self::Configuration,
+        ctx: ConstructProcessorContext,
     ) -> impl AudioNodeProcessor {
+        // We pre-calculate the silence mask since it's kind of annoying.
+        let mut silence_mask = 0;
+        for i in 0..config.channels.get().get() {
+            silence_mask |= 1 << i;
+        }
+
         SendProcessor {
-            gain: self.send_volume.amp(),
-            params: self.clone(),
+            gain: SmoothedParamBuffer::new(
+                self.send_volume.amp(),
+                config.smooth_config,
+                ctx.stream_info,
+            ),
+            silence_mask: !silence_mask,
         }
     }
 }
 
-// TODO: smooth the gain
 struct SendProcessor {
-    params: SendNode,
-    gain: f32,
+    gain: SmoothedParamBuffer,
+    silence_mask: u64,
 }
 
 impl AudioNodeProcessor for SendProcessor {
@@ -195,23 +213,38 @@ impl AudioNodeProcessor for SendProcessor {
             inputs, outputs, ..
         }: ProcBuffers,
         proc_info: &ProcInfo,
-        events: NodeEventList,
+        mut events: NodeEventList,
     ) -> ProcessStatus {
-        if self.params.patch_list(events) {
-            self.gain = self.params.send_volume.amp();
-        }
+        events.for_each_patch::<SendNode>(|SendNodePatch::SendVolume(v)| {
+            self.gain.set_value(v.amp_clamped(DEFAULT_AMP_EPSILON));
+        });
 
         if proc_info.in_silence_mask.all_channels_silent(inputs.len()) {
             return ProcessStatus::ClearAllOutputs;
         }
 
-        for frame in 0..proc_info.frames {
-            for (i, input) in inputs.iter().enumerate() {
-                outputs[i][frame] = input[frame];
-                outputs[i + inputs.len()][frame] = input[frame] * self.gain;
-            }
-        }
+        let gain_is_silent = !self.gain.is_smoothing() && self.gain.target_value() < 0.00001;
 
-        ProcessStatus::outputs_not_silent()
+        if gain_is_silent {
+            for frame in 0..proc_info.frames {
+                for (i, input) in inputs.iter().enumerate() {
+                    outputs[i][frame] = input[frame];
+                }
+            }
+
+            ProcessStatus::OutputsModified {
+                out_silence_mask: SilenceMask(self.silence_mask),
+            }
+        } else {
+            let gain_buffer = self.gain.get_buffer(proc_info.frames).0;
+            for frame in 0..proc_info.frames {
+                for (i, input) in inputs.iter().enumerate() {
+                    outputs[i][frame] = input[frame];
+                    outputs[i + inputs.len()][frame] = input[frame] * gain_buffer[frame];
+                }
+            }
+
+            ProcessStatus::outputs_not_silent()
+        }
     }
 }

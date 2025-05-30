@@ -1,7 +1,6 @@
-use super::{EdgeTarget, NodeMap, PendingEdge, DEFAULT_CONNECTION};
+use super::{DEFAULT_CONNECTION, EdgeTarget, NodeMap, PendingEdge};
 use crate::{context::AudioContext, node::FirewheelNode};
-use bevy_ecs::prelude::*;
-use bevy_log::error_once;
+use bevy::prelude::*;
 
 #[cfg(debug_assertions)]
 use core::panic::Location;
@@ -133,7 +132,7 @@ impl PendingConnections {
 /// # }
 /// ```
 ///
-/// [`EntityCommands`]: bevy_ecs::prelude::EntityCommands
+/// [`EntityCommands`]: bevy::prelude::EntityCommands
 /// [`NodeLabel`]: crate::prelude::NodeLabel
 pub trait Connect<'a>: Sized {
     /// Queue a connection from this entity to the target.
@@ -217,9 +216,10 @@ pub trait Connect<'a>: Sized {
     ///         .chain_node(VolumeNode::default())
     ///         .head();
     ///
-    ///     commands
-    ///         .spawn(SamplePlayer::new(server.load("my_sample.wav")))
-    ///         .effect(SendNode::new(Volume::UNITY_GAIN, chain_input));
+    ///     commands.spawn((
+    ///         SamplePlayer::new(server.load("my_sample.wav")),
+    ///         sample_effects![SendNode::new(Volume::UNITY_GAIN, chain_input)],
+    ///     ));
     /// }
     /// ```
     #[must_use]
@@ -372,15 +372,23 @@ impl core::fmt::Debug for ConnectCommands<'_> {
     }
 }
 
-// this has turned into a bit of a monster
 pub(crate) fn process_connections(
     mut connections: Query<(&mut PendingConnections, &FirewheelNode)>,
     targets: Query<&FirewheelNode>,
     node_map: Res<NodeMap>,
     mut context: ResMut<AudioContext>,
 ) {
+    let connections = connections
+        .iter_mut()
+        .filter(|(pending, _)| !pending.0.is_empty())
+        .collect::<Vec<_>>();
+
+    if connections.is_empty() {
+        return;
+    }
+
     context.with(|context| {
-        for (mut pending, source_node) in connections.iter_mut() {
+        for (mut pending, source_node) in connections.into_iter() {
             pending.0.retain(|connection| {
                 let ports = connection.ports.as_deref().unwrap_or(DEFAULT_CONNECTION);
 
@@ -440,13 +448,10 @@ pub(crate) fn process_connections(
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        context::AudioContext, prelude::MainBus, profiling::ProfilingBackend, SeedlingPlugin,
-    };
+    use crate::{context::AudioContext, prelude::MainBus, test::prepare_app};
 
     use super::*;
-    use bevy::prelude::*;
-    use bevy_ecs::system::RunSystemOnce;
+    use bevy::ecs::system::RunSystemOnce;
     use firewheel::nodes::volume::VolumeNode;
 
     #[derive(Component)]
@@ -455,26 +460,6 @@ mod test {
     struct Two;
     #[derive(Component)]
     struct Three;
-
-    fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
-        let mut app = App::new();
-
-        app.add_plugins((
-            MinimalPlugins,
-            AssetPlugin::default(),
-            SeedlingPlugin::<ProfilingBackend> {
-                default_pool_size: None,
-                ..SeedlingPlugin::<ProfilingBackend>::new()
-            },
-        ))
-        .add_systems(Startup, startup);
-
-        app.finish();
-        app.cleanup();
-        app.update();
-
-        app
-    }
 
     #[test]
     fn test_chain() {

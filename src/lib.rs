@@ -71,12 +71,10 @@
 //!     commands.spawn(SamplePlayer::new(server.load("my_sample.wav")));
 //!
 //!     // Play a sound... with effects :O
-//!     commands
-//!         .spawn((
-//!             SamplePlayer::new(server.load("my_ambience.wav")),
-//!             PlaybackSettings::LOOP,
-//!         ))
-//!         .effect(LowPassNode::new(500.0));
+//!     commands.spawn((
+//!         SamplePlayer::new(server.load("my_ambience.wav")).looping(),
+//!         sample_effects![LowPassNode { frequency: 500.0 }],
+//!     ));
 //! }
 //! ```
 //!
@@ -96,10 +94,10 @@
 //!
 //! ### Sampler pools
 //! - [Dynamic pools][pool::dynamic]
-//! - [Static pools][prelude::Pool]
-//!   - [Constructing pools][prelude::Pool#constructing-pools]
-//!   - [Playing samples in a pool][prelude::Pool#playing-samples-in-a-pool]
-//!   - [Pool architecture][prelude::Pool#architecture]
+//! - [Static pools][prelude::SamplerPool]
+//!   - [Constructing pools][prelude::SamplerPool#constructing-pools]
+//!   - [Playing samples in a pool][prelude::SamplerPool#playing-samples-in-a-pool]
+//!   - [Pool architecture][prelude::SamplerPool#architecture]
 //! - [The default pool][prelude::DefaultPool]
 //!
 //! ### Routing audio
@@ -116,6 +114,7 @@
 //!
 //! | Flag | Description | Default feature |
 //! | ---  | ----------- | --------------- |
+//! | `rand` | Enable the [`PitchRange`][crate::prelude::PitchRange] component. | Yes |
 //! | `wav` | Enable WAV format and PCM encoding. | Yes |
 //! | `ogg` | Enable Ogg format and Vorbis encoding. | Yes |
 //! | `mp3` | Enable mp3 format and encoding. | No |
@@ -125,6 +124,57 @@
 //! | `stream` | Enable CPAL input and output stream nodes. | Yes |
 //!
 //! ## Frequently asked questions
+//!
+//! ### How do I dynamically change a sample's volume?
+//!
+//! The [`SamplePlayer::volume`][prelude::SamplePlayer::volume] field
+//! cannot be changed after spawning or inserting the component. Nonetheless,
+//! there are a few ways to manage dynamic volume changes depending on your needs.
+//!
+//! If you need individual control over each sample's volume, you should add a
+//! [`VolumeNode`][prelude::VolumeNode] as an effect.
+//!
+//! ```
+//! # use bevy::prelude::*;
+//! # use bevy_seedling::prelude::*;
+//! # fn dynamic(mut commands: Commands, server: Res<AssetServer>) {
+//! commands.spawn((
+//!     SamplePlayer::new(server.load("my_sample.wav")),
+//!     sample_effects![VolumeNode { volume: Volume::Decibels(-6.0) }],
+//! ));
+//! # }
+//! ```
+//!
+//! To see how to query for effects, refer to the [`EffectsQuery`][prelude::EffectsQuery]
+//! trait.
+//!
+//! If you want to control groups of samples, such as all music, you'll
+//! probably want to spawn a [`SamplerPool`][prelude::SamplerPool] and
+//! update the pool's [`VolumeNode`][prelude::VolumeNode] rather than using
+//! a node for each sample.
+//!
+//! ```
+//! # use bevy::prelude::*;
+//! # use bevy_seedling::prelude::*;
+//! # fn dynamic(mut commands: Commands, server: Res<AssetServer>) {
+//! #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+//! struct MusicPool;
+//!
+//! commands.spawn(SamplerPool(MusicPool));
+//!
+//! commands.spawn((
+//!     MusicPool,
+//!     SamplePlayer::new(server.load("my_music.wav")),
+//! ));
+//!
+//! // Update the volume of all music at once
+//! fn update_music_volume(
+//!     mut music: Single<&mut VolumeNode, With<SamplerPool<MusicPool>>>,
+//! ) {
+//!     music.volume = Volume::Decibels(-6.0);
+//! }
+//! # }
+//! ```
 //!
 //! ### Why aren't my mp3 samples making any sound?
 //!
@@ -216,13 +266,13 @@
 // Naming trick to facilitate straightforward internal macro usage.
 extern crate self as bevy_seedling;
 
-use bevy_app::{Last, Plugin, PreStartup};
-use bevy_asset::AssetApp;
-use bevy_ecs::prelude::*;
-use firewheel::{backend::AudioBackend, CpalBackend};
+use bevy::prelude::*;
+use core::ops::RangeInclusive;
+use firewheel::{CpalBackend, backend::AudioBackend};
 
 pub mod context;
 pub mod edge;
+pub mod error;
 pub mod fixed_vec;
 pub mod node;
 pub mod nodes;
@@ -237,11 +287,12 @@ pub mod profiling;
 pub mod prelude {
     //! All `bevy_seedlings`'s important types and traits.
 
+    pub use crate::SeedlingPlugin;
     pub use crate::context::AudioContext;
     pub use crate::edge::{Connect, Disconnect, EdgeTarget};
     pub use crate::node::{
-        label::{MainBus, NodeLabel},
         FirewheelNode, RegisterNode,
+        label::{MainBus, NodeLabel},
     };
     pub use crate::nodes::{
         bpf::{BandPassConfig, BandPassNode},
@@ -250,26 +301,27 @@ pub mod prelude {
         send::{SendConfig, SendNode},
     };
     pub use crate::pool::{
-        builder::{Pool, PoolBuilder},
+        DefaultPoolSize, PlaybackCompletionEvent, PoolCommands, PoolDespawn, PoolSize, SamplerPool,
         label::{DefaultPool, PoolLabel},
-        PoolCommands, PoolDespawn,
+        sample_effects::{EffectOf, EffectsQuery, SampleEffects},
     };
-    pub use crate::sample::{OnComplete, PlaybackSettings, SamplePlayer};
+    pub use crate::sample::{OnComplete, PlaybackSettings, SamplePlayer, SamplePriority};
+    pub use crate::sample_effects;
     pub use crate::spatial::{
         DefaultSpatialScale, SpatialListener2D, SpatialListener3D, SpatialScale,
     };
-    pub use crate::SeedlingPlugin;
 
     pub use firewheel::{
+        FirewheelConfig, Volume,
         clock::{ClockSamples, ClockSeconds},
+        diff::{Memo, Notify},
         nodes::{
-            sampler::{RepeatMode, SamplerNode},
+            StereoToMonoNode,
+            sampler::{PlaybackSpeedQuality, PlaybackState, Playhead, RepeatMode, SamplerNode},
             spatial_basic::{SpatialBasicConfig, SpatialBasicNode},
             volume::{VolumeNode, VolumeNodeConfig},
             volume_pan::{VolumePanNode, VolumePanNodeConfig},
-            StereoToMonoNode,
         },
-        FirewheelConfig, Volume,
     };
 
     #[cfg(feature = "stream")]
@@ -277,24 +329,25 @@ pub mod prelude {
         reader::{StreamReaderConfig, StreamReaderNode},
         writer::{StreamWriterConfig, StreamWriterNode},
     };
+
+    #[cfg(feature = "rand")]
+    pub use crate::sample::PitchRange;
 }
 
 /// Sets for all `bevy_seedling` systems.
 ///
 /// These are all inserted into the [`Last`] schedule.
 ///
-/// [`Last`]: bevy_app::Last
+/// [`Last`]: bevy::prelude::Last
 #[derive(Debug, SystemSet, PartialEq, Eq, Hash, Clone)]
 pub enum SeedlingSystems {
     /// Entities without audio nodes acquire them from the audio context.
     Acquire,
     /// Pending connections are made.
     Connect,
+    /// Process sample pool operations.
+    Pool,
     /// Queue audio engine events.
-    ///
-    /// While it's not strictly necessary to separate this
-    /// set from [`SeedlingSystems::Connect`], it's a nice
-    /// semantic divide.
     Queue,
     /// The audio context is updated and flushed.
     Flush,
@@ -316,18 +369,13 @@ pub struct SeedlingPlugin<B: AudioBackend = CpalBackend> {
     /// The stream settings, forwarded directly to the backend.
     pub stream_config: B::Config,
 
-    /// The number of sampler nodes for the default
-    /// sampler pool. If `None` is provided,
-    /// the default pool will not be spawned, allowing
-    /// you to set it up how you like.
-    pub default_pool_size: Option<usize>,
+    /// Set whether to spawn the [`DefaultPool`][crate::prelude::DefaultPool].
+    ///
+    /// This allows you to define the default pool manually.
+    pub spawn_default_pool: bool,
 
-    /// The size range for dynamic pools. Pools
-    /// will be spawned with the minimum value,
-    /// and will grow depending on demand to the
-    /// maximum size. Setting this field to `None`
-    /// will disabled dynamic pools entirely.
-    pub dynamic_pool_range: Option<core::ops::RangeInclusive<usize>>,
+    /// Sets the default size range for sample pools.
+    pub pool_size: RangeInclusive<usize>,
 }
 
 impl Default for SeedlingPlugin<CpalBackend> {
@@ -345,8 +393,8 @@ where
         Self {
             config: Default::default(),
             stream_config: Default::default(),
-            default_pool_size: Some(24),
-            dynamic_pool_range: Some(4..=16),
+            spawn_default_pool: true,
+            pool_size: 4..=32,
         }
     }
 }
@@ -357,27 +405,24 @@ where
     B::Config: Clone + Send + Sync + 'static,
     B::StreamError: Send + Sync + 'static,
 {
-    fn build(&self, app: &mut bevy_app::App) {
+    fn build(&self, app: &mut App) {
         use prelude::*;
 
         let mut context = AudioContext::new::<B>(self.config, self.stream_config.clone());
         let sample_rate = context.with(|ctx| ctx.stream_info().unwrap().sample_rate);
-        let sample_pool_size = self.default_pool_size;
+        let spawn_default = self.spawn_default_pool;
 
         app.insert_resource(context)
             .init_resource::<edge::NodeMap>()
             .init_resource::<node::PendingRemovals>()
             .init_resource::<spatial::DefaultSpatialScale>()
-            .insert_resource(pool::dynamic::DynamicPoolRange(
-                self.dynamic_pool_range.clone(),
-            ))
+            .insert_resource(pool::DefaultPoolSize(4..=32))
             .init_asset::<sample::Sample>()
             .register_asset_loader(sample::SampleLoader { sample_rate })
             .register_node::<VolumeNode>()
             .register_node::<VolumePanNode>()
             .register_node::<SpatialBasicNode>()
-            .register_simple_node::<StereoToMonoNode>()
-            .register_simple_node::<SamplerNode>();
+            .register_simple_node::<StereoToMonoNode>();
 
         #[cfg(feature = "stream")]
         app.register_simple_node::<StreamReaderNode>()
@@ -387,16 +432,20 @@ where
             Last,
             (
                 SeedlingSystems::Connect.after(SeedlingSystems::Acquire),
-                SeedlingSystems::Queue.after(SeedlingSystems::Acquire),
-                SeedlingSystems::Flush
-                    .after(SeedlingSystems::Connect)
-                    .after(SeedlingSystems::Queue),
+                SeedlingSystems::Pool.after(SeedlingSystems::Connect),
+                SeedlingSystems::Queue.after(SeedlingSystems::Pool),
+                SeedlingSystems::Flush.after(SeedlingSystems::Queue),
             ),
         )
         .add_systems(
             Last,
             (
-                (spatial::update_2d_emitters, spatial::update_3d_emitters)
+                (
+                    spatial::update_2d_emitters,
+                    spatial::update_2d_emitters_effects,
+                    spatial::update_3d_emitters,
+                    spatial::update_3d_emitters_effects,
+                )
                     .before(SeedlingSystems::Acquire),
                 edge::auto_connect
                     .before(SeedlingSystems::Connect)
@@ -404,13 +453,7 @@ where
                 (edge::process_connections, edge::process_disconnections)
                     .chain()
                     .in_set(SeedlingSystems::Connect),
-                (
-                    node::process_removals,
-                    node::flush_events,
-                    context::update_context,
-                )
-                    .chain()
-                    .in_set(SeedlingSystems::Flush),
+                node::flush_events.in_set(SeedlingSystems::Flush),
             ),
         )
         .add_systems(
@@ -418,13 +461,49 @@ where
             (
                 node::label::insert_main_bus,
                 move |mut commands: Commands| {
-                    if let Some(size) = sample_pool_size {
-                        Pool::new(DefaultPool, size).spawn(&mut commands);
+                    if spawn_default {
+                        commands.spawn(SamplerPool(DefaultPool));
                     }
                 },
             ),
         );
 
-        app.add_plugins((pool::SamplePoolPlugin, nodes::SeedlingNodesPlugin));
+        app.add_plugins((
+            pool::SamplePoolPlugin,
+            nodes::SeedlingNodesPlugin,
+            #[cfg(feature = "rand")]
+            sample::RandomPlugin,
+        ));
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::prelude::*;
+    use bevy::{ecs::system::RunSystemOnce, prelude::*};
+
+    pub fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
+        let mut app = App::new();
+
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            SeedlingPlugin::<crate::profiling::ProfilingBackend> {
+                spawn_default_pool: false,
+                ..SeedlingPlugin::<crate::profiling::ProfilingBackend>::new()
+            },
+        ))
+        .add_systems(Startup, startup);
+
+        app.finish();
+        app.cleanup();
+        app.update();
+
+        app
+    }
+
+    pub fn run<F: IntoSystem<(), O, M>, O, M>(app: &mut App, system: F) -> O {
+        let world = app.world_mut();
+        world.run_system_once(system).unwrap()
     }
 }

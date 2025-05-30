@@ -1,18 +1,19 @@
 //! Audio node registration and management.
 
 use crate::edge::NodeMap;
-use crate::pool;
-use crate::{prelude::AudioContext, SeedlingSystems};
-use bevy_app::Last;
-use bevy_ecs::{prelude::*, world::DeferredWorld};
-use bevy_log::error;
-use firewheel::diff::PathBuilder;
+use crate::error::SeedlingError;
+use crate::pool::sample_effects::EffectOf;
+use crate::{SeedlingSystems, prelude::AudioContext};
+use bevy::ecs::component::{ComponentId, HookContext, Mutable};
+use bevy::ecs::world::DeferredWorld;
+use bevy::prelude::*;
 use firewheel::{
     diff::{Diff, Patch},
     event::{NodeEvent, NodeEventType},
     node::{AudioNode, NodeID},
 };
 
+pub mod follower;
 pub mod label;
 
 use label::NodeLabels;
@@ -22,6 +23,12 @@ use label::NodeLabels;
 /// This is used as the baseline for diffing.
 #[derive(Component)]
 pub(crate) struct Baseline<T>(pub(crate) T);
+
+/// A component that communicates an effect is present on an entity.
+///
+/// This is used for sample pool bookkeeping.
+#[derive(Component, Clone, Copy)]
+pub(crate) struct EffectId(pub(crate) ComponentId);
 
 /// An event queue.
 ///
@@ -54,9 +61,24 @@ impl Events {
     }
 }
 
+fn apply_patch<T: Patch>(value: &mut T, event: &NodeEventType) -> Result {
+    let NodeEventType::Param { data, path } = event else {
+        return Ok(());
+    };
+
+    let patch = T::patch(data, path).map_err(|e| SeedlingError::PatchError {
+        ty: core::any::type_name::<T>(),
+        error: e,
+    })?;
+
+    value.apply(patch);
+
+    Ok(())
+}
+
 fn generate_param_events<T: Diff + Patch + Component + Clone>(
-    mut nodes: Query<(&T, &mut Baseline<T>, &mut Events), (Changed<T>, Without<ExcludeNode>)>,
-) {
+    mut nodes: Query<(&T, &mut Baseline<T>, &mut Events), (Changed<T>, Without<EffectOf>)>,
+) -> Result {
     for (params, mut baseline, mut events) in nodes.iter_mut() {
         // This ensures we only apply patches that were generated here.
         // I'm not sure this is correct in all cases, though.
@@ -66,15 +88,17 @@ fn generate_param_events<T: Diff + Patch + Component + Clone>(
 
         // Patch the baseline.
         for event in &events.0[starting_len..] {
-            baseline.0.patch_event(event);
+            apply_patch(&mut baseline.0, event)?;
         }
     }
+
+    Ok(())
 }
 
 fn acquire_id<T>(
     q: Query<
         (Entity, &T, Option<&T::Configuration>, Option<&NodeLabels>),
-        (Without<FirewheelNode>, Without<ExcludeNode>),
+        (Without<FirewheelNode>, Without<EffectOf>),
     >,
     mut context: ResMut<AudioContext>,
     mut commands: Commands,
@@ -82,6 +106,10 @@ fn acquire_id<T>(
 ) where
     T: AudioNode<Configuration: Component + Clone> + Component + Clone,
 {
+    if q.iter().len() == 0 {
+        return;
+    }
+
     context.with(|context| {
         for (entity, container, config, labels) in q.iter() {
             let node = context.add_node(container.clone(), config.cloned());
@@ -155,8 +183,8 @@ fn acquire_id<T>(
 /// synchronized with the audio graph.
 ///
 /// This *diffing* isn't just useful for ECS-to-Audio communications; `bevy_seedling`
-/// also uses it to power the [*remote node*][crate::node::ExcludeNode] abstraction,
-/// which makes it easy to modify parameters directly on sample players.
+/// also uses it to power the [`SampleEffects`][crate::prelude::SampleEffects] abstraction,
+/// which makes it easy to modify parameters directly adjacent to sample players.
 ///
 /// Diffing occurs in the [`SeedlingSystems::Queue`] system set during
 /// the [`Last`] schedule. Diffing will only be applied to nodes that have
@@ -169,7 +197,11 @@ pub trait RegisterNode {
     /// parameter diffing.
     fn register_node<T>(&mut self) -> &mut Self
     where
-        T: AudioNode<Configuration: Component + Clone> + Diff + Patch + Component + Clone;
+        T: AudioNode<Configuration: Component + Clone>
+            + Diff
+            + Patch
+            + Component<Mutability = Mutable>
+            + Clone;
 
     /// Register an audio node without automatic diffing.
     ///
@@ -181,28 +213,34 @@ pub trait RegisterNode {
         T: AudioNode<Configuration: Component + Clone> + Component + Clone;
 }
 
-impl RegisterNode for bevy_app::App {
+impl RegisterNode for App {
     fn register_node<T>(&mut self) -> &mut Self
     where
-        T: AudioNode<Configuration: Component + Clone> + Diff + Patch + Component + Clone,
+        T: AudioNode<Configuration: Component + Clone>
+            + Diff
+            + Patch
+            + Component<Mutability = Mutable>
+            + Clone,
     {
         let world = self.world_mut();
 
         world.register_component_hooks::<T>().on_insert(
-            |mut world: DeferredWorld, entity: Entity, _| {
-                let value = world.get::<T>(entity).unwrap().clone();
-                world.commands().entity(entity).insert(Baseline(value));
+            |mut world: DeferredWorld, context: HookContext| {
+                let value = world.get::<T>(context.entity).unwrap().clone();
+                world
+                    .commands()
+                    .entity(context.entity)
+                    .insert((Baseline(value), EffectId(context.component_id)));
             },
         );
         world.register_required_components::<T, Events>();
         world.register_required_components::<T, T::Configuration>();
-        world.register_required_components::<T, pool::dynamic::AutoRegister<T>>();
 
         self.add_systems(
             Last,
             (
                 acquire_id::<T>.in_set(SeedlingSystems::Acquire),
-                (param_follower::<T>, generate_param_events::<T>)
+                (follower::param_follower::<T>, generate_param_events::<T>)
                     .chain()
                     .in_set(SeedlingSystems::Queue),
             ),
@@ -216,7 +254,6 @@ impl RegisterNode for bevy_app::App {
         let world = self.world_mut();
         world.register_required_components::<T, Events>();
         world.register_required_components::<T, T::Configuration>();
-        world.register_required_components::<T, pool::dynamic::AutoRegister<T>>();
 
         self.add_systems(Last, acquire_id::<T>.in_set(SeedlingSystems::Acquire))
     }
@@ -230,22 +267,17 @@ impl RegisterNode for bevy_app::App {
 ///
 /// When this component is removed, the underlying
 /// audio node is removed from the graph.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Component)]
+#[component(on_remove = on_remove_node, immutable)]
 pub struct FirewheelNode(pub NodeID);
 
-impl Component for FirewheelNode {
-    const STORAGE_TYPE: bevy_ecs::component::StorageType = bevy_ecs::component::StorageType::Table;
+fn on_remove_node(mut world: DeferredWorld, context: HookContext) {
+    let Some(node) = world.get::<FirewheelNode>(context.entity).copied() else {
+        return;
+    };
 
-    fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
-        hooks.on_remove(|mut world, entity, _| {
-            let Some(node) = world.get::<FirewheelNode>(entity).copied() else {
-                return;
-            };
-
-            let mut removals = world.resource_mut::<PendingRemovals>();
-            removals.push(node.0);
-        });
-    }
+    let mut removals = world.resource_mut::<PendingRemovals>();
+    removals.push(node.0);
 }
 
 /// Queued audio node removals.
@@ -261,7 +293,8 @@ impl PendingRemovals {
     }
 }
 
-pub(crate) fn process_removals(
+pub(crate) fn flush_events(
+    mut nodes: Query<(&FirewheelNode, &mut Events)>,
     mut removals: ResMut<PendingRemovals>,
     mut context: ResMut<AudioContext>,
 ) {
@@ -271,14 +304,7 @@ pub(crate) fn process_removals(
                 error!("attempted to remove non-existent or invalid node from audio graph");
             }
         }
-    });
-}
 
-pub(crate) fn flush_events(
-    mut nodes: Query<(&FirewheelNode, &mut Events)>,
-    mut context: ResMut<AudioContext>,
-) {
-    context.with(|context| {
         for (node, mut events) in nodes.iter_mut() {
             for event in events.0.drain(..) {
                 context.queue_event(NodeEvent {
@@ -287,91 +313,9 @@ pub(crate) fn flush_events(
                 });
             }
         }
-    });
-}
 
-/// Exclude a node from the audio graph.
-///
-/// This component prevents audio node components
-/// like [`VolumeNode`][crate::prelude::VolumeNode] from
-/// automatically inserting themselves into the audio graph.
-/// This allows you to treat nodes as plain old data,
-/// facilitating the [`ParamFollower`] pattern.
-///
-/// ```
-/// # use bevy_ecs::prelude::*;
-/// # use bevy_seedling::{prelude::*, node::{ExcludeNode, ParamFollower}};
-/// fn system(mut commands: Commands) {
-///     let pod = commands.spawn((VolumeNode::default(), ExcludeNode)).head();
-///
-///     // This node will be inserted into the graph,
-///     // and the volume will track any changes
-///     // made to the `pod` entity.
-///     commands.spawn((VolumeNode::default(), ParamFollower(pod)));
-/// }
-/// ```
-///
-/// Nodes inserted into an entity with [`ExcludeNode`] can be
-/// thought of as *remote nodes* that other graph-connected
-/// nodes can track.
-#[derive(Debug, Default, Component)]
-pub struct ExcludeNode;
-
-/// A component that allows one entity's parameters to track another's.
-///
-/// This can only support a single rank; cascading
-/// is not allowed.
-///
-/// Within `bevy_seedling`, this is used primarily by sampler
-/// pools. When you define a pool with a set of effects,
-/// those nodes will be automatically inserted on
-/// [`SamplePlayer`][crate::prelude::SamplePlayer] entities
-/// queued for that pool. Then, each effect node will
-/// have a [`ParamFollower`] component inserted that
-/// tracks the [`SamplePlayer`][crate::prelude::SamplePlayer].
-///
-/// ```
-/// # use bevy::prelude::*;
-/// # use bevy_seedling::prelude::*;
-/// # #[derive(PoolLabel, Clone, Debug, PartialEq, Eq, Hash)]
-/// # struct MyLabel;
-/// # fn system(mut commands: Commands, server: Res<AssetServer>) {
-/// Pool::new(MyLabel, 1)
-///     .effect(SpatialBasicNode::default())
-///     .spawn(&mut commands);
-///
-/// commands.spawn((MyLabel, SamplePlayer::new(server.load("my_sample.wav"))));
-///
-/// // Once spawned, these will look something like
-/// // Pool: (SamplePlayer) -> (SpatialBasicNode, ParamFollower) -> (VolumeNode) -> (MainBus)
-/// // SamplePlayer: (SamplePlayer, SpatialBasicNode, ExcludeNode)
-/// # }
-/// ```
-#[derive(Debug, Component)]
-pub struct ParamFollower(pub Entity);
-
-/// Apply diffing and patching between two sets of parameters
-/// in the ECS. This allows the engine-connected parameters
-/// to follow another set of parameters that may be
-/// closer to user code.
-///
-/// For example, it's much easier for users to set parameters
-/// on a sample player entity directly rather than drilling
-/// into the sample pool and node the sample is assigned to.
-pub(crate) fn param_follower<T: Diff + Patch + Component>(
-    sources: Query<&T, (Changed<T>, Without<ParamFollower>)>,
-    mut followers: Query<(&ParamFollower, &mut T)>,
-) {
-    let mut event_queue = Vec::new();
-    for (follower, mut params) in followers.iter_mut() {
-        let Ok(source) = sources.get(follower.0) else {
-            continue;
-        };
-
-        source.diff(&params, PathBuilder::default(), &mut event_queue);
-
-        for event in event_queue.drain(..) {
-            params.patch_event(&event);
+        if let Err(e) = context.update() {
+            error!("graph error: {:?}", e);
         }
-    }
+    });
 }

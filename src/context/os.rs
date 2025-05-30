@@ -1,5 +1,5 @@
 use super::SeedlingContext;
-use firewheel::{backend::AudioBackend, FirewheelConfig, FirewheelCtx};
+use firewheel::{FirewheelConfig, FirewheelCtx, backend::AudioBackend};
 use std::sync::mpsc;
 
 /// A thread-safe wrapper around the underlying Firewheel audio context.

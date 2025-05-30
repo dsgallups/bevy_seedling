@@ -1,8 +1,7 @@
 //! Glue code for interfacing with the underlying audio context.
 
-use bevy_ecs::prelude::*;
-use bevy_log::error;
-use firewheel::{backend::AudioBackend, clock::ClockSeconds, FirewheelConfig};
+use bevy::prelude::*;
+use firewheel::{FirewheelConfig, backend::AudioBackend, clock::ClockSeconds};
 
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -51,7 +50,7 @@ impl AudioContext {
     /// ```
     /// # use bevy::prelude::*;
     /// # use bevy_seedling::prelude::*;
-    /// fn mute_all(mut q: Query<&mut LowPassNode>, mut context: ResMut<AudioContext>) {
+    /// fn mute_all(mut q: Query<&mut BandPassNode>, mut context: ResMut<AudioContext>) {
     ///     let now = context.now();
     ///     for mut filter in q.iter_mut() {
     ///         filter
@@ -93,12 +92,4 @@ impl AudioContext {
     {
         self.0.with(f)
     }
-}
-
-pub(crate) fn update_context(mut context: ResMut<AudioContext>) {
-    context.with(|context| {
-        if let Err(e) = context.update() {
-            error!("graph error: {:?}", e);
-        }
-    });
 }

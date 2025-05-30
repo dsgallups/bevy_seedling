@@ -22,14 +22,13 @@ fn main() {
 struct AmbiencePool;
 
 fn startup(server: Res<AssetServer>, mut commands: Commands) {
-    // Here we spawn our custom ambience pool with four sampler nodes.
-    Pool::new(AmbiencePool, 4).spawn(&mut commands);
+    // Here we spawn our custom ambience pool.
+    commands.spawn(SamplerPool(AmbiencePool));
 
     // And we start playing our sample in the pool.
     commands.spawn((
-        SamplePlayer::new(server.load("crow_ambience.ogg")),
-        PlaybackSettings::LOOP,
         AmbiencePool,
+        SamplePlayer::new(server.load("crow_ambience.ogg")).looping(),
     ));
 
     // Then, we queue up the pool's removal.

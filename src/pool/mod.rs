@@ -1,488 +1,638 @@
-//! Sampler pools, which represent primary sampler player mechanism.
+//! Sampler pools, `bevy_seedling`'s primary sample playing mechanism.
 
-use crate::node::ParamFollower;
-use crate::prelude::{AudioContext, Connect, DefaultPool, FirewheelNode, PoolLabel, VolumeNode};
-use crate::sample::{OnComplete, PlaybackSettings, QueuedSample, Sample, SamplePlayer};
-use crate::{node::Events, SeedlingSystems};
-use bevy_app::{Last, Plugin, PostUpdate};
-use bevy_asset::Assets;
-use bevy_ecs::{component::ComponentId, prelude::*, world::DeferredWorld};
-use bevy_hierarchy::DespawnRecursiveExt;
-use bevy_utils::HashSet;
-use dynamic::DynamicPoolRegistry;
-use firewheel::{
-    event::{NodeEventType, SequenceCommand},
-    nodes::sampler::{SamplerNode, SamplerState},
-    Volume,
+use crate::{
+    SeedlingSystems,
+    context::AudioContext,
+    edge::{PendingConnections, PendingEdge},
+    error::SeedlingError,
+    node::{EffectId, FirewheelNode, RegisterNode},
+    pool::label::PoolLabelContainer,
+    prelude::PoolLabel,
+    sample::{OnComplete, PlaybackSettings, QueuedSample, SamplePlayer},
 };
-use std::any::TypeId;
-use std::sync::Arc;
+use bevy::{
+    ecs::{
+        component::{ComponentId, HookContext},
+        entity::EntityCloner,
+        system::QueryLens,
+        world::DeferredWorld,
+    },
+    prelude::*,
+};
+use core::ops::{Deref, RangeInclusive};
+use firewheel::nodes::{
+    sampler::{SamplerConfig, SamplerNode, SamplerState},
+    volume::VolumeNode,
+};
+use queue::SkipTimer;
+use sample_effects::{EffectOf, SampleEffects};
 
-pub mod builder;
 pub mod dynamic;
+mod entity_set;
 pub mod label;
-
-use label::PoolLabelContainer;
+mod queue;
+pub mod sample_effects;
 
 pub(crate) struct SamplePoolPlugin;
 
 impl Plugin for SamplePoolPlugin {
-    fn build(&self, app: &mut bevy_app::App) {
-        app.init_resource::<dynamic::Registries>()
+    fn build(&self, app: &mut App) {
+        app.register_node::<SamplerNode>()
             .add_systems(
                 Last,
                 (
-                    (remove_finished, assign_default)
+                    (populate_pool, queue::grow_pools)
+                        .chain()
+                        .before(SeedlingSystems::Acquire),
+                    (poll_finished, queue::assign_default, retrieve_state)
+                        .before(SeedlingSystems::Pool)
+                        .after(SeedlingSystems::Connect),
+                    watch_sample_players
                         .before(SeedlingSystems::Queue)
-                        .after(SeedlingSystems::Acquire),
-                    monitor_active
-                        .before(SeedlingSystems::Flush)
-                        .after(SeedlingSystems::Queue),
+                        .after(SeedlingSystems::Pool),
+                    (queue::assign_work, queue::update_followers)
+                        .chain()
+                        .in_set(SeedlingSystems::Pool),
+                    (queue::tick_skipped, queue::mark_skipped)
+                        .chain()
+                        .after(SeedlingSystems::Pool),
                 ),
             )
-            .add_systems(PostUpdate, dynamic::update_auto_pools);
+            .add_observer(remove_finished)
+            .add_plugins(dynamic::DynamicPlugin);
     }
 }
 
-/// Spawn an effects chain, connecting all nodes and
-/// returning the root sampler node.
-#[cfg_attr(debug_assertions, track_caller)]
-fn spawn_chain<L: Component + Clone>(
-    bus: Entity,
-    defaults: &SamplePoolTypes,
-    label: L,
-    commands: &mut Commands,
-) -> Entity {
-    let chain = defaults.spawn_nodes(label.clone(), commands);
+/// A component for building sampler pools.
+///
+/// *Sampler pools* are `bevy_seedling`'s primary mechanism for playing
+/// multiple sounds at once. [`SamplerPool`] allows you to precisely define pools
+/// and their routing.
+///
+/// ## Constructing pools
+///
+/// To construct a pool, you'll need to provide a [`PoolLabel`].
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// // Note that you'll need a few additional traits to support `PoolLabel`
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct SimplePool;
+///
+/// fn spawn_pool(mut commands: Commands) {
+///     commands.spawn(SamplerPool(SimplePool));
+/// }
+/// ```
+///
+/// You can also provide an explicit [`PoolSize`], overriding the [`DefaultPoolSize`]
+/// resource.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// # struct SimplePool;
+/// # fn spawn_pool(mut commands: Commands) {
+/// commands.spawn((
+///     SamplerPool(SimplePool),
+///     // A pool of exactly 16 samplers that cannot grow
+///     PoolSize(16..=16),
+/// ));
+/// # }
+/// ```
+///
+/// Finally, you can insert arbitrary effects.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn spawn_pools(mut commands: Commands) {
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct EffectsPool;
+///
+/// commands.spawn((
+///     SamplerPool(EffectsPool),
+///     sample_effects![LowPassNode::default(), SpatialBasicNode::default()],
+/// ));
+/// # }
+/// ```
+///
+/// By default, pools will insert a volume node in the root [`SamplerPool`]
+/// entity and connect all its samplers to it. As a result, you
+/// can easily route the entire pool with a single [`connect`][crate::prelude::Connect::connect]
+/// call.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn spawn_pools(mut commands: Commands) {
+/// # #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// # struct SimplePool;
+/// let filter = commands.spawn(LowPassNode::default()).id();
+///
+/// commands.spawn(SamplerPool(SimplePool)).connect(filter);
+/// # }
+/// ```
+///
+/// ## Playing samples in a pool
+///
+/// Once you've spawned a pool, playing samples in it is easy!
+/// Just spawn your sample players with the label.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct SimplePool;
+///
+/// fn spawn_pool_and_play(mut commands: Commands, server: Res<AssetServer>) {
+///     commands.spawn(SamplerPool(SimplePool));
+///
+///     commands.spawn((SimplePool, SamplePlayer::new(server.load("my_sample.wav"))));
+/// }
+/// ```
+///
+/// Pools with effects will automatically insert [`SampleEffects`]
+/// into queued [`SamplePlayer`]s.
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn overriding_effects(mut commands: Commands, server: Res<AssetServer>) {
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct SpatialPool;
+///
+/// commands.spawn((
+///     SamplerPool(SpatialPool),
+///     sample_effects![SpatialBasicNode::default()],
+/// ));
+///
+/// // Once spawned, this entity will receive a
+/// // `SamplerEffects` pointing to a `SpatialBasicNode`
+/// commands.spawn((SpatialPool, SamplePlayer::new(server.load("my_sample.wav"))));
+/// # }
+/// ```
+///
+/// See [`SampleEffects`][crate::pool::sample_effects::SampleEffects#static-pools] for more details.
+///
+/// ## Architecture
+///
+/// Sampler pools are collections of individual
+/// sampler nodes, each of which can play a single sample at a time.
+/// When samples are queued up for playback, `bevy_seedling` will
+/// look for the best sampler in the corresponding pool. If a suitable
+/// sampler is found, the sample will begin playback, otherwise
+/// waiting until a slot opens up. If the time spent waiting exceeds
+/// a sample's [`SampleQueueLifetime`][crate::sample::SampleQueueLifetime],
+/// the sample's playback is considered complete, and the [`OnComplete`] effect
+/// is applied.
+///
+/// Each sampler node is routed to a final volume node. For a simple pool:
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn simple_pool(mut commands: Commands) {
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct SimplePool;
+///
+/// commands.spawn(SamplerPool(SimplePool));
+/// # }
+/// ```
+///
+/// We end up with a graph like:
+///
+/// ```text
+/// ┌───────┐┌───────┐┌───────┐┌───────┐
+/// │Sampler││Sampler││Sampler││Sampler│
+/// └┬──────┘└┬──────┘└┬──────┘└┬──────┘
+/// ┌▽────────▽────────▽────────▽┐
+/// │Volume                      │
+/// └┬───────────────────────────┘
+/// ┌▽──────┐
+/// │MainBus│
+/// └───────┘
+/// ```
+///
+/// If a pool includes effects, these are inserted in series with each sampler. For a pool
+/// with spatial processing:
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn spatial_pool(mut commands: Commands) {
+/// # #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// # struct SpatialPool;
+/// commands.spawn((SpatialPool, sample_effects![SpatialBasicNode::default()]));
+/// # }
+/// ```
+///
+/// We end up with a graph like:
+///
+/// ```text
+/// ┌───────┐┌───────┐┌───────┐┌───────┐
+/// │Sampler││Sampler││Sampler││Sampler│
+/// └┬──────┘└┬──────┘└┬──────┘└┬──────┘
+/// ┌▽──────┐┌▽──────┐┌▽──────┐┌▽──────┐
+/// │Spatial││Spatial││Spatial││Spatial│
+/// └┬──────┘└┬──────┘└┬──────┘└┬──────┘
+/// ┌▽────────▽────────▽────────▽┐
+/// │Volume                      │
+/// └┬───────────────────────────┘
+/// ┌▽──────┐
+/// │MainBus│
+/// └───────┘
+/// ```
+#[derive(Debug, Component)]
+#[component(immutable, on_insert = Self::on_insert_hook)]
+#[require(PoolMarker)]
+pub struct SamplerPool<T: PoolLabel + Component + Clone>(pub T);
 
-    let source = commands
-        .spawn((
-            SamplerNode::default(),
-            SamplePoolNode,
-            label,
-            EffectsChain(chain.clone()),
-            PoolRoot(bus),
-        ))
-        .id();
+impl<T: PoolLabel + Component + Clone> SamplerPool<T> {
+    fn on_insert_hook(mut world: DeferredWorld, context: HookContext) {
+        world.commands().queue(move |world: &mut World| {
+            let id = match world.component_id::<T>() {
+                Some(id) => id,
+                None => world.register_component::<T>(),
+            };
 
-    let mut chain = chain;
-    chain.push(bus);
+            let Some(value) = world.get::<SamplerPool<T>>(context.entity) else {
+                return;
+            };
 
-    commands.entity(source).connect(chain[0]);
-
-    for pair in chain.windows(2) {
-        commands.entity(pair[0]).connect(pair[1]);
+            let container = PoolLabelContainer::new(&value.0, id);
+            world.entity_mut(context.entity).insert(container);
+        });
     }
-
-    source
 }
 
-/// A resource to keep track of which label types
-/// have already been registered.
-#[derive(Resource, Default)]
-pub(crate) struct RegisteredPools(HashSet<TypeId>);
+/// A simple marker to make it easy to distinguish pools in a type-erased way.
+#[derive(Component, Default)]
+struct PoolMarker;
 
-/// Spawn a sampler pool with an initial size.
-#[cfg_attr(debug_assertions, track_caller)]
-fn spawn_pool<'a, L: PoolLabel + Component + Clone>(
-    label: L,
-    size: core::ops::RangeInclusive<usize>,
-    defaults: SamplePoolTypes,
-    commands: &'a mut Commands,
-) -> EntityCommands<'a> {
-    commands.queue(|world: &mut World| {
-        let mut resource = world.get_resource_or_init::<RegisteredPools>();
+#[derive(Debug, Component)]
+#[relationship(relationship_target = PoolSamplers)]
+struct PoolSamplerOf(pub Entity);
 
-        if resource.0.insert(TypeId::of::<L>()) {
-            world.schedule_scope(Last, |_, schedule| {
-                schedule.add_systems(
-                    (rank_nodes::<L>, assign_work::<L>)
-                        .chain()
-                        .in_set(SeedlingSystems::Queue),
-                );
-            });
+#[derive(Debug, Component)]
+#[relationship_target(relationship = PoolSamplerOf, linked_spawn)]
+struct PoolSamplers(Vec<Entity>);
+
+/// A wrapper for Firewheel's sampler state.
+#[derive(Component, Clone)]
+struct SamplerStateWrapper(SamplerState);
+
+/// A sampler assignment relationships.
+///
+/// This resides in the [`SamplerNode`] entity, pointing to the
+/// [`SamplePlayer`] entity it has been allocated for.
+#[derive(Debug, Component)]
+#[relationship(relationship_target = Sampler)]
+#[component(on_remove = Self::on_remove_hook)]
+pub struct SamplerOf(pub Entity);
+
+impl SamplerOf {
+    fn on_remove_hook(mut world: DeferredWorld, context: HookContext) {
+        if let Some(mut sampler) = world.get_mut::<SamplerNode>(context.entity) {
+            sampler.stop();
         }
-    });
-
-    commands.despawn_pool(label.clone());
-
-    let bus = commands
-        .spawn((
-            VolumeNode {
-                volume: Volume::Linear(1.0),
-            },
-            SamplePoolNode,
-            label.clone(),
-            NodeRank::default(),
-            PoolRange(size.clone()),
-        ))
-        .id();
-
-    let mut nodes = Vec::new();
-    nodes.reserve_exact(*size.start());
-    for _ in 0..*size.start() {
-        let node = spawn_chain(bus, &defaults, label.clone(), commands);
-        nodes.push(node);
     }
-
-    let mut bus = commands.entity(bus);
-    bus.insert((SamplerNodes(nodes), defaults));
-
-    bus
 }
 
-/// The root pool node, analogous to `Parent`.
+/// A relationship that provides information about a sample player's
+/// assigned [`SamplerNode`].
+///
+/// This component is inserted on a [`SamplePlayer`] entity when a
+/// sampler in the corresponding pool has been successfully allocated.
+/// [`Sampler`] provides precise information about a sample's playback
+/// status using shared atomics. Depending on the audio sample rate,
+/// the number of frames in a processing block, and frequency at which
+/// this data is checked, you may notice jitter in the playhead.
 #[derive(Component)]
-struct PoolRoot(Entity);
+#[relationship_target(relationship = SamplerOf)]
+#[component(on_remove = Self::on_insert_hook)]
+pub struct Sampler {
+    #[relationship]
+    sampler: Entity,
+    state: Option<SamplerState>,
+}
 
-/// A collection of each sampler node in the pool.
-#[derive(Component)]
-#[component(on_remove = on_remove_sampler_nodes)]
-struct SamplerNodes(Vec<Entity>);
+impl Sampler {
+    /// Returns the underlying sampler entity.
+    pub fn sampler(&self) -> Entity {
+        self.sampler
+    }
 
-impl core::ops::Deref for SamplerNodes {
-    type Target = [Entity];
+    /// Returns whether this sample is currently playing.
+    pub fn is_playing(&self) -> bool {
+        self.state
+            .as_ref()
+            .map(|s| !s.stopped())
+            .unwrap_or_default()
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    /// Returns the current playhead in frames.
+    ///
+    /// # Panics
+    ///
+    /// If the sample player has not yet propagated to the audio
+    /// graph, this information may not yet be available. For a
+    /// fallible method, see [`try_playhead_frames`][Self::try_playhead_frames].
+    pub fn playhead_frames(&self) -> u64 {
+        self.try_playhead_frames().unwrap()
+    }
+
+    /// Returns the current playhead in frames.
+    ///
+    /// If the sample player has not yet propagated to the audio
+    /// graph, this returns `None`.
+    pub fn try_playhead_frames(&self) -> Option<u64> {
+        self.state.as_ref().map(|s| s.playhead_frames())
     }
 }
 
-fn on_remove_sampler_nodes(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
-    let Some(mut nodes) = world.get_mut::<SamplerNodes>(entity) else {
-        return;
-    };
-
-    let nodes = core::mem::take(&mut nodes.0);
-
-    let mut commands = world.commands();
-    for node in nodes {
-        commands.entity(node).try_despawn();
-    }
-}
-
-#[derive(Component)]
-struct SamplePoolNode;
-
-#[derive(Component)]
-#[component(on_remove = on_remove_effects_chain)]
-struct EffectsChain(Vec<Entity>);
-
-fn on_remove_effects_chain(mut world: DeferredWorld, entity: Entity, _: ComponentId) {
-    let Some(mut nodes) = world.get_mut::<EffectsChain>(entity) else {
-        return;
-    };
-
-    let nodes = core::mem::take(&mut nodes.0);
-
-    let mut commands = world.commands();
-    for node in nodes {
-        commands.entity(node).try_despawn();
-    }
-}
-
-trait SamplePoolType {
-    /// Insert the pool's default value if the component isn't already present.
-    fn insert_default(&self, commands: &mut EntityCommands);
-
-    /// Remove this type and all required types from an entity.
-    fn remove(&self, commands: &mut EntityCommands);
-}
-
-impl<T: Component + Clone> SamplePoolType for T {
-    fn insert_default(&self, commands: &mut EntityCommands) {
-        commands.entry::<T>().or_insert_with(|| self.clone());
-    }
-
-    fn remove(&self, commands: &mut EntityCommands) {
-        commands.remove_with_requires::<T>();
-        // TODO: this might panic for non-diffing nodes
-        commands.remove_with_requires::<crate::node::Baseline<T>>();
-    }
-}
-
-/// A collections of types that manage insertion and removal of remote nodes.
-#[derive(Component, Default, Clone)]
-struct SamplePoolTypes(Vec<Arc<dyn SamplePoolType + Send + Sync + 'static>>);
-
-impl core::fmt::Debug for SamplePoolTypes {
+impl core::fmt::Debug for Sampler {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("SamplePoolTypes").finish_non_exhaustive()
+        f.debug_struct("SamplerAssignment")
+            .field("sampler", &self.sampler)
+            .finish_non_exhaustive()
     }
 }
 
-impl SamplePoolTypes {
-    /// Push a default node value.
-    pub fn push<T: Component + Clone>(&mut self, node: T) {
-        self.0.push(Arc::new(node));
-    }
+impl Sampler {
+    fn on_insert_hook(mut world: DeferredWorld, context: HookContext) {
+        let sampler = world.get::<Sampler>(context.entity).unwrap().sampler;
 
-    /// Spawn a set of unconnected audio nodes.
-    pub fn spawn_nodes<L: Component + Clone>(
-        &self,
-        label: L,
-        commands: &mut Commands,
-    ) -> Vec<Entity> {
-        self.0
-            .iter()
-            .map(|ty| {
-                let mut commands = commands.spawn((label.clone(), SamplePoolNode));
-                ty.insert_default(&mut commands);
-
-                commands.id()
-            })
-            .collect()
-    }
-
-    /// Remove nodes.
-    pub fn remove_nodes(&self, commands: &mut EntityCommands) {
-        for ty in &self.0 {
-            ty.remove(commands);
+        // We'll attempt to eagerly fill the state here, otherwise falling back when
+        // it's not ready.
+        if let Some(state) = world.get::<SamplerStateWrapper>(sampler).cloned() {
+            world.get_mut::<Sampler>(context.entity).unwrap().state = Some(state.0);
         }
     }
 }
 
-/// Sets the range for the number of pool sampler nodes.
-#[derive(Component, Clone, Debug)]
-struct PoolRange(pub core::ops::RangeInclusive<usize>);
+#[derive(Component)]
+struct PoolShape(Vec<ComponentId>);
 
-/// Sampler node ranking for playback.
-#[derive(Default, Component)]
-struct NodeRank(Vec<(Entity, u64)>);
+fn fetch_effect_ids(
+    effects: &[Entity],
+    lens: &mut QueryLens<&EffectId>,
+) -> core::result::Result<Vec<ComponentId>, SeedlingError> {
+    let query = lens.query();
 
-fn rank_nodes<T: Component>(
-    q: Query<
-        (Entity, &SamplerNode, &FirewheelNode, &PoolLabelContainer),
-        (With<SamplePoolNode>, With<T>),
-    >,
-    mut rank: Query<(&mut NodeRank, &PoolLabelContainer), With<T>>,
+    let mut effect_ids = Vec::new();
+    effect_ids.reserve_exact(effects.len());
+    for entity in effects {
+        let id = query
+            .get(*entity)
+            .map_err(|_| SeedlingError::MissingEffect {
+                empty_entity: *entity,
+            })?;
+
+        effect_ids.push(id.0);
+    }
+
+    Ok(effect_ids)
+}
+
+fn retrieve_state(
+    q: Query<(Entity, &FirewheelNode), (With<SamplerNode>, Without<SamplerStateWrapper>)>,
+    mut commands: Commands,
     mut context: ResMut<AudioContext>,
 ) {
-    for (mut rank, label) in rank.iter_mut() {
-        rank.0.clear();
+    if q.iter().len() == 0 {
+        return;
+    }
 
-        context.with(|c| {
-            for (e, params, node, node_label) in q.iter() {
-                if node_label.label != label.label {
-                    continue;
-                }
+    context.with(|ctx| {
+        for (entity, node_id) in q.iter() {
+            let Some(state) = ctx.node_state::<SamplerState>(node_id.0) else {
+                continue;
+            };
+            commands
+                .entity(entity)
+                .insert(SamplerStateWrapper(state.clone()));
+        }
+    });
+}
 
-                let Some(state) = c.node_state::<SamplerState>(node.0) else {
-                    continue;
-                };
+/// A kind of specialization of [`FollowerOf`][crate::node::follower::FollowerOf] for
+/// sampler nodes.
+fn watch_sample_players(
+    mut q: Query<(&mut SamplerNode, &SamplerOf)>,
+    samples: Query<&PlaybackSettings>,
+) {
+    for (mut sampler_node, sample) in q.iter_mut() {
+        let Ok(settings) = samples.get(sample.0) else {
+            continue;
+        };
 
-                let score = state.worker_score(params);
-
-                rank.0.push((e, score));
-            }
-        });
-
-        rank.0
-            .sort_unstable_by_key(|pair| std::cmp::Reverse(pair.1));
+        sampler_node.playhead = settings.playhead.clone();
+        sampler_node.playback = settings.playback.clone();
+        sampler_node.speed = settings.speed;
     }
 }
 
-#[derive(Component, Clone, Copy)]
-struct ActiveSample {
-    sample_entity: Entity,
+fn spawn_chain(
+    bus: Entity,
+    config: Option<SamplerConfig>,
+    effects: &[Entity],
+    commands: &mut Commands,
+) -> Entity {
+    let sampler = commands
+        .spawn((
+            SamplerNode::default(),
+            config.unwrap_or_default(),
+            PoolSamplerOf(bus),
+        ))
+        .id();
+
+    let effects = effects.to_vec();
+    commands.queue(move |world: &mut World| -> Result {
+        let mut cloner = EntityCloner::build(world);
+        cloner.deny::<EffectOf>();
+        let mut cloner = cloner.finish();
+
+        let mut chain = Vec::new();
+        chain.reserve_exact(effects.len() + 1);
+        for effect in effects {
+            chain.push(cloner.spawn_clone(world, effect));
+        }
+        chain.push(bus);
+
+        // Until we come up with a good way to implement the
+        // connect trait for `WorldEntityMut`, we're stuck with
+        // a bit of boilerplate.
+        world
+            .get_entity_mut(sampler)?
+            .add_children(&chain)
+            .entry::<PendingConnections>()
+            .or_default()
+            .into_mut()
+            .push(PendingEdge::new(chain[0], None));
+
+        for pair in chain.windows(2) {
+            world
+                .get_entity_mut(pair[0])?
+                .entry::<PendingConnections>()
+                .or_default()
+                .into_mut()
+                .push(PendingEdge::new(pair[1], None));
+        }
+
+        Ok(())
+    });
+
+    sampler
+}
+
+/// The size of a [`SamplerPool`].
+///
+/// ```
+/// # use bevy::prelude::*;
+/// # use bevy_seedling::prelude::*;
+/// # fn spawn_pool_and_play(mut commands: Commands, server: Res<AssetServer>) {
+/// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+/// struct SimplePool;
+///
+/// commands.spawn((SamplerPool(SimplePool), PoolSize(4..=16)));
+/// # }
+/// ```
+///
+/// This size is expressed as a range so that [`SamplerPool`]s can
+/// grow to meet demand when necessary, and otherwise claim as few
+/// resources as necessary. If a size isn't explicitly provided,
+/// it'll be initialized according to the [`DefaultPoolSize`] resource.
+///
+/// Pools are grown quadratically, so the cost of queuing samples
+/// is roughly amortized constant.
+#[derive(Debug, Clone, Component)]
+pub struct PoolSize(pub RangeInclusive<usize>);
+
+/// The default [`PoolSize`] applied to [`SamplerPool`]s.
+///
+/// The default is `4..=32`.
+/// When set to `0..=0`, dynamic pools are disabled.
+#[derive(Debug, Clone, Resource)]
+pub struct DefaultPoolSize(pub RangeInclusive<usize>);
+
+impl Default for DefaultPoolSize {
+    fn default() -> Self {
+        Self(4..=32)
+    }
+}
+
+fn populate_pool(
+    q: Query<
+        (
+            Entity,
+            &SamplerConfig,
+            Option<&PoolSize>,
+            Option<&SampleEffects>,
+            Option<&EffectId>,
+        ),
+        (
+            With<PoolLabelContainer>,
+            With<PoolMarker>,
+            Without<PoolSamplers>,
+        ),
+    >,
+    mut effects: Query<&EffectId>,
+    default_pool_size: Res<DefaultPoolSize>,
+    mut commands: Commands,
+) -> Result {
+    for (pool, config, size, pool_effects, effect_id) in &q {
+        if effect_id.is_none() {
+            commands.entity(pool).insert(VolumeNode::default());
+        }
+
+        let component_ids = fetch_effect_ids(
+            pool_effects.map(|e| e.deref()).unwrap_or(&[]),
+            &mut effects.as_query_lens(),
+        )?;
+
+        let size = size
+            .map(|p| p.0.clone())
+            .unwrap_or(default_pool_size.0.clone());
+
+        commands
+            .entity(pool)
+            .insert((PoolShape(component_ids), PoolSize(size.clone())));
+
+        let size = (*size.start()).max(1);
+        let config = config.clone();
+        for _ in 0..size {
+            spawn_chain(
+                pool,
+                Some(config.clone()),
+                pool_effects.map(|e| e.deref()).unwrap_or(&[]),
+                &mut commands,
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// An event triggered on [`SamplePlayer`] entities when
+/// their playback completes.
+///
+/// Note that this may be triggered even when the sample isn't
+/// played, including when its playback is set to
+/// [`PlaybackState::Stop`][crate::prelude::PlaybackState] or
+/// when it can't find space in a sampler pool.
+#[derive(Debug, Event)]
+pub struct PlaybackCompletionEvent;
+
+/// Clean up sample resources according to their playback settings.
+fn remove_finished(
+    trigger: Trigger<PlaybackCompletionEvent>,
+    samples: Query<(&PlaybackSettings, &PoolLabelContainer)>,
+    mut commands: Commands,
+) -> Result {
+    let sample_entity = trigger.target();
+    let (settings, container) = samples.get(sample_entity)?;
+
+    match settings.on_complete {
+        OnComplete::Preserve => {
+            commands
+                .entity(sample_entity)
+                .remove::<(Sampler, QueuedSample, SkipTimer)>();
+        }
+        OnComplete::Remove => {
+            commands
+                .entity(sample_entity)
+                .remove_by_id(container.label_id)
+                .remove_with_requires::<(
+                    SampleEffects,
+                    SamplePlayer,
+                    PoolLabelContainer,
+                    Sampler,
+                    QueuedSample,
+                    SkipTimer,
+                )>();
+        }
+        OnComplete::Despawn => {
+            commands.entity(sample_entity).despawn();
+        }
+    }
+
+    Ok(())
 }
 
 /// Automatically remove or despawn sample players when their
 /// sample has finished playing.
-fn remove_finished(
-    nodes: Query<
-        (
-            Entity,
-            &EffectsChain,
-            &FirewheelNode,
-            &ActiveSample,
-            &PoolRoot,
-        ),
-        With<SamplerNode>,
-    >,
-    samples: Query<&PlaybackSettings>,
-    roots: Query<&SamplePoolTypes>,
+fn poll_finished(
+    nodes: Query<(&SamplerNode, &SamplerOf, &SamplerStateWrapper)>,
     mut commands: Commands,
-    mut context: ResMut<AudioContext>,
 ) {
-    context.with(|context| {
-        for (entity, effects_chain, node, active, pool_root) in nodes.iter() {
-            let Some(state) = context.node_state::<SamplerState>(node.0) else {
-                continue;
-            };
+    for (node, active, state) in nodes.iter() {
+        let finished = state.0.finished() == node.sequence.id();
 
-            let state = state.playback_state();
-
-            // TODO: this will remove samples when paused
-            if !state.is_playing() {
-                commands.entity(entity).remove::<ActiveSample>();
-
-                for effect in effects_chain.0.iter() {
-                    commands.entity(*effect).remove::<ParamFollower>();
-                }
-
-                let Ok(settings) = samples.get(active.sample_entity) else {
-                    continue;
-                };
-
-                match settings.on_complete {
-                    OnComplete::Preserve => {}
-                    OnComplete::Remove => {
-                        let Ok(root) = roots.get(pool_root.0) else {
-                            continue;
-                        };
-
-                        let mut entity_commands = commands.entity(active.sample_entity);
-                        root.remove_nodes(&mut entity_commands);
-                        entity_commands.remove_with_requires::<(
-                            SamplePoolTypes,
-                            SamplePlayer,
-                            PoolLabelContainer,
-                            DynamicPoolRegistry,
-                        )>();
-                    }
-                    OnComplete::Despawn => {
-                        commands.entity(active.sample_entity).despawn_recursive();
-                    }
-                }
-            }
+        if finished {
+            commands.entity(active.0).trigger(PlaybackCompletionEvent);
         }
-    });
-}
-
-/// Scan through the set of pending sample players
-/// and assign work to the most appropriate sampler node.
-fn assign_work<T: Component + Clone>(
-    mut nodes: Query<
-        (
-            Entity,
-            &mut SamplerNode,
-            &mut Events,
-            &EffectsChain,
-            &FirewheelNode,
-        ),
-        (With<SamplePoolNode>, With<T>),
-    >,
-    queued_samples: Query<
-        (
-            Entity,
-            &SamplePlayer,
-            &PlaybackSettings,
-            &PoolLabelContainer,
-        ),
-        (With<QueuedSample>, With<T>),
-    >,
-    mut pools: Query<(
-        Entity,
-        &mut NodeRank,
-        &SamplePoolTypes,
-        &T,
-        &PoolLabelContainer,
-        &PoolRange,
-        &mut SamplerNodes,
-    )>,
-    assets: Res<Assets<Sample>>,
-    mut commands: Commands,
-    mut context: ResMut<AudioContext>,
-) {
-    context.with(|context| {
-        for (sample, player, settings, label) in queued_samples.iter() {
-            let Some(asset) = assets.get(&player.0) else {
-                continue;
-            };
-
-            let Some((pool_entity, mut rank, defaults, pool_label, _, pool_range, mut pool_nodes)) =
-                pools.iter_mut().find(|pool| pool.4.label == label.label)
-            else {
-                continue;
-            };
-
-            // get the best candidate
-            let Some((node_entity, _)) = rank.0.first() else {
-                // Try to grow the pool if it's reached max capacity.
-                // TODO: find a decent way to do this eagerly.
-                let current_size = pool_nodes.len();
-                let max_size = *pool_range.0.end();
-
-                if current_size < max_size {
-                    let new_size = (current_size * 2).min(max_size);
-
-                    for _ in 0..new_size - current_size {
-                        let new_sampler =
-                            spawn_chain(pool_entity, defaults, pool_label.clone(), &mut commands);
-                        pool_nodes.0.push(new_sampler);
-                    }
-                }
-
-                continue;
-            };
-
-            let Ok((node_entity, mut params, mut events, effects_chain, sampler_id)) =
-                nodes.get_mut(*node_entity)
-            else {
-                continue;
-            };
-
-            let Some(sampler_state) = context.node_state::<SamplerState>(sampler_id.0) else {
-                continue;
-            };
-
-            params.set_sample(asset.get(), settings.volume, settings.repeat_mode);
-            let event = sampler_state.sync_params_event(&params, true);
-            events.push(event);
-
-            // redirect all parameters to follow the sample source
-            for effect in effects_chain.0.iter() {
-                commands.entity(*effect).insert(ParamFollower(sample));
-            }
-
-            // Insert default pool parameters if not present.
-            for ty in defaults.0.iter() {
-                ty.insert_default(&mut commands.entity(sample));
-            }
-
-            rank.0.remove(0);
-            commands.entity(sample).remove::<QueuedSample>();
-            commands.entity(node_entity).insert(ActiveSample {
-                sample_entity: sample,
-            });
-        }
-    });
-}
-
-// Stop playback if the source entity no longer exists.
-fn monitor_active(
-    mut nodes: Query<(Entity, &ActiveSample, &mut Events, &EffectsChain)>,
-    samples: Query<&SamplePlayer>,
-    mut commands: Commands,
-) {
-    for (node_entity, active, mut events, effects_chain) in nodes.iter_mut() {
-        if samples.get(active.sample_entity).is_err() {
-            events.push(NodeEventType::SequenceCommand(SequenceCommand::Stop));
-
-            commands.entity(node_entity).remove::<ActiveSample>();
-
-            for effect in effects_chain.0.iter() {
-                commands.entity(*effect).remove::<ParamFollower>();
-            }
-        }
-    }
-}
-
-/// Assign the default pool label to a sample player that has no label.
-fn assign_default(
-    samples: Query<
-        Entity,
-        (
-            With<SamplePlayer>,
-            Without<PoolLabelContainer>,
-            Without<DynamicPoolRegistry>,
-        ),
-    >,
-    mut commands: Commands,
-) {
-    for sample in samples.iter() {
-        commands.entity(sample).insert(DefaultPool);
     }
 }
 
@@ -497,7 +647,7 @@ fn assign_default(
 /// This can be used directly or via the [`PoolCommands`] trait.
 ///
 /// ```
-/// # use bevy_ecs::prelude::*;
+/// # use bevy::prelude::*;
 /// # use bevy_seedling::prelude::*;
 /// #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
 /// struct MyLabel;
@@ -509,17 +659,20 @@ fn assign_default(
 #[derive(Debug)]
 pub struct PoolDespawn<T>(T);
 
-impl<T: PoolLabel + Component> PoolDespawn<T> {
+impl<T: PoolLabel + Component + Clone> PoolDespawn<T> {
     /// Construct a new [`PoolDespawn`] with the provided label.
     pub fn new(label: T) -> Self {
         Self(label)
     }
 }
 
-impl<T: PoolLabel + Component> Command for PoolDespawn<T> {
+impl<T: PoolLabel + Component + Clone> Command for PoolDespawn<T> {
     fn apply(self, world: &mut World) {
-        let mut roots =
-            world.query_filtered::<(Entity, &PoolLabelContainer), (With<T>, With<SamplePoolNode>, With<VolumeNode>)>();
+        let mut roots = world.query_filtered::<(Entity, &PoolLabelContainer), (
+            With<SamplerPool<T>>,
+            With<PoolSamplers>,
+            With<FirewheelNode>,
+        )>();
 
         let roots: Vec<_> = roots
             .iter(world)
@@ -531,7 +684,7 @@ impl<T: PoolLabel + Component> Command for PoolDespawn<T> {
         let interned = self.0.intern();
         for (root, label) in roots {
             if label.label == interned {
-                commands.entity(root).despawn_recursive();
+                commands.entity(root).despawn();
             }
         }
     }
@@ -544,11 +697,11 @@ pub trait PoolCommands {
     ///
     /// Despawning the terminal volume node recursively
     /// will produce the same effect.
-    fn despawn_pool<T: PoolLabel + Component>(&mut self, label: T);
+    fn despawn_pool<T: PoolLabel + Component + Clone>(&mut self, label: T);
 }
 
 impl PoolCommands for Commands<'_, '_> {
-    fn despawn_pool<T: PoolLabel + Component>(&mut self, label: T) {
+    fn despawn_pool<T: PoolLabel + Component + Clone>(&mut self, label: T) {
         self.queue(PoolDespawn::new(label));
     }
 }
@@ -556,49 +709,45 @@ impl PoolCommands for Commands<'_, '_> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{pool::NodeRank, prelude::*, profiling::ProfilingBackend};
-    use bevy::prelude::*;
-    use bevy_ecs::system::RunSystemOnce;
+    use crate::{
+        prelude::LowPassNode,
+        sample_effects,
+        test::{prepare_app, run},
+    };
+    use bevy_seedling_macros::PoolLabel;
 
-    fn prepare_app<F: IntoSystem<(), (), M>, M>(startup: F) -> App {
-        let mut app = App::new();
+    #[derive(PoolLabel, Clone, Debug, PartialEq, Eq, Hash)]
+    struct TestPool;
 
-        app.add_plugins((
-            MinimalPlugins,
-            AssetPlugin::default(),
-            SeedlingPlugin::<ProfilingBackend> {
-                default_pool_size: None,
-                ..SeedlingPlugin::<ProfilingBackend>::new()
+    #[test]
+    fn test_spawn() {
+        let mut app = prepare_app(|mut commands: Commands| {
+            commands.spawn((
+                SamplerPool(TestPool),
+                sample_effects![LowPassNode::default()],
+            ));
+        });
+
+        run(
+            &mut app,
+            |q: Query<&PoolSamplers, With<SamplerPool<TestPool>>>| {
+                assert_eq!(q.iter().len(), 1);
             },
-            HierarchyPlugin,
-        ))
-        .add_systems(Startup, startup);
-
-        app.finish();
-        app.cleanup();
-        app.update();
-
-        app
-    }
-
-    fn run<F: IntoSystem<(), O, M>, O, M>(app: &mut App, system: F) -> O {
-        let world = app.world_mut();
-        world.run_system_once(system).unwrap()
+        );
     }
 
     #[test]
-    fn test_despawn_static() {
-        #[derive(PoolLabel, Clone, Debug, PartialEq, Eq, Hash)]
-        struct TestPool;
-
+    fn test_despawn() {
         let mut app = prepare_app(|mut commands: Commands| {
-            Pool::new(TestPool, 4)
-                .effect(LowPassNode::default())
-                .spawn(&mut commands);
+            commands.spawn((
+                SamplerPool(TestPool),
+                PoolSize(4..=32),
+                sample_effects![LowPassNode::default()],
+            ));
         });
 
         run(&mut app, |pool_nodes: Query<&FirewheelNode>| {
-            // 2 * 4 (sampler and low pass nodes) + 1 (pool volume) + 1 (global volume)
+            // 2 * 4 (sampler and low pass nodes) + (pool volume) + 1 (global volume)
             assert_eq!(pool_nodes.iter().count(), 10);
         });
 
@@ -615,33 +764,31 @@ mod test {
     }
 
     #[test]
-    fn test_despawn_dynamic() {
+    fn test_playback_starts() {
         let mut app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
-            commands
-                .spawn(SamplePlayer::new(server.load("caw.ogg")))
-                .effect(LowPassNode::default());
+            commands.spawn((
+                SamplerPool(TestPool),
+                sample_effects![LowPassNode::default()],
+            ));
+            commands.spawn((
+                TestPool,
+                SamplePlayer::new(server.load("caw.ogg")).looping(),
+                EmptyComponent,
+            ));
         });
 
-        run(&mut app, |pool_nodes: Query<&FirewheelNode>| {
-            // 2 * 4 (sampler and low pass nodes) + 1 (pool volume) + 1 (global volume)
-            assert_eq!(pool_nodes.iter().count(), 10);
-        });
+        loop {
+            let players = run(
+                &mut app,
+                |q: Query<Entity, (With<SamplePlayer>, With<Sampler>)>| q.iter().len(),
+            );
 
-        run(
-            &mut app,
-            |q: Query<Entity, With<NodeRank>>, mut commands: Commands| {
-                let pool = q.single();
+            if players == 1 {
+                break;
+            }
 
-                commands.entity(pool).despawn();
-            },
-        );
-
-        app.update();
-
-        run(&mut app, |pool_nodes: Query<&FirewheelNode>| {
-            // 1 (global volume)
-            assert_eq!(pool_nodes.iter().count(), 1);
-        });
+            app.update();
+        }
     }
 
     #[derive(Component)]
@@ -651,55 +798,14 @@ mod test {
     fn test_remove_in_dynamic() {
         let mut app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
             // We'll play a short sample
-            commands
-                .spawn((
-                    SamplePlayer::new(server.load("sine_440hz_1ms.wav")),
-                    EmptyComponent,
-                    PlaybackSettings::REMOVE,
-                ))
-                .effect(LowPassNode::default());
-        });
-
-        // Then wait until the sample player is removed.
-        loop {
-            let players = run(
-                &mut app,
-                |q: Query<Entity, (With<SamplePlayer>, With<EmptyComponent>)>| q.iter().len(),
-            );
-
-            if players == 0 {
-                break;
-            }
-
-            app.update();
-        }
-
-        // Once removed, we'll verify that _all_ audio-related components are removed.
-        let world = app.world_mut();
-        let mut q = world.query_filtered::<EntityRef, With<EmptyComponent>>();
-        let entity = q.single(world);
-
-        let archetype = entity.archetype();
-
-        assert_eq!(archetype.components().count(), 1);
-        assert!(entity.contains::<EmptyComponent>());
-    }
-
-    #[test]
-    fn test_remove_in_pool() {
-        #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
-        struct BespokeLabel;
-
-        let mut app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
-            Pool::new(BespokeLabel, 4)
-                .effect(LowPassNode::default())
-                .spawn(&mut commands);
-
             commands.spawn((
-                BespokeLabel,
                 SamplePlayer::new(server.load("sine_440hz_1ms.wav")),
                 EmptyComponent,
-                PlaybackSettings::REMOVE,
+                PlaybackSettings {
+                    on_complete: OnComplete::Remove,
+                    ..Default::default()
+                },
+                sample_effects![LowPassNode::default()],
             ));
         });
 
@@ -720,7 +826,51 @@ mod test {
         // Once removed, we'll verify that _all_ audio-related components are removed.
         let world = app.world_mut();
         let mut q = world.query_filtered::<EntityRef, With<EmptyComponent>>();
-        let entity = q.single(world);
+        let entity = q.single(world).unwrap();
+
+        let archetype = entity.archetype();
+
+        assert_eq!(archetype.components().count(), 1);
+        assert!(entity.contains::<EmptyComponent>());
+    }
+
+    #[test]
+    fn test_remove_in_pool() {
+        let mut app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
+            commands.spawn((
+                SamplerPool(TestPool),
+                sample_effects![LowPassNode::default()],
+            ));
+
+            commands.spawn((
+                TestPool,
+                SamplePlayer::new(server.load("sine_440hz_1ms.wav")),
+                EmptyComponent,
+                PlaybackSettings {
+                    on_complete: OnComplete::Remove,
+                    ..Default::default()
+                },
+            ));
+        });
+
+        // Then wait until the sample player is removed.
+        loop {
+            let players = run(
+                &mut app,
+                |q: Query<Entity, (With<SamplePlayer>, With<EmptyComponent>)>| q.iter().len(),
+            );
+
+            if players == 0 {
+                break;
+            }
+
+            app.update();
+        }
+
+        // Once removed, we'll verify that _all_ audio-related components are removed.
+        let world = app.world_mut();
+        let mut q = world.query_filtered::<EntityRef, With<EmptyComponent>>();
+        let entity = q.single(world).unwrap();
 
         let archetype = entity.archetype();
 
