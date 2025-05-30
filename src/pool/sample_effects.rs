@@ -20,7 +20,7 @@ pub struct EffectOf(pub Entity);
 ///
 /// ## Dynamic pools
 ///
-/// When applied to a [`SamplePlayer`][crate::prelude::SamplePlayer] without an explicit pool asignment,
+/// When applied to a [`SamplePlayer`][crate::prelude::SamplePlayer] without an explicit pool assignment,
 /// a pool is dynamically created according to the shape of the effects.
 /// ```
 /// # use bevy::prelude::*;

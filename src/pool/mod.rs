@@ -283,7 +283,7 @@ struct PoolSamplers(Vec<Entity>);
 #[derive(Component, Clone)]
 struct SamplerStateWrapper(SamplerState);
 
-/// A sampler assignment relatinoship.
+/// A sampler assignment relationships.
 ///
 /// This resides in the [`SamplerNode`] entity, pointing to the
 /// [`SamplePlayer`] entity it has been allocated for.
@@ -417,7 +417,7 @@ fn retrieve_state(
     });
 }
 
-/// A kind of specialization of [`ParamFollower`] for
+/// A kind of specialization of [`FollowerOf`][crate::node::follower::FollowerOf] for
 /// sampler nodes.
 fn watch_sample_players(
     mut q: Query<(&mut SamplerNode, &SamplerOf)>,

@@ -88,7 +88,7 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// connected to the input of the low-pass node.
 ///
 /// When you apply effects to a sample player, the node components are added using the
-/// [`SampleEffects`][crate::prelude::SampleEffects] relatinoship. If you want to access
+/// [`SampleEffects`][crate::prelude::SampleEffects] relationships. If you want to access
 /// the effects in terms of the sample they're applied to, you can break up your
 /// queries and use the [`EffectsQuery`][crate::prelude::EffectsQuery] trait.
 ///

@@ -1,5 +1,5 @@
 // use bevy_seedling::{profiling::ProfilingBackend, VolumeNode};
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 // use firewheel::{channel_config::ChannelCount, FirewheelCtx};
 
 pub fn criterion_benchmark(_c: &mut Criterion) {
