@@ -12,7 +12,7 @@ received significant upgrades in functionality.
 - Sample speed control
   - The new `PitchRange` component will automatically
     randomize the starting pitch of your samples.
-- Clear separation between fixed and dynamic parameters
+- Clear separation between fixed and dynamic sample parameters
   - Fixed parameters exist on the `SamplePlayer`, while dynamic
     ones are kept in `PlaybackSettings`.
 
@@ -26,8 +26,8 @@ clearer API. `SamplePlayer` now includes `volume` and `repeat_mode` fields,
 taken from `PlaybackSettings`. In Firewheel, these parameters can only be set
 when providing the sample, so `bevy_seedling` enforces this with `SamplePlayer`'s
 immutability. This should make it clear to users that a sample's volume isn't dynamic,
-and that they should reach for other mechanisms
-(like routing to buses, adding effects, etc.).
+and that they should reach for other mechanisms (like routing to buses, adding effects, etc.)
+if they want dynamic volume.
 
 - Looping playback
 
@@ -97,7 +97,7 @@ commands.spawn(
 ```rs
 // 0.3
 fn get_playhead(players: Query<&SamplePlayer>) {
-    for mut player in &players {
+    for player in &players {
         if let Some(playhead) = player.playhead_frames() {
             // ...
         }
@@ -106,7 +106,7 @@ fn get_playhead(players: Query<&SamplePlayer>) {
 
 // 0.4
 fn get_playhead(players: Query<&Sampler>) {
-    for mut sampler in &players {
+    for sampler in &players {
         let playhead = sampler.playhead_frames();
         // ...
     }

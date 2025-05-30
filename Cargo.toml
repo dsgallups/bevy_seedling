@@ -39,7 +39,7 @@ bevy = { version = "0.16", default-features = false, features = [
   "std",
 ] }
 bevy_math = { version = "0.16", default-features = false, features = ["curve"] }
-firewheel = { version = "0.3.1", features = ["bevy", "spatial_basic_node"] }
+firewheel = { version = "0.4.0", features = ["bevy", "spatial_basic_node"] }
 symphonium = { version = "0.4", default-features = false, features = [
   "opt-simd",
   "fft-resampler",
@@ -50,10 +50,11 @@ smallvec = "1.13"
 bevy_seedling_macros = { path = "./seedling_macros", version = "0.4.0" }
 rand = { version = "0.8", default-features = false, features = [
   "small_rng",
+  "getrandom",
 ], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-firewheel = { version = "0.3.1", features = ["wasm-bindgen"] }
+firewheel = { version = "0.4.0", features = ["wasm-bindgen"] }
 
 [dev-dependencies]
 bevy = { version = "0.16", default-features = false, features = [
@@ -69,7 +70,6 @@ criterion = { version = "0.5", default-features = false, features = [
   "plotters",
   "cargo_bench_support",
 ] }
-rand = "0.8"
 
 [[bench]]
 name = "basic"
