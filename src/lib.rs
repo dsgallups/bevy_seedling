@@ -125,18 +125,57 @@
 //!
 //! ## Frequently asked questions
 //!
-//! ### How do I dynamically change player's volume?
-//! The first thing to note is that `PlaybackSettings` only defines 
-//! what should happen when the audio starts playing. That being said, 
-//! the volume defined in it would be referred to as the maximum volume for this player.
-//! However, the volume can be changed during the player's lifetime using a `VolumeNote`, for example:
-//! ```ignore
-//! sample_effects!(VolumeNode { volume: Volume::SILENT })
+//! ### How do I dynamically change a sample's volume?
+//!
+//! The [`SamplePlayer::volume`][prelude::SamplePlayer::volume] field
+//! cannot be changed after spawning or inserting the component. Nonetheless,
+//! there are a few ways to manage dynamic volume changes depending on your needs.
+//!
+//! If you need individual control over each sample's volume, you should add a
+//! [`VolumeNode`][prelude::VolumeNode] as an effect.
+//!
 //! ```
-//! These can then be queried and manipulated directly.
-//! Note that, like other nodes, 
-//! the node points to the sample player through `EffectOf(sample_player_entity)`.
-//! 
+//! # use bevy::prelude::*;
+//! # use bevy_seedling::prelude::*;
+//! # fn dynamic(mut commands: Commands, server: Res<AssetServer>) {
+//! commands.spawn((
+//!     SamplePlayer::new(server.load("my_sample.wav")),
+//!     sample_effects![VolumeNode { volume: Volume::Decibels(-6.0) }],
+//! ));
+//! # }
+//! ```
+//!
+//! To see how to query for effects, refer to the [`EffectsQuery`][prelude::EffectsQuery]
+//! trait.
+//!
+//! If you want to control groups of samples, such as all music, you'll
+//! probably want to spawn a [`SamplerPool`][prelude::SamplerPool] and
+//! update the pool's [`VolumeNode`][prelude::VolumeNode] rather than using
+//! a node for each sample.
+//!
+//! ```
+//! # use bevy::prelude::*;
+//! # use bevy_seedling::prelude::*;
+//! # fn dynamic(mut commands: Commands, server: Res<AssetServer>) {
+//! #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+//! struct MusicPool;
+//!
+//! commands.spawn(SamplerPool(MusicPool));
+//!
+//! commands.spawn((
+//!     MusicPool,
+//!     SamplePlayer::new(server.load("my_music.wav")),
+//! ));
+//!
+//! // Update the volume of all music at once
+//! fn update_music_volume(
+//!     mut music: Single<&mut VolumeNode, With<SamplerPool<MusicPool>>>,
+//! ) {
+//!     music.volume = Volume::Decibels(-6.0);
+//! }
+//! # }
+//! ```
+//!
 //! ### Why aren't my mp3 samples making any sound?
 //!
 //! `bevy_seedling` enables a few formats and encodings by default.
