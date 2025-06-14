@@ -37,30 +37,30 @@ fn main() {
                     let path = format!("notes/{sample}");
                     commands.spawn((LargePool, SamplePlayer::new(server.load(&path)), *priority));
                 }
-
                 let path = format!("notes/{}", samples[4].0);
-                commands
-                    .spawn((
-                        LargePool,
-                        SamplePlayer::new(server.load(&path)),
-                        samples[4].1,
-                    ))
-                    .observe(
-                        move |_trigger: Trigger<PlaybackCompletionEvent>,
-                              server: Res<AssetServer>,
-                              mut commands: Commands| {
-                            // In the smaller pool, with only three samplers, only the
-                            // samples with the highest priority will be played.
-                            for (sample, priority) in samples {
-                                let path = format!("notes/{sample}");
-                                commands.spawn((
-                                    SmallPool,
-                                    SamplePlayer::new(server.load(&path)),
-                                    priority,
-                                ));
-                            }
-                        },
-                    );
+                let mut last_sample = commands.spawn((
+                    LargePool,
+                    SamplePlayer::new(server.load(&path)),
+                    samples[4].1,
+                ));
+
+                // We'll play the next batch after this one's done.
+                last_sample.observe(
+                    move |_trigger: Trigger<PlaybackCompletionEvent>,
+                          server: Res<AssetServer>,
+                          mut commands: Commands| {
+                        // In the smaller pool, with only three samplers, only the
+                        // samples with the highest priority will be played.
+                        for (sample, priority) in samples {
+                            let path = format!("notes/{sample}");
+                            commands.spawn((
+                                SmallPool,
+                                SamplePlayer::new(server.load(&path)),
+                                priority,
+                            ));
+                        }
+                    },
+                );
             },
         )
         .run();
