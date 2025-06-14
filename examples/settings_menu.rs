@@ -1,37 +1,32 @@
+//! This example demonstrates a simple master, music, and sfx setup.
 //!
-//! Simple setup for a game: general, music and sfx channels settings
-//!
-//! This example set's up the following structure:
+//! In `initialize_audio`, we build the following graph:
 //!
 //! ```text
-//! ┌─────┐┌───┐┌───────┐
-//! │Music││Sfx││General│
-//! └┬────┘└┬──┘└┬──────┘
-//! ┌▽──────▽┐   │
-//! │Bus 1   │   │
-//! └┬───────┘   │
-//! ┌▽───────────▽┐
+//! ┌─────┐┌───┐┌───────────┐
+//! │Music││Sfx││DefaultPool│
+//! └┬────┘└┬──┘└┬──────────┘
+//! ┌▽──────▽────▽┐
 //! │MainBus      │
 //! └─────────────┘
 //! ```
 //!
-//! A "bus" is really just a node that we've given a label, usually a VolumeNode
-//! The default pool is already connected to the MainBus,
-//! and the Bus node will be automatically connected as well since we didn't specify any connections for it.
+//! The `Music` pool, `Sfx` pool, and `DefaultPool` are all routed to the `MainBus` node.
+//! Since each pool has a `VolumeNode`, we can control them all individually. And,
+//! since they're all routed to the `MainBus`, we can also set the volume of all three
+//! at once.
 //!
-//! A sampler pool is basically a collective sound source, so it doesn't really make any sense to route audio "through" it.
-//! We don't use relationships right now to represent connections because Bevy's implementation doesn't support M:N-style relationships.
-//! So for now, we have to stick to the imperative connect methods.
-//!
+//! You can see this in action in the knob observers: to set the master volume,
+//! we adjust the `MainBus` node, and to set the individual volumes, we adjust the
+//! pool nodes.
 
 #![allow(clippy::type_complexity)]
 use bevy::{
     app::App,
     ecs::{spawn::SpawnWith, system::IntoObserverSystem},
     prelude::*,
-    ui::Val::*,
 };
-use bevy_seedling::{pool::SamplerPool, prelude::*, sample::Sample};
+use bevy_seedling::prelude::*;
 
 #[derive(PoolLabel, PartialEq, Eq, Debug, Hash, Clone)]
 struct Sfx;
@@ -39,236 +34,230 @@ struct Sfx;
 #[derive(PoolLabel, PartialEq, Eq, Debug, Hash, Clone)]
 struct Music;
 
-#[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
-struct General;
-
-#[derive(Resource, Debug, Clone)]
-pub struct Sound {
-    pub general: f32,
-    pub music: f32,
-    pub sfx: f32,
-}
-
-const MIN_VOLUME: f32 = 0.0;
-const MAX_VOLUME: f32 = 3.0;
-const STEP: f32 = 0.1;
-
 fn main() {
     let mut app = App::new();
     app.add_plugins((DefaultPlugins, SeedlingPlugin::default()));
 
-    app.add_systems(Startup, spawn_pools).add_systems(
+    app.add_systems(Startup, initialize_audio).add_systems(
         Update,
         (
             update_music_volume_label,
-            update_general_volume_label,
+            update_master_volume_label,
             update_sfx_volume_label,
+            button_hover,
         ),
     );
 
     app.run();
 }
 
-fn spawn_pools(mut commands: Commands) {
-    commands.insert_resource(Sound {
-        general: 1.0,
-        music: 0.5,
-        sfx: 0.5,
-    });
+fn initialize_audio(mut master: Single<&mut VolumeNode, With<MainBus>>, mut commands: Commands) {
+    // Since the main bus already exists, we can just set the desired volume.
+    master.volume = Volume::UNITY_GAIN;
 
-    commands.spawn((General, VolumeNode::default()));
-    commands.spawn(SamplerPool(Music)).connect(General);
-    commands.spawn(SamplerPool(Sfx)).connect(General);
+    // For each new pool, we can provide non-default initial values for the volume.
+    commands.spawn((
+        SamplerPool(Music),
+        VolumeNode {
+            volume: Volume::Linear(0.5),
+        },
+    ));
+    commands.spawn((
+        SamplerPool(Sfx),
+        VolumeNode {
+            volume: Volume::Linear(0.5),
+        },
+    ));
 
     commands.spawn(Camera2d);
 
     commands.spawn((
-        BackgroundColor(Color::srgba_u8(170, 200, 250, 200)),
+        BackgroundColor(Color::srgb(0.23, 0.23, 0.23)),
         Node {
-            width: Percent(100.0),
-            height: Percent(100.0),
+            width: Val::Percent(80.0),
+            height: Val::Percent(80.0),
             position_type: PositionType::Absolute,
             flex_direction: FlexDirection::Column,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
-            row_gap: Vh(5.0),
+            row_gap: Val::Vh(8.0),
+            margin: UiRect::AUTO,
+            padding: UiRect::axes(Val::Px(50.0), Val::Px(50.0)),
+            border: UiRect::axes(Val::Px(2.0), Val::Px(2.0)),
             ..default()
         },
-        children![text("Settings".into()), core_grid()],
+        BorderColor(Color::srgb(0.9, 0.9, 0.9)),
+        BorderRadius::all(Val::Px(25.0)),
+        children![
+            text((
+                Text::new("Sound Settings"),
+                TextFont {
+                    font_size: 32.0,
+                    ..Default::default()
+                },
+            )),
+            core_grid(),
+            play_buttons(),
+        ],
     ));
-}
-
-pub fn music(handle: Handle<Sample>, vol: f32) -> impl Bundle {
-    (
-        Music,
-        SamplePlayer::new(handle).with_volume(Volume::Decibels(vol)),
-    )
-}
-
-pub fn sfx(handle: Handle<Sample>, vol: f32) -> impl Bundle {
-    (
-        Sfx,
-        SamplePlayer::new(handle).with_volume(Volume::Decibels(vol)),
-    )
 }
 
 fn play_music(
     _: Trigger<Pointer<Click>>,
+    playing: Query<Entity, (With<Music>, With<SamplePlayer>)>,
     mut commands: Commands,
-    sound: Res<Sound>,
     server: Res<AssetServer>,
 ) {
+    // We'll only play music if it's not already playing.
+    if playing.iter().len() > 0 {
+        return;
+    }
+
     let source = server.load("selfless_courage.ogg");
-    let vol = sound.general * sound.music;
-    commands.spawn(music(source, vol));
+    commands.spawn((
+        // Including the `Music` marker queues this sample in the `Music` pool
+        Music,
+        SamplePlayer::new(source).with_volume(Volume::Decibels(-6.0)),
+    ));
 }
 
-fn play_sfx(
-    _: Trigger<Pointer<Click>>,
-    mut commands: Commands,
-    sound: Res<Sound>,
-    server: Res<AssetServer>,
-) {
+fn play_sfx(_: Trigger<Pointer<Click>>, mut commands: Commands, server: Res<AssetServer>) {
     let source = server.load("caw.ogg");
-    let vol = sound.general * sound.sfx;
-    commands.spawn(sfx(source, vol));
+    // Similarly, we queue this sample in the `Sfx` pool
+    commands.spawn((Sfx, SamplePlayer::new(source)));
 }
 
-// ============================ CONTROL KNOB OBSERVERS ============================
+//  ============================ Control Knob Observers ============================ //
 
-// GENERAL
-fn lower_general(
-    _: Trigger<Pointer<Click>>,
-    mut sound: ResMut<Sound>,
-    mut general: Single<&mut VolumeNode, With<General>>,
-) {
-    let new_volume = (sound.general - STEP).max(MIN_VOLUME);
-    sound.general = new_volume;
-    general.volume = Volume::Linear(new_volume);
+const MIN_VOLUME: f32 = 0.0;
+const MAX_VOLUME: f32 = 3.0;
+const STEP: f32 = 0.1;
+
+fn increment_volume(volume: Volume) -> Volume {
+    Volume::Linear((volume.linear() + STEP).min(MAX_VOLUME))
 }
 
-fn raise_general(
-    _: Trigger<Pointer<Click>>,
-    mut sound: ResMut<Sound>,
-    mut general: Single<&mut VolumeNode, With<General>>,
-) {
-    let new_volume = (sound.general + STEP).min(MAX_VOLUME);
-    sound.general = new_volume;
-    general.volume = Volume::Linear(new_volume);
+fn decrement_volume(volume: Volume) -> Volume {
+    Volume::Linear((volume.linear() - STEP).max(MIN_VOLUME))
 }
 
-fn update_general_volume_label(
-    mut label: Single<&mut Text, With<GeneralVolumeLabel>>,
-    sound: Res<Sound>,
+// Master
+fn lower_master(_: Trigger<Pointer<Click>>, mut master: Single<&mut VolumeNode, With<MainBus>>) {
+    master.volume = decrement_volume(master.volume);
+}
+
+fn raise_master(_: Trigger<Pointer<Click>>, mut master: Single<&mut VolumeNode, With<MainBus>>) {
+    master.volume = increment_volume(master.volume);
+}
+
+fn update_master_volume_label(
+    mut label: Single<&mut Text, With<MasterVolumeLabel>>,
+    master: Single<&VolumeNode, (With<MainBus>, Changed<VolumeNode>)>,
 ) {
-    let percent = (sound.general * 100.0).round();
+    let percent = (master.volume.linear() * 100.0).round();
     let text = format!("{percent}%");
     label.0 = text;
 }
 
-// MUSIC
+// Music
 fn lower_music(
     _: Trigger<Pointer<Click>>,
-    mut sound: ResMut<Sound>,
-    mut music: Single<&mut VolumeNode, (With<SamplerPool<Music>>, Without<SamplerPool<Sfx>>)>,
+    mut music: Single<&mut VolumeNode, With<SamplerPool<Music>>>,
 ) {
-    let new_volume = (sound.music - STEP).max(MIN_VOLUME);
-    sound.music = new_volume;
-    music.volume = Volume::Linear(new_volume * sound.general);
+    music.volume = decrement_volume(music.volume);
 }
 
 fn raise_music(
     _: Trigger<Pointer<Click>>,
-    mut sound: ResMut<Sound>,
-    mut music: Single<&mut VolumeNode, (With<SamplerPool<Music>>, Without<SamplerPool<Sfx>>)>,
+    mut music: Single<&mut VolumeNode, With<SamplerPool<Music>>>,
 ) {
-    let new_volume = (sound.music + STEP).min(MAX_VOLUME);
-    sound.music = new_volume;
-    music.volume = Volume::Linear(new_volume * sound.general);
+    music.volume = increment_volume(music.volume);
 }
 
 fn update_music_volume_label(
     mut label: Single<&mut Text, With<MusicVolumeLabel>>,
-    sound: Res<Sound>,
+    music: Single<&VolumeNode, (With<SamplerPool<Music>>, Changed<VolumeNode>)>,
 ) {
-    let percent = (sound.music * 100.0).round();
+    let percent = (music.volume.linear() * 100.0).round();
     let text = format!("{percent}%");
     label.0 = text;
 }
 
 // SFX
-fn lower_sfx(
-    _: Trigger<Pointer<Click>>,
-    mut sound: ResMut<Sound>,
-    mut sfx: Single<&mut VolumeNode, (With<SamplerPool<Sfx>>, Without<SamplerPool<Music>>)>,
-) {
-    let new_volume = (sound.sfx - STEP).max(MIN_VOLUME);
-    sound.sfx = new_volume;
-    sfx.volume = Volume::Linear(new_volume * sound.general);
+fn lower_sfx(_: Trigger<Pointer<Click>>, mut sfx: Single<&mut VolumeNode, With<SamplerPool<Sfx>>>) {
+    sfx.volume = decrement_volume(sfx.volume);
 }
 
-fn raise_sfx(
-    _: Trigger<Pointer<Click>>,
-    mut sound: ResMut<Sound>,
-    mut sfx: Single<&mut VolumeNode, (With<SamplerPool<Sfx>>, Without<SamplerPool<Music>>)>,
-) {
-    let new_volume = (sound.sfx + STEP).min(MAX_VOLUME);
-    sound.sfx = new_volume;
-    sfx.volume = Volume::Linear(new_volume * sound.general);
+fn raise_sfx(_: Trigger<Pointer<Click>>, mut sfx: Single<&mut VolumeNode, With<SamplerPool<Sfx>>>) {
+    sfx.volume = increment_volume(sfx.volume);
 }
 
-fn update_sfx_volume_label(mut label: Single<&mut Text, With<SfxVolumeLabel>>, sound: Res<Sound>) {
-    let percent = (sound.sfx * 100.0).round();
+fn update_sfx_volume_label(
+    mut label: Single<&mut Text, With<SfxVolumeLabel>>,
+    sfx: Single<&VolumeNode, (With<SamplerPool<Sfx>>, Changed<VolumeNode>)>,
+) {
+    let percent = (sfx.volume.linear() * 100.0).round();
     let text = format!("{percent}%");
     label.0 = text;
 }
 
-// ============================ UI STUFF, NEVERMIND THIS PILE OF CODE ============================
+//  ============================ UI Code ============================ //
 
 fn core_grid() -> impl Bundle {
     (
         Name::new("Sound Grid"),
         Node {
-            row_gap: Px(10.0),
-            column_gap: Px(30.0),
+            row_gap: Val::Px(10.0),
+            column_gap: Val::Px(30.0),
             display: Display::Grid,
-            grid_template_columns: RepeatedGridTrack::px(2, 400.0),
+            width: Val::Percent(100.0),
+            grid_template_columns: RepeatedGridTrack::percent(2, 50.0),
             ..default()
         },
         children![
-            text("General".into()),
-            general_volume(),
-            text("Music".into()),
+            text(Text::new("Master")),
+            master_volume(),
+            text(Text::new("Music")),
             music_volume(),
-            text("Sfx".into()),
+            text(Text::new("Sfx")),
             sfx_volume(),
-            btn("Play Music".into(), play_music),
-            btn("Play Sfx".into(), play_sfx),
         ],
     )
 }
-fn general_volume() -> impl Bundle {
+
+fn play_buttons() -> impl Bundle {
+    (
+        Node {
+            justify_content: JustifyContent::SpaceAround,
+            width: Val::Percent(100.0),
+            ..Default::default()
+        },
+        children![btn("Play Music", play_music), btn("Play Sfx", play_sfx),],
+    )
+}
+
+fn master_volume() -> impl Bundle {
     (
         knobs_container(),
         children![
-            btn("-".into(), lower_general),
-            knob_label(GeneralVolumeLabel),
-            btn("+".into(), raise_general),
+            btn("-", lower_master),
+            knob_label(MasterVolumeLabel),
+            btn("+", raise_master),
         ],
     )
 }
 
 #[derive(Component, Reflect)]
 #[reflect(Component)]
-struct GeneralVolumeLabel;
+struct MasterVolumeLabel;
 
 fn music_volume() -> impl Bundle {
     (
         knobs_container(),
         children![
-            btn("-".into(), lower_music),
+            btn("-", lower_music),
             knob_label(MusicVolumeLabel),
-            btn("+".into(), raise_music),
+            btn("+", raise_music),
         ],
     )
 }
@@ -281,9 +270,9 @@ fn sfx_volume() -> impl Bundle {
     (
         knobs_container(),
         children![
-            btn("-".into(), lower_sfx),
+            btn("-", lower_sfx),
             knob_label(SfxVolumeLabel),
-            btn("+".into(), raise_sfx),
+            btn("+", raise_sfx),
         ],
     )
 }
@@ -292,13 +281,14 @@ fn sfx_volume() -> impl Bundle {
 #[reflect(Component)]
 struct SfxVolumeLabel;
 
-pub fn btn<E, B, M, I>(t: String, action: I) -> impl Bundle
+pub fn btn<E, B, M, I>(t: impl Into<String>, action: I) -> impl Bundle
 where
     E: Event,
     B: Bundle,
     I: IntoObserverSystem<E, B, M>,
 {
     let action = IntoObserverSystem::into_system(action);
+    let t: String = t.into();
 
     (
         Name::new("Button"),
@@ -308,18 +298,24 @@ where
                 .spawn((
                     Button,
                     BorderColor(Color::WHITE),
-                    children![Name::new("Button text"), text(t)],
+                    children![Name::new("Button text"), text(Text(t))],
                 ))
                 .observe(action);
         })),
     )
 }
 
-pub fn text(t: String) -> impl Bundle {
+pub fn text(text: impl Bundle) -> impl Bundle {
     (
-        BackgroundColor(Color::WHITE),
-        Text(t),
-        TextColor(Color::BLACK),
+        Node {
+            padding: UiRect::axes(Val::Px(10.0), Val::Px(10.0)),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..Default::default()
+        },
+        BackgroundColor(Color::srgb(0.9, 0.9, 0.9)),
+        BorderRadius::all(Val::Percent(10.0)),
+        children![(text, TextColor(Color::srgb(0.1, 0.1, 0.1)))],
     )
 }
 
@@ -327,7 +323,7 @@ fn knobs_container() -> impl Bundle {
     Node {
         justify_self: JustifySelf::Center,
         align_content: AlignContent::SpaceEvenly,
-        min_width: Px(100.0),
+        min_width: Val::Px(100.0),
         ..Default::default()
     }
 }
@@ -335,10 +331,47 @@ fn knobs_container() -> impl Bundle {
 fn knob_label(label: impl Component) -> impl Bundle {
     (
         Node {
-            padding: UiRect::horizontal(Px(10.0)),
+            padding: UiRect::horizontal(Val::Px(10.0)),
             justify_content: JustifyContent::Center,
             ..Default::default()
         },
-        children![(text("".into()), label)],
+        children![text((
+            Text::new(""),
+            Node {
+                min_width: Val::Px(75.0),
+                ..Default::default()
+            },
+            TextLayout {
+                justify: JustifyText::Center,
+                ..Default::default()
+            },
+            label
+        ))],
     )
+}
+
+const NORMAL_BUTTON: Color = Color::srgb(0.9, 0.9, 0.9);
+const HOVERED_BUTTON: Color = Color::srgb(0.7, 0.7, 0.7);
+
+fn button_hover(
+    interaction_query: Query<(&Interaction, &Children), (Changed<Interaction>, With<Button>)>,
+    mut text: Query<&mut BackgroundColor>,
+) {
+    for (interaction, children) in &interaction_query {
+        let Some(mut color) = children.get(1).and_then(|c| text.get_mut(*c).ok()) else {
+            continue;
+        };
+
+        match *interaction {
+            Interaction::Pressed => {
+                *color = NORMAL_BUTTON.into();
+            }
+            Interaction::Hovered => {
+                *color = HOVERED_BUTTON.into();
+            }
+            Interaction::None => {
+                *color = NORMAL_BUTTON.into();
+            }
+        }
+    }
 }
