@@ -60,11 +60,20 @@ firewheel = { version = "0.4.0", features = ["wasm-bindgen"] }
 bevy = { version = "0.16", default-features = false, features = [
   "bevy_debug_stepping",
   "bevy_asset",
-  "bevy_color",
   "bevy_state",
   "multi_threaded",
   "sysinfo_plugin",
   "std",
+  # for examples with ui
+  "bevy_text",
+  "default_font",
+  "bevy_ui",
+  "bevy_picking",
+  "bevy_ui_picking_backend",
+  "bevy_window",
+  "bevy_render",
+  "wayland",
+  "x11",
 ] }
 criterion = { version = "0.5", default-features = false, features = [
   "plotters",
