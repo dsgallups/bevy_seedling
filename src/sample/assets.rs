@@ -15,6 +15,11 @@ use std::sync::Arc;
 pub struct Sample(ArcGc<dyn SampleResource>);
 
 impl Sample {
+    /// Create a new `Sample` from a `SampleResource` loaded into memory.
+    pub fn new<S: SampleResource>(sample: S) -> Self {
+        Self(ArcGc::new_unsized(|| Arc::new(sample) as _))
+    }
+
     /// Share the inner value.
     pub fn get(&self) -> ArcGc<dyn SampleResource> {
         self.0.clone()
