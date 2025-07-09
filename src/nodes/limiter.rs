@@ -8,9 +8,7 @@ use firewheel::{
     SilenceMask, Volume,
     channel_config::{ChannelConfig, NonZeroChannelCount},
     diff::{Diff, Patch},
-    dsp::filter::smoothing_filter::{
-        DEFAULT_SETTLE_EPSILON, SmoothingFilter, SmoothingFilterCoeff,
-    },
+    dsp::filter::smoothing_filter::{SmoothingFilter, SmoothingFilterCoeff},
     event::NodeEventList,
     node::{
         AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, ProcBuffers,
@@ -209,8 +207,6 @@ struct Limiter {
     index: usize,
 }
 
-const DEFAULT_MAX_BUFFER_LENGTH: NonZeroU32 = NonZeroU32::new(1024).unwrap();
-
 impl AudioNode for LimiterNode {
     type Configuration = LimiterConfig;
 
@@ -226,16 +222,16 @@ impl AudioNode for LimiterNode {
     fn construct_processor(
         &self,
         config: &Self::Configuration,
-        _cx: ConstructProcessorContext,
+        cx: ConstructProcessorContext,
     ) -> impl AudioNodeProcessor {
         Limiter::new(
-            NonZeroU32::new(44100).unwrap(),
+            cx.stream_info.sample_rate,
             config.lookahead.unwrap_or(self.attack),
             self.attack,
             self.release,
             config.headroom,
             config.channels.get().get(),
-            DEFAULT_MAX_BUFFER_LENGTH,
+            cx.stream_info.max_block_frames,
         )
     }
 }
