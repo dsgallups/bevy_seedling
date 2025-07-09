@@ -20,24 +20,16 @@ use firewheel::{
 
 /// The configuration for a [`SmoothedParam`]
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct AsymmetricalSmootherConfig {
+struct AsymmetricalSmootherConfig {
     /// The amount of smoothing in seconds when the target is higher than the current value
-    ///
-    /// By default this is set to 5 milliseconds.
     pub smooth_secs_up: f32,
     /// The amount of smoothing in seconds when the target is lower than the current value
-    ///
-    /// By default this is set to 5 milliseconds.
     pub smooth_secs_down: f32,
-    /// The threshold at which the smoothing will complete
-    ///
-    /// By default this is set to `0.00001`.
-    pub settle_epsilon: f32,
 }
 
 /// A helper struct to smooth an f32 parameter, allowing different rates for up and down.
 #[derive(Debug, Clone)]
-pub struct AsymmetricalSmoothedParam {
+struct AsymmetricalSmoothedParam {
     target_value: f32,
     target_times_a_up: f32,
     target_times_a_down: f32,
@@ -46,7 +38,6 @@ pub struct AsymmetricalSmoothedParam {
     coeff_down: SmoothingFilterCoeff,
     smooth_secs_up: f32,
     smooth_secs_down: f32,
-    settle_epsilon: f32,
 }
 
 impl AsymmetricalSmoothedParam {
@@ -54,7 +45,6 @@ impl AsymmetricalSmoothedParam {
     pub fn new(value: f32, config: AsymmetricalSmootherConfig, sample_rate: NonZeroU32) -> Self {
         assert!(config.smooth_secs_up > 0.0);
         assert!(config.smooth_secs_down > 0.0);
-        assert!(config.settle_epsilon > 0.0);
 
         let coeff_up = SmoothingFilterCoeff::new(sample_rate, config.smooth_secs_up);
         let coeff_down = SmoothingFilterCoeff::new(sample_rate, config.smooth_secs_down);
@@ -68,7 +58,6 @@ impl AsymmetricalSmoothedParam {
             coeff_down,
             smooth_secs_up: config.smooth_secs_up,
             smooth_secs_down: config.smooth_secs_down,
-            settle_epsilon: config.settle_epsilon,
         }
     }
 
@@ -84,23 +73,6 @@ impl AsymmetricalSmoothedParam {
         self.target_times_a_down = value * self.coeff_down.a0;
     }
 
-    /// Settle the filter if its state is close enough to the target value.
-    ///
-    /// Returns `true` if this filter is settled, `false` if not.
-    pub fn settle(&mut self) -> bool {
-        self.filter.settle(self.target_value, self.settle_epsilon)
-    }
-
-    /// Whether the value is still interpolating towards the target value.
-    pub fn is_smoothing(&self) -> bool {
-        !self.filter.has_settled(self.target_value)
-    }
-
-    /// Reset the smoother.
-    pub fn reset(&mut self) {
-        self.filter = SmoothingFilter::new(self.target_value);
-    }
-
     /// Return the next smoothed value.
     #[inline(always)]
     pub fn next_smoothed(&mut self) -> f32 {
@@ -110,23 +82,6 @@ impl AsymmetricalSmoothedParam {
         } else {
             self.filter
                 .process_sample_a(self.target_times_a_down, self.coeff_down.b1)
-        }
-    }
-
-    /// Fill the given buffer with the smoothed values.
-    pub fn process_into_buffer(&mut self, buffer: &mut [f32]) {
-        if self.is_smoothing() {
-            let coeff = if self.filter.z1 < self.target_value() {
-                self.coeff_up
-            } else {
-                self.coeff_down
-            };
-            self.filter
-                .process_into_buffer(buffer, self.target_value, coeff);
-
-            self.filter.settle(self.target_value, self.settle_epsilon);
-        } else {
-            buffer.fill(self.target_value);
         }
     }
 
@@ -245,8 +200,6 @@ impl Default for LimiterNode {
 struct Limiter {
     lookahead: f32,
     headroom: Volume,
-    attack: f32,
-    release: f32,
     sample_rate: NonZeroU32,
     reducer: IncrementalMax,
     follower: AsymmetricalSmoothedParam,
@@ -310,7 +263,6 @@ impl Limiter {
             AsymmetricalSmootherConfig {
                 smooth_secs_up: attack,
                 smooth_secs_down: release,
-                settle_epsilon: DEFAULT_SETTLE_EPSILON,
             },
             sample_rate,
         );
@@ -329,8 +281,6 @@ impl Limiter {
             // Static
             lookahead,
             headroom,
-            attack,
-            release,
             follower,
         }
     }
@@ -397,15 +347,7 @@ impl AudioNodeProcessor for Limiter {
 
         self.reducer = IncrementalMax::new(reducer_buf_size(stream_info.sample_rate, self.lookahead));
 
-        self.follower = AsymmetricalSmoothedParam::new(
-            1.,
-            AsymmetricalSmootherConfig {
-                smooth_secs_up: self.attack,
-                smooth_secs_down: self.release,
-                settle_epsilon: DEFAULT_SETTLE_EPSILON,
-            },
-            stream_info.sample_rate,
-        );
+        self.follower.update_sample_rate(stream_info.sample_rate);
 
         let new_buffer_size = self.reducer.len() * self.num_channels as usize;
 
