@@ -314,7 +314,7 @@ impl AudioNodeProcessor for Limiter {
 
             self.follower.set_value(max * self.headroom.amp());
 
-            let limit = self.follower.next_smoothed();
+            let limit = self.follower.next_smoothed().max(1.);
 
             for ((current_chan, out_chan), input_chan) in self
                 .buffer
