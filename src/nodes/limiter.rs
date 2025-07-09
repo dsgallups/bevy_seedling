@@ -240,9 +240,9 @@ impl AudioNode for LimiterNode {
     }
 }
 
-    fn reducer_buf_size(sample_rate: NonZeroU32, lookahead: f32) -> usize {
-        (sample_rate.get() as f32 * lookahead).round().max(1.) as usize
-    }
+fn reducer_buf_size(sample_rate: NonZeroU32, lookahead: f32) -> usize {
+    (sample_rate.get() as f32 * lookahead).round().max(1.) as usize
+}
 
 impl Limiter {
     fn advance(&mut self) {
@@ -345,7 +345,8 @@ impl AudioNodeProcessor for Limiter {
         self.num_channels = stream_info.num_stream_in_channels;
         self.max_buffer_length = stream_info.max_block_frames;
 
-        self.reducer = IncrementalMax::new(reducer_buf_size(stream_info.sample_rate, self.lookahead));
+        self.reducer =
+            IncrementalMax::new(reducer_buf_size(stream_info.sample_rate, self.lookahead));
 
         self.follower.update_sample_rate(stream_info.sample_rate);
 
