@@ -119,6 +119,8 @@ impl IncrementalMax {
 
     /// The length of the internal buffer.
     #[inline]
+    // `is_empty` doesn't make sense for this type, the length should always be >0
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.length
     }
