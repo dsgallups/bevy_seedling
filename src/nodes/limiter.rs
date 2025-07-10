@@ -16,7 +16,7 @@ use firewheel::{
     },
 };
 
-/// The configuration for a [`SmoothedParam`]
+/// The configuration for an [`AsymmetricalSmoothedParam`]
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct AsymmetricalSmootherConfig {
     /// The amount of smoothing in seconds when the target is higher than the current value
@@ -69,6 +69,18 @@ impl AsymmetricalSmoothedParam {
         self.target_value = value;
         self.target_times_a_up = value * self.coeff_up.a0;
         self.target_times_a_down = value * self.coeff_down.a0;
+    }
+
+    pub fn set_smooth_secs_up(&mut self, sample_rate: NonZeroU32, smooth_secs_up: f32) {
+        let coeff_up = SmoothingFilterCoeff::new(sample_rate, smooth_secs_up);
+        self.smooth_secs_up = smooth_secs_up;
+        self.coeff_up = coeff_up;
+    }
+
+    pub fn set_smooth_secs_down(&mut self, sample_rate: NonZeroU32, smooth_secs_down: f32) {
+        let coeff_down = SmoothingFilterCoeff::new(sample_rate, smooth_secs_down);
+        self.smooth_secs_down = smooth_secs_down;
+        self.coeff_down = coeff_down;
     }
 
     /// Return the next smoothed value.
@@ -219,6 +231,7 @@ impl AudioNode for LimiterNode {
                 num_inputs: config.channels.get(),
                 num_outputs: config.channels.get(),
             })
+            .uses_events(true)
     }
 
     fn construct_processor(
@@ -289,8 +302,17 @@ impl AudioNodeProcessor for Limiter {
         &mut self,
         buffers: ProcBuffers,
         proc_info: &ProcInfo,
-        _events: NodeEventList,
+        mut events: NodeEventList,
     ) -> ProcessStatus {
+        events.for_each_patch::<LimiterNode>(|patch| match patch {
+            LimiterNodePatch::Attack(atk) => {
+                self.follower.set_smooth_secs_up(self.sample_rate, atk);
+            }
+            LimiterNodePatch::Release(rel) => {
+                self.follower.set_smooth_secs_down(self.sample_rate, rel);
+            }
+        });
+
         if proc_info
             .in_silence_mask
             .all_channels_silent(buffers.inputs.len())
