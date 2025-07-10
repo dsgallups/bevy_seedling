@@ -81,7 +81,8 @@ fn main() {
                     *angle += time.delta_secs() * core::f32::consts::TAU / period;
 
                     let sin = angle.sin() * 0.5 + 0.5;
-                    node.volume = Volume::UNITY_GAIN + Volume::Linear(sin.powi(2)) * Volume::Decibels(10.);
+                    node.volume =
+                        Volume::UNITY_GAIN + Volume::Linear(sin.powi(2)) * Volume::Decibels(10.);
                 },
             ),
         )
