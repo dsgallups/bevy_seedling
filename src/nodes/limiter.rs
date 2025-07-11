@@ -262,8 +262,7 @@ impl AudioNode for LimiterNode {
             config
                 .channels
                 .get()
-                .get()
-                .min(cx.stream_info.num_stream_in_channels),
+                .get(),
             cx.stream_info.max_block_frames,
         )
     }
