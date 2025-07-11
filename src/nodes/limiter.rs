@@ -71,12 +71,14 @@ impl AsymmetricalSmoothedParam {
         self.target_times_a_down = value * self.coeff_down.a0;
     }
 
+    /// Set the smooth rate when the target value is higher than the current value.
     pub fn set_smooth_secs_up(&mut self, sample_rate: NonZeroU32, smooth_secs_up: f32) {
         let coeff_up = SmoothingFilterCoeff::new(sample_rate, smooth_secs_up);
         self.smooth_secs_up = smooth_secs_up;
         self.coeff_up = coeff_up;
     }
 
+    /// Set the smooth rate when the target value is lower than the current value.
     pub fn set_smooth_secs_down(&mut self, sample_rate: NonZeroU32, smooth_secs_down: f32) {
         let coeff_down = SmoothingFilterCoeff::new(sample_rate, smooth_secs_down);
         self.smooth_secs_down = smooth_secs_down;
@@ -86,13 +88,15 @@ impl AsymmetricalSmoothedParam {
     /// Return the next smoothed value.
     #[inline(always)]
     pub fn next_smoothed(&mut self) -> f32 {
-        if self.filter.z1 < self.target_value() {
-            self.filter
-                .process_sample_a(self.target_times_a_up, self.coeff_up.b1)
-        } else {
-            self.filter
-                .process_sample_a(self.target_times_a_down, self.coeff_down.b1)
-        }
+        // Branchless alternation between up and down.
+        let signum = (self.target_value() - self.filter.z1).signum();
+        let less_factor = signum.max(0.);
+        let more_factor = (-signum).max(0.);
+        let equal = 1. - (less_factor + more_factor);
+        let target_times_a =
+            less_factor * self.target_times_a_up + more_factor * self.target_times_a_down;
+        let coeff_b1 = less_factor * self.coeff_up.b1 + more_factor * self.coeff_down.b1 + equal;
+        self.filter.process_sample_a(target_times_a, coeff_b1)
     }
 
     /// Update the sample rate.
@@ -104,9 +108,9 @@ impl AsymmetricalSmoothedParam {
     }
 }
 
-/// Buffer.
+/// Buffer to incrementally calculate a maximum value of a buffer with the minimum number of comparisons.
 #[derive(Debug, Clone)]
-pub struct IncrementalMax {
+struct IncrementalMax {
     // First item is unused for convenience. Buffer length is rounded up to an even number.
     buffer: Box<[f32]>,
     length: usize,
@@ -155,23 +159,27 @@ impl IncrementalMax {
             self.buffer[i] = max;
         }
     }
-
-    /// Clear the buffer, resetting all values to 0.
-    pub fn clear(&mut self) {
-        self.buffer.fill(0.);
-    }
 }
 
 /// Configuration for a [`LimiterNode`].
 #[derive(Debug, Clone, Component)]
 pub struct LimiterConfig {
-    /// The limiter lookahead - how much latency will be introduced in order to ensure that the
-    /// limiter will reduce volum in time for high peaks to be reduced. By default, it will set
-    /// the lookahead to the same as the `attack` of the limiter.
+    /// The limiter lookahead.
+    ///
+    /// This is how much latency will be introduced in order to ensure that the
+    /// limiter will reduce volume in time for high peaks to be reduced.
+    ///
+    /// By default, it will set the lookahead to the same as the `attack` of the limiter.
     pub lookahead: Option<f32>,
-    /// How much extra headroom to add - the intended target volume will be unity gain minus this.
+    /// How much extra headroom to add.
+    ///
+    /// The intended target volume will be unity gain minus this.
+    ///
+    /// By default, no headroom is added.
     pub headroom: Volume,
     /// How many channels to take as input/return as output.
+    ///
+    /// By default, this is stereo.
     pub channels: NonZeroChannelCount,
 }
 
@@ -185,13 +193,19 @@ impl Default for LimiterConfig {
     }
 }
 
-/// A limiter node with lookahead. By default the lookahead will be set to `attack`, see [`LimiterConfig`] to see how to
+/// A limiter node with lookahead.
+///
+/// By default the lookahead will be set to `attack`, see [`LimiterConfig`] to see how to
 /// set lookahead to something else.
 #[derive(Diff, Patch, Debug, Clone, Component)]
 pub struct LimiterNode {
-    /// How long it takes to react to increases in volume, in seconds. By default, this is 0.05s.
+    /// How long it takes to react to increases in volume, in seconds.
+    ///
+    /// By default, this is 0.05s.
     pub attack: f32,
-    /// How long it takes to react to decreases in volume, in seconds. By default, this is 0.2s.
+    /// How long it takes to react to decreases in volume, in seconds.
+    ///
+    /// By default, this is 0.2s.
     pub release: f32,
 }
 
@@ -245,7 +259,11 @@ impl AudioNode for LimiterNode {
             self.attack,
             self.release,
             config.headroom,
-            config.channels.get().get(),
+            config
+                .channels
+                .get()
+                .get()
+                .min(cx.stream_info.num_stream_in_channels),
             cx.stream_info.max_block_frames,
         )
     }
