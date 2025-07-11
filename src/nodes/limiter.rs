@@ -92,10 +92,12 @@ impl AsymmetricalSmoothedParam {
         let signum = (self.target_value() - self.filter.z1).signum();
         let less_factor = signum.max(0.);
         let more_factor = (-signum).max(0.);
-        let equal = 1. - (less_factor + more_factor);
+
+        debug_assert!(less_factor == 1. || more_factor == 1.);
+
         let target_times_a =
             less_factor * self.target_times_a_up + more_factor * self.target_times_a_down;
-        let coeff_b1 = less_factor * self.coeff_up.b1 + more_factor * self.coeff_down.b1 + equal;
+        let coeff_b1 = less_factor * self.coeff_up.b1 + more_factor * self.coeff_down.b1;
         self.filter.process_sample_a(target_times_a, coeff_b1)
     }
 
@@ -259,10 +261,7 @@ impl AudioNode for LimiterNode {
             self.attack,
             self.release,
             config.headroom,
-            config
-                .channels
-                .get()
-                .get(),
+            config.channels.get().get(),
             cx.stream_info.max_block_frames,
         )
     }
