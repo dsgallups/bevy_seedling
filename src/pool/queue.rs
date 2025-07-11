@@ -170,6 +170,10 @@ pub(super) fn assign_work(
     }
 
     for (label, samplers, size, pool_shape, pool_effects) in pools {
+        // To suppress warnings when debug assertions are disabled, as `size` is only used in the debug-only `commands.queue` call below.
+        #[cfg(not(debug_assertions))]
+        let _size = size;
+
         let Some(mut queued_samples) = queued_samples.remove(&label.label) else {
             continue;
         };
