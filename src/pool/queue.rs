@@ -7,14 +7,13 @@ use crate::{
     node::{EffectId, follower::FollowerOf},
     pool::label::PoolLabelContainer,
     prelude::DefaultPool,
-    sample::{QueuedSample, Sample, SamplePlayer, SamplePriority, SampleQueueLifetime},
+    sample::{AudioSample, QueuedSample, SamplePlayer, SamplePriority, SampleQueueLifetime},
 };
-use bevy::{
-    ecs::{entity::EntityCloner, relationship::Relationship},
-    platform::collections::HashMap,
-    prelude::*,
-    time::Stopwatch,
-};
+use bevy_asset::prelude::*;
+use bevy_ecs::{entity::EntityCloner, prelude::*, relationship::Relationship};
+use bevy_log::prelude::*;
+use bevy_platform::collections::HashMap;
+use bevy_time::{Stopwatch, Time};
 use firewheel::nodes::sampler::{RepeatMode, SamplerConfig, SamplerNode};
 use std::ops::Deref;
 
@@ -49,12 +48,12 @@ pub(super) fn grow_pools(
         &SamplerConfig,
     )>,
     nodes: Query<Option<&SamplerOf>, With<PoolSamplerOf>>,
-    server: Res<AssetServer>,
+    assets: Res<Assets<AudioSample>>,
     mut commands: Commands,
 ) -> Result {
     let queued_samples: HashMap<_, usize> = queued_samples
         .iter()
-        .filter_map(|(player, label)| server.is_loaded(&player.sample).then_some(label))
+        .filter_map(|(player, label)| assets.get(&player.sample).map(|_| label))
         .fold(HashMap::new(), |mut acc, label| {
             *acc.entry(label.label).or_default() += 1;
             acc
@@ -150,7 +149,7 @@ pub(super) fn assign_work(
     >,
     active_samples: Query<(&SamplePlayer, &SamplePriority)>,
     mut effects: Query<&EffectId, With<EffectOf>>,
-    assets: Res<Assets<Sample>>,
+    assets: Res<Assets<AudioSample>>,
     mut commands: Commands,
 ) -> Result {
     let mut queued_samples: HashMap<_, Vec<_>> = queued_samples
@@ -215,7 +214,11 @@ pub(super) fn assign_work(
                 let (sampler_entity, mut params, state, _) =
                     nodes.get_mut(*inactive.next().unwrap())?;
 
-                params.set_sample(asset.get(), player.volume, player.repeat_mode);
+                params.sample = Some(asset.get());
+                params.volume = player.volume;
+                params.repeat_mode = player.repeat_mode;
+                // params.playback = sett
+
                 // commands
                 //     .entity(sample_entity)
                 //     .insert(crate::prelude::SampleState(state.0.clone()));
@@ -384,7 +387,9 @@ pub(super) fn assign_work(
 
             let (sampler_entity, mut params, state, _) = nodes.get_mut(sampler_entity)?;
 
-            params.set_sample(asset.get(), player.volume, player.repeat_mode);
+            params.sample = Some(asset.get());
+            params.volume = player.volume;
+            params.repeat_mode = player.repeat_mode;
             // commands
             //     .entity(sample_entity)
             //     .insert(crate::prelude::SampleState(state.0.clone()));
@@ -517,11 +522,11 @@ pub(super) struct SkipTimer(Stopwatch);
 
 pub(super) fn mark_skipped(
     samples: Query<(Entity, &SamplePlayer), (With<QueuedSample>, Without<SkipTimer>)>,
-    server: Res<AssetServer>,
+    assets: Res<Assets<AudioSample>>,
     mut commands: Commands,
 ) {
     for (sample, player) in &samples {
-        if server.is_loaded(&player.sample) {
+        if assets.get(&player.sample).is_some() {
             commands.entity(sample).insert(SkipTimer(Stopwatch::new()));
         }
     }
@@ -539,6 +544,8 @@ pub(super) fn tick_skipped(
 
     for (sample_entity, mut timer, lifetime) in &mut samples {
         if timer.0.tick(delta).elapsed() >= lifetime.0 {
+            debug!("skipping sample {:?} after {:?}", sample_entity, lifetime.0,);
+
             commands
                 .entity(sample_entity)
                 .trigger(PlaybackCompletionEvent);

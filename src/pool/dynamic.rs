@@ -33,7 +33,7 @@
 //! Dynamic pools are a convenient abstraction, but they may not be appropriate for all use-cases.
 //! They have three main drawbacks:
 //!
-//! 1. Dynamic pools cannot be routed anywhere.
+//! 1. Dynamic pools cannot have individual routing. They are all connected to the [`DynamicBus`].
 //! 2. The number of pools corresponds to the total permutations of effects your project uses,
 //!    which could grow fairly large. Silent sampler nodes shouldn't take much CPU time,
 //!    but many unused nodes could grow your memory usage by a few megabytes.
@@ -50,16 +50,16 @@
 
 use super::{DefaultPoolSize, PoolSize, SamplerPool, sample_effects::EffectOf};
 use crate::{
+    edge::Connect,
     node::EffectId,
     pool::{label::PoolLabelContainer, sample_effects::SampleEffects},
     sample::{QueuedSample, SamplePlayer},
 };
-use bevy::{
-    ecs::{component::ComponentId, entity::EntityCloner},
-    platform::collections::HashMap,
-    prelude::*,
-};
-use bevy_seedling_macros::PoolLabel;
+use bevy_app::prelude::*;
+use bevy_ecs::{component::ComponentId, entity::EntityCloner, prelude::*};
+use bevy_log::prelude::*;
+use bevy_platform::collections::HashMap;
+use bevy_seedling_macros::{NodeLabel, PoolLabel};
 
 pub(super) struct DynamicPlugin;
 
@@ -69,6 +69,11 @@ impl Plugin for DynamicPlugin {
             .add_systems(PostUpdate, update_dynamic_pools);
     }
 }
+
+/// The destination for all dynamic pools.
+#[derive(NodeLabel, Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+pub struct DynamicBus;
 
 /// A label reserved for dynamic pools.
 #[derive(PoolLabel, Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -90,15 +95,13 @@ fn update_dynamic_pools(
             Without<PoolLabelContainer>,
         ),
     >,
+    // TODO: make sure to migrate this to `If<Single<_>>` for 0.17
+    dynamic_bus: Single<Entity, With<DynamicBus>>,
     mut effects: Query<&EffectId>,
     mut registries: ResMut<Registries>,
     mut commands: Commands,
     dynamic_range: Res<DefaultPoolSize>,
 ) -> Result {
-    if *dynamic_range.0.end() == 0 {
-        return Ok(());
-    }
-
     for (sample, sample_effects) in queued_samples.iter() {
         let component_ids =
             match super::fetch_effect_ids(sample_effects, &mut effects.as_query_lens()) {
@@ -119,7 +122,8 @@ fn update_dynamic_pools(
 
                 let bus = commands
                     .spawn((SamplerPool(label), PoolSize(dynamic_range.0.clone())))
-                    .id();
+                    .connect(*dynamic_bus)
+                    .head();
 
                 let effects: Vec<_> = sample_effects.iter().collect();
                 commands.queue(move |world: &mut World| {

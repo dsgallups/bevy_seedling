@@ -4,15 +4,15 @@
 #![allow(missing_docs)]
 #![allow(clippy::module_inception)]
 
-use bevy::prelude::Component;
+use bevy_ecs::component::Component;
 use firewheel::{
     channel_config::{ChannelConfig, ChannelCount},
     core::node::ProcInfo,
     diff::{Diff, Patch},
-    event::NodeEventList,
+    event::ProcEvents,
     node::{
         AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, EmptyConfig,
-        ProcBuffers, ProcessStatus,
+        ProcBuffers, ProcExtra, ProcessStatus,
     },
 };
 
@@ -23,6 +23,7 @@ mod freeverb;
 
 /// A simple, relatively cheap stereo reverb.
 #[derive(Diff, Patch, Clone, Debug, Component)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct FreeverbNode {
     /// Set the size of the emulated room, expressed from 0 to 1.
     pub room_size: f32,
@@ -85,17 +86,17 @@ struct FreeverbProcessor {
 impl AudioNodeProcessor for FreeverbProcessor {
     fn process(
         &mut self,
-        ProcBuffers {
-            inputs, outputs, ..
-        }: ProcBuffers,
         proc_info: &ProcInfo,
-        mut events: NodeEventList,
+        ProcBuffers { inputs, outputs }: ProcBuffers,
+        events: &mut ProcEvents,
+        _: &mut ProcExtra,
     ) -> ProcessStatus {
         let mut changed = false;
-        events.for_each_patch::<FreeverbNode>(|p| {
+
+        for patch in events.drain_patches::<FreeverbNode>() {
             changed = true;
-            self.params.apply(p);
-        });
+            self.params.apply(patch);
+        }
 
         if changed {
             self.params.apply_params(&mut self.freeverb);

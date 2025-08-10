@@ -1,15 +1,7 @@
 //! This example demonstrates a simple master, music, and sfx setup.
 //!
-//! In `initialize_audio`, we build the following graph:
-//!
-//! ```text
-//! ┌─────┐┌───┐┌───────────┐
-//! │Music││Sfx││DefaultPool│
-//! └┬────┘└┬──┘└┬──────────┘
-//! ┌▽──────▽────▽┐
-//! │MainBus      │
-//! └─────────────┘
-//! ```
+//! With the default [`GraphConfiguration`], we have everything we need
+//! to create the typical audio settings menu.
 //!
 //! The `Music` pool, `Sfx` pool, and `DefaultPool` are all routed to the `MainBus` node.
 //! Since each pool has a `VolumeNode`, we can control them all individually. And,
@@ -26,48 +18,30 @@ use bevy::{
     ecs::{spawn::SpawnWith, system::IntoObserverSystem},
     prelude::*,
 };
-use bevy_seedling::prelude::*;
-
-#[derive(PoolLabel, PartialEq, Eq, Debug, Hash, Clone)]
-struct Sfx;
-
-#[derive(PoolLabel, PartialEq, Eq, Debug, Hash, Clone)]
-struct Music;
+use bevy_seedling::{
+    configuration::{MusicPool, SfxBus},
+    prelude::*,
+};
 
 fn main() {
     let mut app = App::new();
-    app.add_plugins((DefaultPlugins, SeedlingPlugin::default()));
-
-    app.add_systems(Startup, initialize_audio).add_systems(
-        Update,
-        (
-            update_music_volume_label,
-            update_master_volume_label,
-            update_sfx_volume_label,
-            button_hover,
-        ),
-    );
-
-    app.run();
+    app.add_plugins((DefaultPlugins, SeedlingPlugin::default()))
+        .add_systems(Startup, setup)
+        .add_systems(
+            Update,
+            (
+                update_music_volume_label,
+                update_master_volume_label,
+                update_sfx_volume_label,
+                button_hover,
+            ),
+        )
+        .run();
 }
 
-fn initialize_audio(mut master: Single<&mut VolumeNode, With<MainBus>>, mut commands: Commands) {
-    // Since the main bus already exists, we can just set the desired volume.
-    master.volume = Volume::UNITY_GAIN;
-
-    // For each new pool, we can provide non-default initial values for the volume.
-    commands.spawn((
-        SamplerPool(Music),
-        VolumeNode {
-            volume: Volume::Linear(0.5),
-        },
-    ));
-    commands.spawn((
-        SamplerPool(Sfx),
-        VolumeNode {
-            volume: Volume::Linear(0.5),
-        },
-    ));
+fn setup(mut master: Single<&mut VolumeNode, With<MainBus>>, mut commands: Commands) {
+    // Let's reduce the master volume a bit.
+    master.volume = CONVERTER.perceptual_to_volume(0.7);
 
     commands.spawn(Camera2d);
 
@@ -104,7 +78,7 @@ fn initialize_audio(mut master: Single<&mut VolumeNode, With<MainBus>>, mut comm
 
 fn play_music(
     _: Trigger<Pointer<Click>>,
-    playing: Query<Entity, (With<Music>, With<SamplePlayer>)>,
+    playing: Query<(), (With<MusicPool>, With<SamplePlayer>)>,
     mut commands: Commands,
     server: Res<AssetServer>,
 ) {
@@ -115,30 +89,38 @@ fn play_music(
 
     let source = server.load("selfless_courage.ogg");
     commands.spawn((
-        // Including the `Music` marker queues this sample in the `Music` pool
-        Music,
+        // Including the `MusicPool` marker queues this sample in the `MusicPool`.
+        MusicPool,
         SamplePlayer::new(source).with_volume(Volume::Decibels(-6.0)),
     ));
 }
 
 fn play_sfx(_: Trigger<Pointer<Click>>, mut commands: Commands, server: Res<AssetServer>) {
     let source = server.load("caw.ogg");
-    // Similarly, we queue this sample in the `Sfx` pool
-    commands.spawn((Sfx, SamplePlayer::new(source)));
+
+    // The default pool is routed to the `SfxBus`, so we don't
+    // need to include any special markers for sound effects.
+    commands.spawn(SamplePlayer::new(source));
 }
 
 //  ============================ Control Knob Observers ============================ //
 
+const CONVERTER: PerceptualVolume = PerceptualVolume::new();
+
 const MIN_VOLUME: f32 = 0.0;
-const MAX_VOLUME: f32 = 3.0;
+const MAX_VOLUME: f32 = 2.0;
 const STEP: f32 = 0.1;
 
 fn increment_volume(volume: Volume) -> Volume {
-    Volume::Linear((volume.linear() + STEP).min(MAX_VOLUME))
+    let perceptual = CONVERTER.volume_to_perceptual(volume);
+    let new_perceptual = (perceptual + STEP).min(MAX_VOLUME);
+    CONVERTER.perceptual_to_volume(new_perceptual)
 }
 
 fn decrement_volume(volume: Volume) -> Volume {
-    Volume::Linear((volume.linear() - STEP).max(MIN_VOLUME))
+    let perceptual = CONVERTER.volume_to_perceptual(volume);
+    let new_perceptual = (perceptual - STEP).max(MIN_VOLUME);
+    CONVERTER.perceptual_to_volume(new_perceptual)
 }
 
 // Master
@@ -154,50 +136,50 @@ fn update_master_volume_label(
     mut label: Single<&mut Text, With<MasterVolumeLabel>>,
     master: Single<&VolumeNode, (With<MainBus>, Changed<VolumeNode>)>,
 ) {
-    let percent = (master.volume.linear() * 100.0).round();
-    let text = format!("{percent}%");
+    let percent = CONVERTER.volume_to_perceptual(master.volume) * 100.0;
+    let text = format!("{}%", percent.round());
     label.0 = text;
 }
 
 // Music
 fn lower_music(
     _: Trigger<Pointer<Click>>,
-    mut music: Single<&mut VolumeNode, With<SamplerPool<Music>>>,
+    mut music: Single<&mut VolumeNode, With<SamplerPool<MusicPool>>>,
 ) {
     music.volume = decrement_volume(music.volume);
 }
 
 fn raise_music(
     _: Trigger<Pointer<Click>>,
-    mut music: Single<&mut VolumeNode, With<SamplerPool<Music>>>,
+    mut music: Single<&mut VolumeNode, With<SamplerPool<MusicPool>>>,
 ) {
     music.volume = increment_volume(music.volume);
 }
 
 fn update_music_volume_label(
     mut label: Single<&mut Text, With<MusicVolumeLabel>>,
-    music: Single<&VolumeNode, (With<SamplerPool<Music>>, Changed<VolumeNode>)>,
+    music: Single<&VolumeNode, (With<SamplerPool<MusicPool>>, Changed<VolumeNode>)>,
 ) {
-    let percent = (music.volume.linear() * 100.0).round();
-    let text = format!("{percent}%");
+    let percent = CONVERTER.volume_to_perceptual(music.volume) * 100.0;
+    let text = format!("{}%", percent.round());
     label.0 = text;
 }
 
 // SFX
-fn lower_sfx(_: Trigger<Pointer<Click>>, mut sfx: Single<&mut VolumeNode, With<SamplerPool<Sfx>>>) {
+fn lower_sfx(_: Trigger<Pointer<Click>>, mut sfx: Single<&mut VolumeNode, With<SfxBus>>) {
     sfx.volume = decrement_volume(sfx.volume);
 }
 
-fn raise_sfx(_: Trigger<Pointer<Click>>, mut sfx: Single<&mut VolumeNode, With<SamplerPool<Sfx>>>) {
+fn raise_sfx(_: Trigger<Pointer<Click>>, mut sfx: Single<&mut VolumeNode, With<SfxBus>>) {
     sfx.volume = increment_volume(sfx.volume);
 }
 
 fn update_sfx_volume_label(
     mut label: Single<&mut Text, With<SfxVolumeLabel>>,
-    sfx: Single<&VolumeNode, (With<SamplerPool<Sfx>>, Changed<VolumeNode>)>,
+    sfx: Single<&VolumeNode, (With<SfxBus>, Changed<VolumeNode>)>,
 ) {
-    let percent = (sfx.volume.linear() * 100.0).round();
-    let text = format!("{percent}%");
+    let percent = CONVERTER.volume_to_perceptual(sfx.volume) * 100.0;
+    let text = format!("{}%", percent.round());
     label.0 = text;
 }
 

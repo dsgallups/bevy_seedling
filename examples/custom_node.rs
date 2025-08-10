@@ -1,25 +1,28 @@
 //! This example demonstrates how to define and use a custom
 //! Firewheel node.
 
-use bevy::prelude::*;
+use bevy::{app::ScheduleRunnerPlugin, prelude::*};
 use bevy_seedling::{pool::sample_effects::SampleEffects, prelude::*};
+use std::time::Duration;
 
 // You'll need to depend on firewheel directly when defining
 // custom nodes.
 use firewheel::{
     channel_config::{ChannelConfig, NonZeroChannelCount},
     diff::{Diff, Patch},
-    event::NodeEventList,
+    event::ProcEvents,
     node::{
         AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, ProcBuffers,
-        ProcInfo, ProcessStatus,
+        ProcExtra, ProcInfo, ProcessStatus,
     },
 };
 
 fn main() {
     App::new()
         .add_plugins((
-            MinimalPlugins,
+            // Without a window, the event loop tends to run quite fast.
+            // We'll slow it down so we don't drop any audio events.
+            MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_millis(16))),
             bevy::log::LogPlugin::default(),
             AssetPlugin::default(),
             SeedlingPlugin::default(),
@@ -48,7 +51,7 @@ pub struct CustomVolumeNode {
 // Most nodes with have a configuration struct,
 // which allows users to define additional parameters
 // that are only required once during construction.
-#[derive(Debug, Component, Clone)]
+#[derive(Debug, Component, Clone, PartialEq)]
 pub struct VolumeConfig {
     pub channels: NonZeroChannelCount,
 }
@@ -77,7 +80,6 @@ impl AudioNode for CustomVolumeNode {
                 num_inputs: config.channels.get(),
                 num_outputs: config.channels.get(),
             })
-            .uses_events(true)
     }
 
     fn construct_processor(
@@ -102,16 +104,17 @@ struct VolumeProcessor {
 impl AudioNodeProcessor for VolumeProcessor {
     fn process(
         &mut self,
-        ProcBuffers {
-            inputs, outputs, ..
-        }: ProcBuffers,
         proc_info: &ProcInfo,
-        mut events: NodeEventList,
+        ProcBuffers { inputs, outputs }: ProcBuffers,
+        events: &mut ProcEvents,
+        _: &mut ProcExtra,
     ) -> ProcessStatus {
         // This will iterate over this node's events,
         // applying any patches sent from the ECS in a
         // realtime-safe way.
-        events.for_each_patch::<CustomVolumeNode>(|patch| self.params.apply(patch));
+        for patch in events.drain_patches::<CustomVolumeNode>() {
+            self.params.apply(patch);
+        }
 
         // Firewheel will inform you if an input channel is silent. If they're
         // all silent, we can simply skip processing and save CPU time.

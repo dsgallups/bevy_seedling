@@ -31,10 +31,34 @@
 //! simply select the closest listener for distance
 //! calculations.
 
-use bevy::prelude::*;
-use firewheel::nodes::spatial_basic::SpatialBasicNode;
+use bevy_app::prelude::*;
+use bevy_ecs::prelude::*;
+use bevy_math::prelude::*;
+use bevy_transform::prelude::*;
+use firewheel::{nodes::spatial_basic::SpatialBasicNode, vector};
 
-use crate::pool::sample_effects::EffectOf;
+use crate::{SeedlingSystems, nodes::itd::ItdNode, pool::sample_effects::EffectOf};
+
+pub(crate) struct SpatialPlugin;
+
+impl Plugin for SpatialPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<DefaultSpatialScale>().add_systems(
+            Last,
+            (
+                update_2d_emitters,
+                update_2d_emitters_effects,
+                update_3d_emitters,
+                update_3d_emitters_effects,
+                update_itd_effects,
+                #[cfg(feature = "hrtf")]
+                spatial_hrtf::update_hrtf_effects,
+            )
+                .after(SeedlingSystems::Pool)
+                .before(SeedlingSystems::Queue),
+        );
+    }
+}
 
 /// A scaling factor applied to the distance between spatial listeners and emitters.
 ///
@@ -71,6 +95,7 @@ use crate::pool::sample_effects::EffectOf;
 /// factor, so if a meter in your game corresponds to more than one unit, you
 /// should provide a spatial scale of less than one to compensate.
 #[derive(Component, Debug, Clone, Copy)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct SpatialScale(pub Vec3);
 
 impl Default for SpatialScale {
@@ -84,20 +109,13 @@ impl Default for SpatialScale {
 /// For more details on spatial scaling, see [`SpatialScale`].
 ///
 /// The default scaling is 1 in every direction, [`Vec3::ONE`].
-#[derive(Resource, Debug, Default, Clone)]
-pub struct DefaultSpatialScale(SpatialScale);
+#[derive(Resource, Debug, Clone, Copy)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+pub struct DefaultSpatialScale(pub Vec3);
 
-impl core::ops::Deref for DefaultSpatialScale {
-    type Target = SpatialScale;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl core::ops::DerefMut for DefaultSpatialScale {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Default for DefaultSpatialScale {
+    fn default() -> Self {
+        Self(Vec3::ONE)
     }
 }
 
@@ -113,6 +131,7 @@ impl core::ops::DerefMut for DefaultSpatialScale {
 /// calculations.
 #[derive(Debug, Default, Component)]
 #[require(Transform)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct SpatialListener2D;
 
 /// A 3D spatial listener.
@@ -127,9 +146,10 @@ pub struct SpatialListener2D;
 /// calculations.
 #[derive(Debug, Default, Component)]
 #[require(Transform)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct SpatialListener3D;
 
-pub(crate) fn update_2d_emitters(
+fn update_2d_emitters(
     listeners: Query<&GlobalTransform, With<SpatialListener2D>>,
     mut emitters: Query<(
         &mut SpatialBasicNode,
@@ -149,17 +169,17 @@ pub(crate) fn update_2d_emitters(
             continue;
         };
 
-        let scale = scale.map(|s| s.0).unwrap_or(default_scale.0.0);
+        let scale = scale.map(|s| s.0).unwrap_or(default_scale.0);
 
         let mut world_offset = emitter_pos - listener.translation;
         world_offset.z = 0.0;
         let local_offset = (listener.rotation.inverse() * world_offset) * scale;
-        spatial.offset = Vec3::new(local_offset.x, 0.0, local_offset.y);
+        spatial.offset = vector::Vec3::new(local_offset.x, 0.0, local_offset.y);
     }
 }
 
 // TODO: is there a good way to consolidate this?
-pub(crate) fn update_2d_emitters_effects(
+fn update_2d_emitters_effects(
     listeners: Query<&GlobalTransform, With<SpatialListener2D>>,
     mut emitters: Query<(&mut SpatialBasicNode, Option<&SpatialScale>, &EffectOf)>,
     effect_parents: Query<&GlobalTransform>,
@@ -180,16 +200,42 @@ pub(crate) fn update_2d_emitters_effects(
             continue;
         };
 
-        let scale = scale.map(|s| s.0).unwrap_or(default_scale.0.0);
+        let scale = scale.map(|s| s.0).unwrap_or(default_scale.0);
 
         let mut world_offset = emitter_pos - listener.translation;
         world_offset.z = 0.0;
         let local_offset = (listener.rotation.inverse() * world_offset) * scale;
-        spatial.offset = Vec3::new(local_offset.x, 0.0, local_offset.y);
+        spatial.offset = vector::Vec3::new(local_offset.x, 0.0, local_offset.y);
     }
 }
 
-pub(crate) fn update_3d_emitters(
+fn update_itd_effects(
+    listeners: Query<&GlobalTransform, Or<(With<SpatialListener2D>, With<SpatialListener3D>)>>,
+    mut emitters: Query<(&mut ItdNode, &EffectOf)>,
+    effect_parents: Query<&GlobalTransform>,
+) {
+    for (mut spatial, effect_of) in emitters.iter_mut() {
+        let Ok(transform) = effect_parents.get(effect_of.0) else {
+            continue;
+        };
+
+        let emitter_pos = transform.translation();
+        let closest_listener = find_closest_listener(
+            emitter_pos,
+            listeners.iter().map(GlobalTransform::compute_transform),
+        );
+
+        let Some(listener) = closest_listener else {
+            continue;
+        };
+
+        let world_offset = emitter_pos - listener.translation;
+        let local_offset = listener.rotation.inverse() * world_offset;
+        spatial.direction = local_offset;
+    }
+}
+
+fn update_3d_emitters(
     listeners: Query<&GlobalTransform, With<SpatialListener3D>>,
     mut emitters: Query<(
         &mut SpatialBasicNode,
@@ -209,15 +255,15 @@ pub(crate) fn update_3d_emitters(
             continue;
         };
 
-        let scale = scale.map(|s| s.0).unwrap_or(default_scale.0.0);
+        let scale = scale.map(|s| s.0).unwrap_or(default_scale.0);
 
         let world_offset = emitter_pos - listener.translation;
         let local_offset = listener.rotation.inverse() * world_offset;
-        spatial.offset = local_offset * scale;
+        spatial.offset = (local_offset * scale).into();
     }
 }
 
-pub(crate) fn update_3d_emitters_effects(
+fn update_3d_emitters_effects(
     listeners: Query<&GlobalTransform, With<SpatialListener3D>>,
     mut emitters: Query<(&mut SpatialBasicNode, Option<&SpatialScale>, &EffectOf)>,
     effect_parents: Query<&GlobalTransform>,
@@ -238,11 +284,11 @@ pub(crate) fn update_3d_emitters_effects(
             continue;
         };
 
-        let scale = scale.map(|s| s.0).unwrap_or(default_scale.0.0);
+        let scale = scale.map(|s| s.0).unwrap_or(default_scale.0);
 
         let world_offset = emitter_pos - listener.translation;
         let local_offset = listener.rotation.inverse() * world_offset;
-        spatial.offset = local_offset * scale;
+        spatial.offset = (local_offset * scale).into();
     }
 }
 
@@ -270,8 +316,47 @@ fn find_closest_listener(
     closest_listener.map(|l| l.1)
 }
 
+#[cfg(feature = "hrtf")]
+mod spatial_hrtf {
+    use super::*;
+    use crate::prelude::hrtf::HrtfNode;
+
+    pub(super) fn update_hrtf_effects(
+        listeners: Query<&GlobalTransform, Or<(With<SpatialListener2D>, With<SpatialListener3D>)>>,
+        mut emitters: Query<(&mut HrtfNode, Option<&SpatialScale>, &EffectOf)>,
+        effect_parents: Query<&GlobalTransform>,
+        default_scale: Res<DefaultSpatialScale>,
+    ) {
+        for (mut spatial, scale, effect_of) in emitters.iter_mut() {
+            let Ok(transform) = effect_parents.get(effect_of.0) else {
+                continue;
+            };
+
+            let emitter_pos = transform.translation();
+            let closest_listener = find_closest_listener(
+                emitter_pos,
+                listeners.iter().map(GlobalTransform::compute_transform),
+            );
+
+            let Some(listener) = closest_listener else {
+                continue;
+            };
+
+            let scale = scale.map(|s| s.0).unwrap_or(default_scale.0);
+
+            let world_offset = emitter_pos - listener.translation;
+            let local_offset = listener.rotation.inverse() * world_offset;
+            let local_offset = local_offset * scale;
+
+            spatial.offset = local_offset * scale;
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use bevy_asset::AssetServer;
+
     use super::*;
     use crate::{
         node::follower::FollowerOf,
@@ -331,8 +416,8 @@ mod test {
                 move |player: Query<&Sampler>,
                       effect: Query<&SpatialBasicNode, With<FollowerOf>>| {
                     if player.iter().len() == 1 {
-                        let effect = effect.single().unwrap();
-                        assert_eq!(effect.offset, position);
+                        let effect: Vec3 = effect.single().unwrap().offset.into();
+                        assert_eq!(effect, position);
                         true
                     } else {
                         false

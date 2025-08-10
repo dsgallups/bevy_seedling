@@ -1,6 +1,6 @@
 //! Types that allow one set of params to track another.
 
-use bevy::{ecs::component::Mutable, prelude::*};
+use bevy_ecs::{component::Mutable, prelude::*};
 use firewheel::diff::{Diff, Patch, PathBuilder};
 use smallvec::SmallVec;
 
@@ -38,6 +38,7 @@ use smallvec::SmallVec;
 /// ```
 #[derive(Debug, Component)]
 #[relationship(relationship_target = Followers)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct FollowerOf(pub Entity);
 
 /// The relationship target for [`FollowerOf`].

@@ -4,16 +4,11 @@
 //! Any node that doesn't provide an explicit pool when spawned
 //! and has no effects will be automatically played in the [`DefaultPool`].
 
-use bevy::{
-    ecs::{component::ComponentId, intern::Interned},
-    prelude::*,
-};
-// use bevy_ecs::{component::ComponentId, intern::Interned, prelude::*, world::DeferredWorld};
+use bevy_ecs::{component::ComponentId, intern::Interned, prelude::*};
 
 pub use bevy_seedling_macros::PoolLabel;
-use firewheel::nodes::sampler::SamplerConfig;
 
-bevy::ecs::define_label!(
+bevy_ecs::define_label!(
     /// A label for differentiating sample pools.
     ///
     /// When deriving [`PoolLabel`], you'll need to make sure your type implements
@@ -36,9 +31,8 @@ bevy::ecs::define_label!(
 ///
 /// [`SamplePlayer`]: crate::sample::SamplePlayer
 ///
-/// You can customize the default sampler pool by setting
-/// [`SeedlingPlugin::spawn_default_pool`][crate::prelude::SeedlingPlugin::spawn_default_pool]
-/// to `false`, preventing the plugin from spawning it for you.
+/// Depending on your [`GraphConfiguration`][crate::prelude::GraphConfiguration], you
+/// can customize the default pool or even omit it entirely.
 ///
 /// ```no_run
 /// use bevy::prelude::*;
@@ -49,16 +43,20 @@ bevy::ecs::define_label!(
 ///         .add_plugins((
 ///             DefaultPlugins,
 ///             SeedlingPlugin {
-///                 spawn_default_pool: false,
+///                 graph_config: GraphConfiguration::Empty,
 ///                 ..Default::default()
 ///             },
 ///         ))
 ///         .add_systems(Startup, |mut commands: Commands| {
-///             // Make the default pool provide spatial audio
+///             // Make the default pool provide spatial audio.
 ///             commands.spawn((
 ///                 SamplerPool(DefaultPool),
 ///                 sample_effects![SpatialBasicNode::default()],
 ///             ));
+///
+///             commands
+///                 .spawn((MainBus, VolumeNode::default()))
+///                 .connect(AudioGraphOutput);
 ///         })
 ///         .run();
 /// }
@@ -79,10 +77,12 @@ bevy::ecs::define_label!(
 ///     commands
 ///         .entity(*pool)
 ///         .disconnect(MainBus)
-///         .chain_node(SendNode::new(Volume::Decibels(-12.0), reverb));
+///         .chain_node(SendNode::new(Volume::Decibels(-12.0), reverb))
+///         .connect(SfxBus);
 /// }
 /// ```
 #[derive(PoolLabel, Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct DefaultPool;
 
 /// A type-erased node label.
@@ -90,7 +90,6 @@ pub type InternedPoolLabel = Interned<dyn PoolLabel>;
 
 /// A type-erased pool label container.
 #[derive(Component, Debug, Clone)]
-#[require(SamplerConfig)]
 pub struct PoolLabelContainer {
     pub(crate) label: InternedPoolLabel,
     pub(crate) label_id: ComponentId,

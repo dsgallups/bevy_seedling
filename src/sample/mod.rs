@@ -1,10 +1,8 @@
 //! Audio sample components.
 
 use crate::prelude::Volume;
-use bevy::{
-    ecs::{component::HookContext, world::DeferredWorld},
-    prelude::*,
-};
+use bevy_asset::Handle;
+use bevy_ecs::prelude::*;
 use firewheel::{
     diff::Notify,
     nodes::sampler::{PlaybackState, Playhead, RepeatMode},
@@ -13,7 +11,7 @@ use std::time::Duration;
 
 mod assets;
 
-pub use assets::{Sample, SampleLoader, SampleLoaderError};
+pub use assets::{AudioSample, SampleLoader, SampleLoaderError};
 
 /// A component that queues sample playback.
 ///
@@ -151,10 +149,11 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 ///         volume: Volume::UNITY_GAIN,
 ///     },
 ///     PlaybackSettings {
-///         playback: Notify::new(PlaybackState::Play { delay: None }),
-///         playhead: Notify::new(Playhead::Seconds(0.0)),
+///         playback: Notify::new(PlaybackState::Play {
+///             playhead: Some(Playhead::Seconds(0.0)),
+///         }),
 ///         speed: 1.0,
-///         on_complete: OnComplete::Remove,
+///         on_complete: OnComplete::Despawn,
 ///     },
 ///     SamplePriority(0),
 ///     SampleQueueLifetime(std::time::Duration::from_millis(100)),
@@ -167,11 +166,12 @@ pub use assets::{Sample, SampleLoader, SampleLoaderError};
 /// will be inserted, which provides information about the
 /// playhead position and playback status.
 #[derive(Debug, Component, Clone)]
-#[require(PlaybackSettings, SamplePriority, SampleQueueLifetime)]
-#[component(on_insert = on_insert_sample, immutable)]
+#[require(PlaybackSettings, SamplePriority, SampleQueueLifetime, QueuedSample)]
+#[component(immutable)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct SamplePlayer {
     /// The sample to play.
-    pub sample: Handle<Sample>,
+    pub sample: Handle<AudioSample>,
 
     /// Sets the sample's [`RepeatMode`].
     ///
@@ -202,10 +202,6 @@ impl Default for SamplePlayer {
     }
 }
 
-fn on_insert_sample(mut world: DeferredWorld, context: HookContext) {
-    world.commands().entity(context.entity).insert(QueuedSample);
-}
-
 impl SamplePlayer {
     /// Construct a new [`SamplePlayer`].
     ///
@@ -218,7 +214,7 @@ impl SamplePlayer {
     /// ```
     ///
     /// This immediately queues up the sample for playback.
-    pub fn new(handle: Handle<Sample>) -> Self {
+    pub fn new(handle: Handle<AudioSample>) -> Self {
         Self {
             sample: handle,
             ..Default::default()
@@ -285,6 +281,7 @@ impl SamplePlayer {
 /// ```
 #[derive(Debug, Default, Component, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[component(immutable)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct SamplePriority(pub i32);
 
 /// The maximum duration of time that a sample will wait for an available sampler.
@@ -296,6 +293,7 @@ pub struct SamplePriority(pub i32);
 /// The default lifetime is 100ms.
 #[derive(Debug, Component, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[component(immutable)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct SampleQueueLifetime(pub Duration);
 
 impl Default for SampleQueueLifetime {
@@ -308,6 +306,7 @@ impl Default for SampleQueueLifetime {
 ///
 /// This will not trigger for looping samples unless they are stopped.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub enum OnComplete {
     /// Preserve the entity and components, leaving them untouched.
     Preserve,
@@ -335,7 +334,9 @@ pub enum OnComplete {
 ///         SamplePlayer::new(server.load("my_sample.wav")),
 ///         // You can start one second in
 ///         PlaybackSettings {
-///             playhead: Notify::new(Playhead::Seconds(1.0)),
+///             playback: Notify::new(PlaybackState::Play {
+///                 playhead: Some(Playhead::Seconds(1.0)),
+///             }),
 ///             ..Default::default()
 ///         },
 ///     ));
@@ -351,6 +352,7 @@ pub enum OnComplete {
 /// }
 /// ```
 #[derive(Component, Debug)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct PlaybackSettings {
     /// Sets the playback state, allowing you to play, pause or stop samples.
     ///
@@ -358,13 +360,6 @@ pub struct PlaybackSettings {
     /// audio processor. To get whether the sample is playing,
     /// see [`Sampler::is_playing`][crate::pool::Sampler::is_playing].
     pub playback: Notify<PlaybackState>,
-
-    /// Sets the playhead.
-    ///
-    /// This field provides only one-way communication with the
-    /// audio processor. To get the current value of the playhead,
-    /// see [`Sampler::playhead_frames`][crate::pool::Sampler::playhead_frames].
-    pub playhead: Notify<Playhead>,
 
     /// Sets the playback speed.
     pub speed: f64,
@@ -388,7 +383,9 @@ impl PlaybackSettings {
     /// }
     /// ```
     pub fn play(&mut self) {
-        *self.playback = PlaybackState::Play { delay: None };
+        *self.playback = PlaybackState::Play {
+            playhead: Some(Playhead::Seconds(0.0)),
+        };
     }
 
     /// Pause playback.
@@ -419,15 +416,15 @@ impl PlaybackSettings {
     /// ```
     pub fn stop(&mut self) {
         *self.playback = PlaybackState::Stop;
-        *self.playhead = Playhead::default();
     }
 }
 
 impl Default for PlaybackSettings {
     fn default() -> Self {
         Self {
-            playback: Notify::new(PlaybackState::Play { delay: None }),
-            playhead: Notify::default(),
+            playback: Notify::new(PlaybackState::Play {
+                playhead: Some(Playhead::Seconds(0.0)),
+            }),
             speed: 1.0,
             on_complete: OnComplete::Despawn,
         }
@@ -441,55 +438,103 @@ impl Default for PlaybackSettings {
 pub struct QueuedSample;
 
 #[cfg(feature = "rand")]
-pub use random::PitchRange;
+pub use random::{PitchRngSource, RandomPitch};
 
 #[cfg(feature = "rand")]
 pub(crate) use random::RandomPlugin;
 
 #[cfg(feature = "rand")]
 mod random {
+    use crate::SeedlingSystems;
+
     use super::PlaybackSettings;
-    use bevy::{
-        ecs::{component::HookContext, world::DeferredWorld},
-        prelude::*,
-    };
-    use rand::{Rng, SeedableRng, rngs::SmallRng};
+    use bevy_app::prelude::*;
+    use bevy_ecs::prelude::*;
+    use rand::{SeedableRng, rngs::SmallRng};
 
     pub struct RandomPlugin;
 
     impl Plugin for RandomPlugin {
         fn build(&self, app: &mut App) {
-            app.insert_resource(PitchRng(SmallRng::from_entropy()));
+            app.insert_resource(PitchRngSource::new(SmallRng::from_entropy()))
+                .add_systems(Last, RandomPitch::apply.before(SeedlingSystems::Acquire));
         }
     }
 
-    #[derive(Resource)]
-    struct PitchRng(SmallRng);
+    trait PitchRng {
+        fn gen_pitch(&mut self, range: std::ops::Range<f64>) -> f64;
+    }
 
-    /// A component that applies a random pitch
-    /// to a sample player when spawned.
+    struct RandRng<T>(T);
+
+    impl<T: rand::Rng> PitchRng for RandRng<T> {
+        fn gen_pitch(&mut self, range: std::ops::Range<f64>) -> f64 {
+            self.0.gen_range(range)
+        }
+    }
+
+    /// Provides the RNG source for the [`RandomPitch`] component.
+    ///
+    /// By default, this uses [`rand::rngs::SmallRng`]. To provide
+    /// your own RNG source, simply insert this resource after
+    /// adding the [`SeedlingPlugin`][crate::prelude::SeedlingPlugin].
+    #[derive(Resource)]
+    pub struct PitchRngSource(Box<dyn PitchRng + Send + Sync>);
+
+    impl core::fmt::Debug for PitchRngSource {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_tuple("PitchRngSource").finish_non_exhaustive()
+        }
+    }
+
+    impl PitchRngSource {
+        /// Construct a new [`PitchRngSource`].
+        pub fn new<T: rand::Rng + Send + Sync + 'static>(rng: T) -> Self {
+            Self(Box::new(RandRng(rng)))
+        }
+    }
+
+    /// A component that applies a random pitch to [`PlaybackSettings`] when spawned.
+    ///
+    /// This can be used for subtle sound variations, breaking up
+    /// the monotony of repeated sounds like footsteps.
+    ///
+    /// To control the RNG source, you can provide a custom [`PitchRngSource`] resource.
     #[derive(Debug, Component, Default, Clone)]
     #[require(PlaybackSettings)]
-    #[component(immutable, on_add = Self::on_add_hook)]
-    pub struct PitchRange(pub core::ops::Range<f64>);
+    #[component(immutable)]
+    #[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+    pub struct RandomPitch(pub core::ops::Range<f64>);
 
-    impl PitchRange {
-        fn on_add_hook(mut world: DeferredWorld, context: HookContext) {
-            let range = world
-                .get::<PitchRange>(context.entity)
-                .expect("Entity should have a `PitchRange` component")
-                .0
-                .clone();
+    impl RandomPitch {
+        /// Create a new [`RandomPitch`] with deviation about 1.0.
+        ///
+        /// ```
+        /// # use bevy::prelude::*;
+        /// # use bevy_seedling::prelude::*;
+        /// # fn deviation(mut commands: Commands, server: Res<AssetServer>) {
+        /// commands.spawn((
+        ///     SamplePlayer::new(server.load("my_sample.wav")),
+        ///     RandomPitch::new(0.05),
+        /// ));
+        /// # }
+        /// ```
+        pub fn new(deviation: f64) -> Self {
+            let minimum = (1.0 - deviation).clamp(0.0, f64::MAX);
+            let maximum = (1.0 + deviation).clamp(0.0, f64::MAX);
 
-            let mut rng = world.resource_mut::<PitchRng>();
-            let value = rng.0.gen_range(range);
+            Self(minimum..maximum)
+        }
 
-            world
-                .commands()
-                .entity(context.entity)
-                .entry::<PlaybackSettings>()
-                .or_default()
-                .and_modify(move |mut params| params.speed = value);
+        fn apply(
+            mut samples: Query<(Entity, &mut PlaybackSettings, &Self)>,
+            mut commands: Commands,
+            mut rng: ResMut<PitchRngSource>,
+        ) {
+            for (entity, mut settings, range) in samples.iter_mut() {
+                settings.speed = rng.0.gen_pitch(range.0.clone());
+                commands.entity(entity).remove::<Self>();
+            }
         }
     }
 }

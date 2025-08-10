@@ -1,6 +1,7 @@
 use super::{DEFAULT_CONNECTION, EdgeTarget, NodeMap, PendingEdge};
 use crate::{context::AudioContext, node::FirewheelNode};
-use bevy::prelude::*;
+use bevy_ecs::prelude::*;
+use bevy_log::prelude::*;
 
 #[cfg(debug_assertions)]
 use core::panic::Location;
@@ -57,7 +58,7 @@ impl PendingDisconnections {
 /// [`SeedlingSystems::Connect`][crate::SeedlingSystems::Connect] set immediately
 /// after connections.
 ///
-/// [`EntityCommands`]: bevy::prelude::EntityCommands
+/// [`EntityCommands`]: bevy_ecs::prelude::EntityCommands
 /// [`NodeLabel`]: crate::prelude::NodeLabel
 pub trait Disconnect: Sized {
     /// Queue a disconnection from this entity to the target.
@@ -193,7 +194,7 @@ pub(crate) fn process_disconnections(
 mod test {
     use crate::{
         context::AudioContext,
-        edge::Connect,
+        edge::{AudioGraphOutput, Connect},
         prelude::MainBus,
         test::{prepare_app, run},
     };
@@ -211,8 +212,11 @@ mod test {
         let mut app = prepare_app(|mut commands: Commands| {
             commands
                 .spawn((VolumeNode::default(), One))
-                .chain_node((VolumeNode::default(), Two))
-                .connect(MainBus);
+                .chain_node((VolumeNode::default(), Two));
+
+            commands
+                .spawn((VolumeNode::default(), MainBus))
+                .connect(AudioGraphOutput);
         });
 
         // first, verify they're all connected

@@ -2,7 +2,7 @@
 
 use crate::{
     SeedlingSystems,
-    context::AudioContext,
+    context::{AudioContext, PreStreamRestartEvent, SampleRate, StreamRestartEvent},
     edge::{PendingConnections, PendingEdge},
     error::SeedlingError,
     node::{EffectId, FirewheelNode, RegisterNode},
@@ -10,25 +10,27 @@ use crate::{
     prelude::PoolLabel,
     sample::{OnComplete, PlaybackSettings, QueuedSample, SamplePlayer},
 };
-use bevy::{
-    ecs::{
-        component::{ComponentId, HookContext},
-        entity::EntityCloner,
-        system::QueryLens,
-        world::DeferredWorld,
-    },
+use bevy_app::prelude::*;
+use bevy_asset::prelude::*;
+use bevy_ecs::{
+    component::{ComponentId, HookContext},
+    entity::EntityCloner,
     prelude::*,
+    system::QueryLens,
+    world::DeferredWorld,
 };
 use core::ops::{Deref, RangeInclusive};
-use firewheel::nodes::{
-    sampler::{SamplerConfig, SamplerNode, SamplerState},
-    volume::VolumeNode,
+use firewheel::{
+    clock::{DurationSamples, DurationSeconds},
+    nodes::{
+        sampler::{PlaybackState, Playhead, SamplerConfig, SamplerNode, SamplerState},
+        volume::VolumeNode,
+    },
 };
 use queue::SkipTimer;
 use sample_effects::{EffectOf, SampleEffects};
 
 pub mod dynamic;
-mod entity_set;
 pub mod label;
 mod queue;
 pub mod sample_effects;
@@ -41,10 +43,10 @@ impl Plugin for SamplePoolPlugin {
             .add_systems(
                 Last,
                 (
-                    (populate_pool, queue::grow_pools)
+                    (populate_pool, queue::assign_default, queue::grow_pools)
                         .chain()
                         .before(SeedlingSystems::Acquire),
-                    (poll_finished, queue::assign_default, retrieve_state)
+                    (poll_finished, retrieve_state)
                         .before(SeedlingSystems::Pool)
                         .after(SeedlingSystems::Connect),
                     watch_sample_players
@@ -59,6 +61,8 @@ impl Plugin for SamplePoolPlugin {
                 ),
             )
             .add_observer(remove_finished)
+            .add_observer(generate_snapshots)
+            .add_observer(apply_snapshots)
             .add_plugins(dynamic::DynamicPlugin);
     }
 }
@@ -246,7 +250,8 @@ impl Plugin for SamplePoolPlugin {
 /// ```
 #[derive(Debug, Component)]
 #[component(immutable, on_insert = Self::on_insert_hook)]
-#[require(PoolMarker)]
+#[require(PoolMarker, SamplerConfig)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct SamplerPool<T: PoolLabel + Component + Clone>(pub T);
 
 impl<T: PoolLabel + Component + Clone> SamplerPool<T> {
@@ -315,6 +320,7 @@ impl SamplerOf {
 pub struct Sampler {
     #[relationship]
     sampler: Entity,
+    sample_rate: Option<SampleRate>,
     state: Option<SamplerState>,
 }
 
@@ -339,7 +345,7 @@ impl Sampler {
     /// If the sample player has not yet propagated to the audio
     /// graph, this information may not yet be available. For a
     /// fallible method, see [`try_playhead_frames`][Self::try_playhead_frames].
-    pub fn playhead_frames(&self) -> u64 {
+    pub fn playhead_frames(&self) -> DurationSamples {
         self.try_playhead_frames().unwrap()
     }
 
@@ -347,8 +353,30 @@ impl Sampler {
     ///
     /// If the sample player has not yet propagated to the audio
     /// graph, this returns `None`.
-    pub fn try_playhead_frames(&self) -> Option<u64> {
+    pub fn try_playhead_frames(&self) -> Option<DurationSamples> {
         self.state.as_ref().map(|s| s.playhead_frames())
+    }
+
+    /// Returns the current playhead in seconds.
+    ///
+    /// # Panics
+    ///
+    /// If the sample player has not yet propagated to the audio
+    /// graph, this information may not yet be available. For a
+    /// fallible method, see [`try_playhead_frames`][Self::try_playhead_seconds].
+    pub fn playhead_seconds(&self) -> DurationSeconds {
+        self.try_playhead_seconds().unwrap()
+    }
+
+    /// Returns the current playhead in seconds.
+    ///
+    /// If the sample player has not yet propagated to the audio
+    /// graph, this returns `None`.
+    pub fn try_playhead_seconds(&self) -> Option<DurationSeconds> {
+        let state = self.state.as_ref()?;
+        let sample_rate = self.sample_rate.as_ref()?;
+
+        Some(state.playhead_seconds(sample_rate.get()))
     }
 }
 
@@ -363,12 +391,80 @@ impl core::fmt::Debug for Sampler {
 impl Sampler {
     fn on_insert_hook(mut world: DeferredWorld, context: HookContext) {
         let sampler = world.get::<Sampler>(context.entity).unwrap().sampler;
+        let sample_rate = world.resource::<SampleRate>().clone();
 
         // We'll attempt to eagerly fill the state here, otherwise falling
-        // back to `retrieve_State` when it's not ready.
+        // back to `retrieve_state` when it's not ready.
         if let Some(state) = world.get::<SamplerStateWrapper>(sampler).cloned() {
-            world.get_mut::<Sampler>(context.entity).unwrap().state = Some(state.0);
+            let mut sampler = world.get_mut::<Sampler>(context.entity).unwrap();
+            sampler.state = Some(state.0);
+            sampler.sample_rate = Some(sample_rate);
         }
+    }
+}
+
+/// A snapshot of a sampler's state.
+///
+/// This helps us restore the state of every
+/// active sampler when the audio stream's sample
+/// rate changes.
+#[derive(Component)]
+struct SamplerSnapshot {
+    pub playhead: f64,
+}
+
+fn generate_snapshots(
+    _: Trigger<PreStreamRestartEvent>,
+    sample_players: Query<(Entity, Option<&Sampler>), With<SamplePlayer>>,
+    mut commands: Commands,
+) {
+    for (entity, sampler) in &sample_players {
+        let playhead = sampler
+            .and_then(|s| s.try_playhead_seconds())
+            .unwrap_or_default();
+
+        commands.entity(entity).insert(SamplerSnapshot {
+            playhead: playhead.0,
+        });
+    }
+}
+
+fn apply_snapshots(
+    trigger: Trigger<StreamRestartEvent>,
+    mut sample_players: Query<(
+        Entity,
+        &SamplerSnapshot,
+        &SamplePlayer,
+        &mut PlaybackSettings,
+        Has<QueuedSample>,
+        Has<Sampler>,
+    )>,
+    server: Res<AssetServer>,
+    mut assets: ResMut<Assets<crate::sample::AudioSample>>,
+    mut commands: Commands,
+) {
+    let rates_changed = trigger.previous_rate != trigger.current_rate;
+
+    for (entity, snapshot, player, mut settings, has_queued, has_sampler) in &mut sample_players {
+        let active = has_queued || has_sampler;
+        let mut commands = commands.entity(entity);
+
+        if rates_changed && active {
+            let new_player = player.clone();
+
+            if let Some(sample) = new_player.sample.path() {
+                assets.remove(&new_player.sample);
+                server.reload(sample);
+            }
+
+            *settings.playback = PlaybackState::Play {
+                playhead: Some(Playhead::Seconds(snapshot.playhead)),
+            };
+
+            commands.insert(new_player).remove::<Sampler>();
+        }
+
+        commands.remove::<SamplerSnapshot>();
     }
 }
 
@@ -442,8 +538,7 @@ fn watch_sample_players(
             continue;
         };
 
-        sampler_node.playhead = settings.playhead.clone();
-        sampler_node.playback = settings.playback.clone();
+        sampler_node.playback = settings.playback;
         sampler_node.speed = settings.speed;
     }
 }
@@ -454,6 +549,11 @@ fn spawn_chain(
     effects: &[Entity],
     commands: &mut Commands,
 ) -> Entity {
+    let connections = config.as_ref().map(|c| {
+        let channels = c.channels.get().get();
+        (0..channels).map(|i| (i, i)).collect()
+    });
+
     let sampler = commands
         .spawn((
             SamplerNode::default(),
@@ -484,7 +584,7 @@ fn spawn_chain(
             .entry::<PendingConnections>()
             .or_default()
             .into_mut()
-            .push(PendingEdge::new(chain[0], None));
+            .push(PendingEdge::new(chain[0], connections.clone()));
 
         for pair in chain.windows(2) {
             world
@@ -492,7 +592,7 @@ fn spawn_chain(
                 .entry::<PendingConnections>()
                 .or_default()
                 .into_mut()
-                .push(PendingEdge::new(pair[1], None));
+                .push(PendingEdge::new(pair[1], connections.clone()));
         }
 
         Ok(())
@@ -522,6 +622,7 @@ fn spawn_chain(
 /// Pools are grown quadratically, so the cost of queuing samples
 /// is roughly amortized constant.
 #[derive(Debug, Clone, Component)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct PoolSize(pub RangeInclusive<usize>);
 
 /// The default [`PoolSize`] applied to [`SamplerPool`]s.
@@ -529,6 +630,7 @@ pub struct PoolSize(pub RangeInclusive<usize>);
 /// The default is `4..=32`.
 /// When set to `0..=0`, dynamic pools are disabled.
 #[derive(Debug, Clone, Resource)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct DefaultPoolSize(pub RangeInclusive<usize>);
 
 impl Default for DefaultPoolSize {
@@ -597,6 +699,7 @@ fn populate_pool(
 /// [`PlaybackState::Stop`][crate::prelude::PlaybackState] or
 /// when it can't find space in a sampler pool.
 #[derive(Debug, Event)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct PlaybackCompletionEvent;
 
 /// Clean up sample resources according to their playback settings.
@@ -642,7 +745,7 @@ fn poll_finished(
     mut commands: Commands,
 ) {
     for (node, active, state) in nodes.iter() {
-        let finished = state.0.finished() == node.sequence.id();
+        let finished = state.0.finished() == node.playback.id();
 
         if finished {
             commands.entity(active.0).trigger(PlaybackCompletionEvent);
@@ -811,6 +914,9 @@ mod test {
     #[test]
     fn test_remove_in_dynamic() {
         let mut app = prepare_app(|mut commands: Commands, server: Res<AssetServer>| {
+            // make sure we can spawn dynamic pools
+            commands.spawn((VolumeNode::default(), dynamic::DynamicBus));
+
             // We'll play a short sample
             commands.spawn((
                 SamplePlayer::new(server.load("sine_440hz_1ms.wav")),

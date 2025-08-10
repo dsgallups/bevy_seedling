@@ -3,16 +3,16 @@
 use core::f32;
 use std::num::NonZeroU32;
 
-use bevy::ecs::component::Component;
+use bevy_ecs::component::Component;
 use firewheel::{
-    SilenceMask, Volume,
+    Volume,
     channel_config::{ChannelConfig, NonZeroChannelCount},
     diff::{Diff, Patch},
     dsp::filter::smoothing_filter::{SmoothingFilter, SmoothingFilterCoeff},
-    event::NodeEventList,
+    event::ProcEvents,
     node::{
         AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, ProcBuffers,
-        ProcInfo, ProcessStatus,
+        ProcExtra, ProcInfo, ProcessStatus,
     },
 };
 
@@ -164,7 +164,8 @@ impl IncrementalMax {
 }
 
 /// Configuration for a [`LimiterNode`].
-#[derive(Debug, Clone, Component)]
+#[derive(Debug, Clone, Component, PartialEq)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct LimiterConfig {
     /// The limiter lookahead.
     ///
@@ -200,6 +201,7 @@ impl Default for LimiterConfig {
 /// By default the lookahead will be set to `attack`, see [`LimiterConfig`] to see how to
 /// set lookahead to something else.
 #[derive(Diff, Patch, Debug, Clone, Component)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct LimiterNode {
     /// How long it takes to react to increases in volume, in seconds.
     ///
@@ -247,7 +249,6 @@ impl AudioNode for LimiterNode {
                 num_inputs: config.channels.get(),
                 num_outputs: config.channels.get(),
             })
-            .uses_events(true)
     }
 
     fn construct_processor(
@@ -316,18 +317,21 @@ impl Limiter {
 impl AudioNodeProcessor for Limiter {
     fn process(
         &mut self,
-        buffers: ProcBuffers,
         proc_info: &ProcInfo,
-        mut events: NodeEventList,
+        buffers: ProcBuffers,
+        events: &mut ProcEvents,
+        _: &mut ProcExtra,
     ) -> ProcessStatus {
-        events.for_each_patch::<LimiterNode>(|patch| match patch {
-            LimiterNodePatch::Attack(atk) => {
-                self.follower.set_smooth_secs_up(self.sample_rate, atk);
+        for patch in events.drain_patches::<LimiterNode>() {
+            match patch {
+                LimiterNodePatch::Attack(atk) => {
+                    self.follower.set_smooth_secs_up(self.sample_rate, atk);
+                }
+                LimiterNodePatch::Release(rel) => {
+                    self.follower.set_smooth_secs_down(self.sample_rate, rel);
+                }
             }
-            LimiterNodePatch::Release(rel) => {
-                self.follower.set_smooth_secs_down(self.sample_rate, rel);
-            }
-        });
+        }
 
         if proc_info
             .in_silence_mask
@@ -370,15 +374,12 @@ impl AudioNodeProcessor for Limiter {
             self.advance();
         }
 
-        ProcessStatus::OutputsModified {
-            out_silence_mask: SilenceMask::NONE_SILENT,
-        }
+        ProcessStatus::outputs_not_silent()
     }
 
     fn new_stream(&mut self, stream_info: &firewheel::StreamInfo) {
         self.index = 0;
         self.sample_rate = stream_info.sample_rate;
-        self.num_channels = stream_info.num_stream_in_channels;
         self.max_buffer_length = stream_info.max_block_frames;
 
         self.reducer =

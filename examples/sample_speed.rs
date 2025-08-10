@@ -1,12 +1,16 @@
-//! This example demonstrates how to adjust a sample's speed during playback.
+//! This example demonstrates how to adjust a sample's speed
+//! (and therefore pitch) during playback.
 
-use bevy::{log::LogPlugin, prelude::*};
+use bevy::{app::ScheduleRunnerPlugin, log::LogPlugin, prelude::*};
 use bevy_seedling::prelude::*;
+use std::time::Duration;
 
 fn main() {
     App::new()
         .add_plugins((
-            MinimalPlugins,
+            // Without a window, the event loop tends to run quite fast.
+            // We'll slow it down so we don't drop any audio events.
+            MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_millis(16))),
             LogPlugin::default(),
             AssetPlugin::default(),
             SeedlingPlugin::default(),

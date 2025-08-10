@@ -1,6 +1,7 @@
 use super::{DEFAULT_CONNECTION, EdgeTarget, NodeMap, PendingEdge};
 use crate::{context::AudioContext, node::FirewheelNode};
-use bevy::prelude::*;
+use bevy_ecs::prelude::*;
+use bevy_log::prelude::*;
 
 #[cfg(debug_assertions)]
 use core::panic::Location;
@@ -132,7 +133,7 @@ impl PendingConnections {
 /// # }
 /// ```
 ///
-/// [`EntityCommands`]: bevy::prelude::EntityCommands
+/// [`EntityCommands`]: bevy_ecs::prelude::EntityCommands
 /// [`NodeLabel`]: crate::prelude::NodeLabel
 pub trait Connect<'a>: Sized {
     /// Queue a connection from this entity to the target.
@@ -448,7 +449,9 @@ pub(crate) fn process_connections(
 
 #[cfg(test)]
 mod test {
-    use crate::{context::AudioContext, prelude::MainBus, test::prepare_app};
+    use crate::{
+        context::AudioContext, edge::AudioGraphOutput, prelude::MainBus, test::prepare_app,
+    };
 
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
@@ -466,8 +469,11 @@ mod test {
         let mut app = prepare_app(|mut commands: Commands| {
             commands
                 .spawn((VolumeNode::default(), One))
-                .chain_node((VolumeNode::default(), Two))
-                .connect(MainBus);
+                .chain_node((VolumeNode::default(), Two));
+
+            commands
+                .spawn((VolumeNode::default(), MainBus))
+                .connect(AudioGraphOutput);
         });
 
         app.world_mut()
@@ -516,6 +522,10 @@ mod test {
                 .spawn((VolumeNode::default(), Three))
                 .connect(a)
                 .connect(b);
+
+            commands
+                .spawn((VolumeNode::default(), MainBus))
+                .connect(AudioGraphOutput);
         });
 
         app.world_mut()

@@ -1,15 +1,16 @@
 //! A simple band-pass filter.
 
 use crate::timeline::Timeline;
-use bevy::prelude::*;
+use bevy_ecs::component::Component;
 use firewheel::{
     channel_config::ChannelConfig,
-    core::{channel_config::NonZeroChannelCount, clock::ClockSeconds, node::ProcInfo},
+    clock::DurationSeconds,
+    core::{channel_config::NonZeroChannelCount, node::ProcInfo},
     diff::{Diff, Patch},
-    event::NodeEventList,
+    event::ProcEvents,
     node::{
         AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, ProcBuffers,
-        ProcessStatus,
+        ProcExtra, ProcessStatus,
     },
 };
 
@@ -50,7 +51,8 @@ impl BandPassNode {
 }
 
 /// [`BandPassNode`]'s configuration.
-#[derive(Debug, Component, Clone)]
+#[derive(Debug, Component, Clone, PartialEq)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct BandPassConfig {
     /// The number of channels to process.
     ///
@@ -76,7 +78,6 @@ impl AudioNode for BandPassNode {
                 num_inputs: config.channels.get(),
                 num_outputs: config.channels.get(),
             })
-            .uses_events(true)
     }
 
     fn construct_processor(
@@ -157,25 +158,27 @@ struct BandPassProcessor {
 impl AudioNodeProcessor for BandPassProcessor {
     fn process(
         &mut self,
-        ProcBuffers {
-            inputs, outputs, ..
-        }: ProcBuffers,
         proc_info: &ProcInfo,
-        mut events: NodeEventList,
+        ProcBuffers { inputs, outputs }: ProcBuffers,
+        events: &mut ProcEvents,
+        _: &mut ProcExtra,
     ) -> ProcessStatus {
-        events.for_each_patch::<BandPassNode>(|p| self.params.apply(p));
+        for patch in events.drain_patches::<BandPassNode>() {
+            self.params.apply(patch);
+        }
 
         if proc_info.in_silence_mask.all_channels_silent(inputs.len()) {
             // All inputs are silent.
             return ProcessStatus::ClearAllOutputs;
         }
 
-        let seconds = proc_info.clock_seconds.start;
-        let frame_time = (proc_info.clock_seconds.end.0 - proc_info.clock_seconds.start.0)
-            / proc_info.frames as f64;
+        let time_range = proc_info.clock_seconds_range();
+
+        let seconds = time_range.start;
+        let frame_time = (time_range.end.0 - time_range.start.0) / proc_info.frames as f64;
         for sample in 0..inputs[0].len() {
             if sample % 32 == 0 {
-                let seconds = seconds + ClockSeconds(sample as f64 * frame_time);
+                let seconds = seconds + DurationSeconds(sample as f64 * frame_time);
                 self.params.frequency.tick(seconds);
                 let frequency = self.params.frequency.get();
                 let q = self.params.q.get();

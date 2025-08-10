@@ -5,16 +5,16 @@ use crate::{
     node::follower::FollowerOf,
     prelude::MainBus,
 };
-use bevy::prelude::*;
+use bevy_ecs::prelude::*;
 use firewheel::{
     SilenceMask, Volume,
     channel_config::{ChannelConfig, ChannelCount, NonZeroChannelCount},
     diff::{Diff, Patch},
     dsp::volume::DEFAULT_AMP_EPSILON,
-    event::NodeEventList,
+    event::ProcEvents,
     node::{
         AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, ProcBuffers,
-        ProcInfo, ProcessStatus,
+        ProcExtra, ProcInfo, ProcessStatus,
     },
     param::smoother::{SmoothedParamBuffer, SmootherConfig},
 };
@@ -44,6 +44,8 @@ use firewheel::{
 /// The signal simply passing through [`SendNode`] is untouched, while the
 /// send output has [`SendNode::send_volume`] applied.
 #[derive(Diff, Patch, Debug, Clone, Component)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+#[cfg_attr(feature = "reflect", reflect(from_reflect = false))]
 pub struct SendNode {
     /// The send volume.
     ///
@@ -51,6 +53,7 @@ pub struct SendNode {
     pub send_volume: Volume,
 
     #[diff(skip)]
+    #[cfg_attr(feature = "reflect", reflect(ignore))]
     pub(crate) target: EdgeTarget,
 }
 
@@ -144,7 +147,7 @@ impl SendNode {
 }
 
 /// [`SendNode`]'s configuration.
-#[derive(Debug, Component, Clone)]
+#[derive(Debug, Component, Clone, PartialEq)]
 pub struct SendConfig {
     /// The number of channels in this node's direct output and send output.
     pub channels: NonZeroChannelCount,
@@ -176,7 +179,6 @@ impl AudioNode for SendNode {
                 num_outputs: ChannelCount::new(config.channels.get().get() * 2)
                     .expect("send channel count must not exceed 32"),
             })
-            .uses_events(true)
     }
 
     fn construct_processor(
@@ -209,15 +211,14 @@ struct SendProcessor {
 impl AudioNodeProcessor for SendProcessor {
     fn process(
         &mut self,
-        ProcBuffers {
-            inputs, outputs, ..
-        }: ProcBuffers,
         proc_info: &ProcInfo,
-        mut events: NodeEventList,
+        ProcBuffers { inputs, outputs }: ProcBuffers,
+        events: &mut ProcEvents,
+        _: &mut ProcExtra,
     ) -> ProcessStatus {
-        events.for_each_patch::<SendNode>(|SendNodePatch::SendVolume(v)| {
+        for SendNodePatch::SendVolume(v) in events.drain_patches::<SendNode>() {
             self.gain.set_value(v.amp_clamped(DEFAULT_AMP_EPSILON));
-        });
+        }
 
         if proc_info.in_silence_mask.all_channels_silent(inputs.len()) {
             return ProcessStatus::ClearAllOutputs;

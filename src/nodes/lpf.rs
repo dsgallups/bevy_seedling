@@ -1,19 +1,20 @@
 //! One-pole, low-pass filter.
 
-use bevy::prelude::*;
+use bevy_ecs::component::Component;
 use firewheel::{
     channel_config::{ChannelConfig, NonZeroChannelCount},
     diff::{Diff, Patch},
-    event::NodeEventList,
+    event::ProcEvents,
     node::{
         AudioNode, AudioNodeInfo, AudioNodeProcessor, ConstructProcessorContext, ProcBuffers,
-        ProcInfo, ProcessStatus,
+        ProcExtra, ProcInfo, ProcessStatus,
     },
     param::smoother::{SmoothedParam, SmootherConfig},
 };
 
 /// A one-pole, low-pass filter.
 #[derive(Diff, Patch, Debug, Clone, Component)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct LowPassNode {
     /// The cutoff frequency in hertz.
     pub frequency: f32,
@@ -26,7 +27,8 @@ impl Default for LowPassNode {
 }
 
 /// [`LowPassNode`]'s configuration.
-#[derive(Debug, Component, Clone)]
+#[derive(Debug, Component, Clone, PartialEq)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct LowPassConfig {
     /// The parameter smoothing config used for frequency.
     pub smoother_config: SmootherConfig,
@@ -53,7 +55,6 @@ impl AudioNode for LowPassNode {
                 num_inputs: config.channels.get(),
                 num_outputs: config.channels.get(),
             })
-            .uses_events(true)
     }
 
     fn construct_processor(
@@ -125,15 +126,16 @@ struct LowPassProcessor {
 impl AudioNodeProcessor for LowPassProcessor {
     fn process(
         &mut self,
-        ProcBuffers {
-            inputs, outputs, ..
-        }: ProcBuffers,
         proc_info: &ProcInfo,
-        mut events: NodeEventList,
+        ProcBuffers { inputs, outputs }: ProcBuffers,
+        events: &mut ProcEvents,
+        _: &mut ProcExtra,
     ) -> ProcessStatus {
-        events.for_each_patch::<LowPassNode>(|p| match p {
-            LowPassNodePatch::Frequency(f) => self.frequency.set_value(f.clamp(0.0, 20_000.0)),
-        });
+        for patch in events.drain_patches::<LowPassNode>() {
+            match patch {
+                LowPassNodePatch::Frequency(f) => self.frequency.set_value(f.clamp(0.0, 20_000.0)),
+            }
+        }
 
         // Actually this won't _technically_ be true, since
         // the filter may cary over a bit of energy from
