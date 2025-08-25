@@ -2,13 +2,14 @@
 
 use crate::{
     SeedlingSystems,
-    context::{AudioContext, PreStreamRestartEvent, SampleRate, StreamRestartEvent},
+    context::{PreStreamRestartEvent, SampleRate, StreamRestartEvent},
     edge::{PendingConnections, PendingEdge},
     error::SeedlingError,
-    node::{EffectId, FirewheelNode, RegisterNode},
+    node::{AudioState, DiffTimestamp, EffectId, FirewheelNode, RegisterNode},
     pool::label::PoolLabelContainer,
-    prelude::PoolLabel,
+    prelude::{AudioEvents, PoolLabel},
     sample::{OnComplete, PlaybackSettings, QueuedSample, SamplePlayer},
+    time::{Audio, AudioTime},
 };
 use bevy_app::prelude::*;
 use bevy_asset::prelude::*;
@@ -40,13 +41,14 @@ pub(crate) struct SamplePoolPlugin;
 impl Plugin for SamplePoolPlugin {
     fn build(&self, app: &mut App) {
         app.register_node::<SamplerNode>()
+            .register_node_state::<SamplerNode, SamplerState>()
             .add_systems(
                 Last,
                 (
                     (populate_pool, queue::assign_default, queue::grow_pools)
                         .chain()
                         .before(SeedlingSystems::Acquire),
-                    (poll_finished, retrieve_state)
+                    poll_finished
                         .before(SeedlingSystems::Pool)
                         .after(SeedlingSystems::Connect),
                     watch_sample_players
@@ -284,10 +286,6 @@ struct PoolSamplerOf(pub Entity);
 #[relationship_target(relationship = PoolSamplerOf, linked_spawn)]
 struct PoolSamplers(Vec<Entity>);
 
-/// A wrapper for Firewheel's sampler state.
-#[derive(Component, Clone)]
-struct SamplerStateWrapper(SamplerState);
-
 /// A sampler assignment relationships.
 ///
 /// This resides in the [`SamplerNode`] entity, pointing to the
@@ -395,9 +393,12 @@ impl Sampler {
 
         // We'll attempt to eagerly fill the state here, otherwise falling
         // back to `retrieve_state` when it's not ready.
-        if let Some(state) = world.get::<SamplerStateWrapper>(sampler).cloned() {
+        if let Some(state) = world
+            .get::<AudioState<SamplerState>>(sampler)
+            .map(|s| s.0.clone())
+        {
             let mut sampler = world.get_mut::<Sampler>(context.entity).unwrap();
-            sampler.state = Some(state.0);
+            sampler.state = Some(state);
             sampler.sample_rate = Some(sample_rate);
         }
     }
@@ -492,55 +493,48 @@ fn fetch_effect_ids(
     Ok(effect_ids)
 }
 
-fn retrieve_state(
-    q: Query<
-        (Entity, &FirewheelNode, Option<&SamplerOf>),
-        (With<SamplerNode>, Without<SamplerStateWrapper>),
-    >,
-    mut samples: Query<&mut Sampler>,
-    mut commands: Commands,
-    mut context: ResMut<AudioContext>,
-) -> Result {
-    if q.iter().len() == 0 {
-        return Ok(());
-    }
-
-    context.with(|ctx| {
-        for (entity, node_id, sampler_of) in q.iter() {
-            let Some(state) = ctx.node_state::<SamplerState>(node_id.0) else {
-                continue;
-            };
-            commands
-                .entity(entity)
-                .insert(SamplerStateWrapper(state.clone()));
-
-            // If the sampler already has an assignment, we'll need to
-            // provide the state here since it couldn't have been eagerly
-            // fetched.
-            if let Some(sampler_of) = sampler_of {
-                let mut source = samples.get_mut(sampler_of.0)?;
-                source.state = Some(state.clone());
-            }
-        }
-
-        Ok(())
-    })
-}
-
 /// A kind of specialization of [`FollowerOf`][crate::node::follower::FollowerOf] for
 /// sampler nodes.
 fn watch_sample_players(
-    mut q: Query<(&mut SamplerNode, &SamplerOf)>,
-    samples: Query<&PlaybackSettings>,
-) {
-    for (mut sampler_node, sample) in q.iter_mut() {
-        let Ok(settings) = samples.get(sample.0) else {
+    mut q: Query<(Entity, &mut SamplerNode, &mut AudioEvents, &SamplerOf)>,
+    mut samples: Query<
+        (
+            &mut PlaybackSettings,
+            &mut AudioEvents,
+            Option<&DiffTimestamp>,
+        ),
+        Without<SamplerOf>,
+    >,
+    time: Res<bevy_time::Time<Audio>>,
+    mut commands: Commands,
+) -> Result {
+    let render_range = time.render_range();
+
+    for (sampler_entity, mut sampler_node, mut events, sample) in q.iter_mut() {
+        let Ok((mut settings, mut source_events, timestamp)) = samples.get_mut(sample.0) else {
             continue;
         };
 
+        // The order here is very important!
+        // If we applied the scheduled events before this, the
+        // sampler itself would call `value_at` afterwards, meaning we'd
+        // produce incorrectly duplicated, potentially unscheduled events.
         sampler_node.playback = settings.playback;
         sampler_node.speed = settings.speed;
+
+        // TODO: consider collecting these errors
+        if source_events.active_within(render_range.start, render_range.end) {
+            source_events.value_at(render_range.start, render_range.end, settings.as_mut())?;
+        }
+        events.merge_timelines_and_clear(&mut source_events, time.now());
+
+        if let Some(timestamp) = timestamp {
+            commands.entity(sampler_entity).insert(timestamp.clone());
+            commands.entity(sample.0).remove::<DiffTimestamp>();
+        }
     }
+
+    Ok(())
 }
 
 fn spawn_chain(
@@ -728,6 +722,7 @@ fn remove_finished(
                     Sampler,
                     QueuedSample,
                     SkipTimer,
+                    AudioEvents,
                 )>();
         }
         OnComplete::Despawn => {
@@ -741,7 +736,7 @@ fn remove_finished(
 /// Automatically remove or despawn sample players when their
 /// sample has finished playing.
 fn poll_finished(
-    nodes: Query<(&SamplerNode, &SamplerOf, &SamplerStateWrapper)>,
+    nodes: Query<(&SamplerNode, &SamplerOf, &AudioState<SamplerState>)>,
     mut commands: Commands,
 ) {
     for (node, active, state) in nodes.iter() {
@@ -921,10 +916,7 @@ mod test {
             commands.spawn((
                 SamplePlayer::new(server.load("sine_440hz_1ms.wav")),
                 EmptyComponent,
-                PlaybackSettings {
-                    on_complete: OnComplete::Remove,
-                    ..Default::default()
-                },
+                PlaybackSettings::default().remove(),
                 sample_effects![LowPassNode::default()],
             ));
         });

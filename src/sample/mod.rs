@@ -1,9 +1,15 @@
 //! Audio sample components.
 
-use crate::prelude::Volume;
+use crate::{
+    node::DiffTimestamp,
+    prelude::{AudioEvents, Volume},
+    time::Audio,
+};
 use bevy_asset::Handle;
 use bevy_ecs::prelude::*;
+use bevy_math::FloatExt;
 use firewheel::{
+    clock::{DurationSeconds, InstantSeconds},
     diff::Notify,
     nodes::sampler::{PlaybackState, Playhead, RepeatMode},
 };
@@ -57,10 +63,7 @@ pub use assets::{AudioSample, SampleLoader, SampleLoaderError};
 /// ) {
 ///     commands.entity(*player).insert((
 ///         SamplePlayer::new(server.load("my_sample.wav")),
-///         PlaybackSettings {
-///             on_complete: OnComplete::Remove,
-///             ..Default::default()
-///         },
+///         PlaybackSettings::default().remove(),
 ///     ));
 /// }
 /// ```
@@ -261,6 +264,23 @@ impl SamplePlayer {
     }
 }
 
+/// We use this to, by default, ensure samples play "when they should."
+///
+/// In practice, this means that samples which take a long time to load
+/// will skip the time spent loading. If you notice this in your game,
+/// consider preloading your sound assets, or simply disable all
+/// automatic scheduling with [`ScheduleDiffing`][crate::node::ScheduleDiffing].
+pub(super) fn observe_player_insert(
+    player: Trigger<OnInsert, SamplePlayer>,
+    time: Res<bevy_time::Time<Audio>>,
+    mut commands: Commands,
+) {
+    commands
+        .entity(player.target())
+        .insert(DiffTimestamp::new(&time))
+        .insert_if_new(AudioEvents::new(&time));
+}
+
 /// Provide explicit priorities for samples.
 ///
 /// Samples with higher priorities are queued before, and cannot
@@ -333,25 +353,19 @@ pub enum OnComplete {
 ///     commands.spawn((
 ///         SamplePlayer::new(server.load("my_sample.wav")),
 ///         // You can start one second in
-///         PlaybackSettings {
-///             playback: Notify::new(PlaybackState::Play {
-///                 playhead: Some(Playhead::Seconds(1.0)),
-///             }),
-///             ..Default::default()
-///         },
+///         PlaybackSettings::default().with_playback(PlaybackState::Play {
+///             playhead: Some(Playhead::Seconds(1.0)),
+///         }),
 ///     ));
 ///
 ///     commands.spawn((
 ///         SamplePlayer::new(server.load("my_sample.wav")),
 ///         // Or even spawn with paused playback
-///         PlaybackSettings {
-///             playback: Notify::new(PlaybackState::Pause),
-///             ..Default::default()
-///         },
+///         PlaybackSettings::default().with_playback(PlaybackState::Pause),
 ///     ));
 /// }
 /// ```
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Clone)]
 #[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
 pub struct PlaybackSettings {
     /// Sets the playback state, allowing you to play, pause or stop samples.
@@ -362,6 +376,15 @@ pub struct PlaybackSettings {
     pub playback: Notify<PlaybackState>,
 
     /// Sets the playback speed.
+    ///
+    /// This is a factor, meaning `1.0` is normal speed, `2.0` is twice
+    /// as fast, and `0.5` is half as fast.
+    ///
+    /// The speed of a sample is also inherently linked to its pitch. A
+    /// sample played twice as fast will sound an octave higher
+    /// (i.e. a fair bit higher-pitched). This can be a relatively cheap way
+    /// to break up the monotony of repeated sounds. The [`RandomPitch`]
+    /// component is an easy way to get started with this technique.
     pub speed: f64,
 
     /// Determines this sample's behavior on playback completion.
@@ -369,6 +392,228 @@ pub struct PlaybackSettings {
 }
 
 impl PlaybackSettings {
+    /// Set the [`PlaybackState`].
+    pub fn with_playback(self, playback: PlaybackState) -> Self {
+        Self {
+            playback: Notify::new(playback),
+            ..self
+        }
+    }
+
+    /// Set the sample speed.
+    pub fn with_speed(self, speed: f64) -> Self {
+        Self { speed, ..self }
+    }
+
+    /// Set the [`OnComplete`] behavior.
+    pub fn with_on_complete(self, on_complete: OnComplete) -> Self {
+        Self {
+            on_complete,
+            ..self
+        }
+    }
+
+    /// Set [`PlaybackSettings::on_complete`] to [`OnComplete::Preserve`].
+    pub fn preserve(self) -> Self {
+        Self {
+            on_complete: OnComplete::Preserve,
+            ..self
+        }
+    }
+
+    /// Set [`PlaybackSettings::on_complete`] to [`OnComplete::Remove`].
+    pub fn remove(self) -> Self {
+        Self {
+            on_complete: OnComplete::Remove,
+            ..self
+        }
+    }
+
+    /// Set [`PlaybackSettings::on_complete`] to [`OnComplete::Despawn`].
+    ///
+    /// Note that this is the default value.
+    pub fn despawn(self) -> Self {
+        Self {
+            on_complete: OnComplete::Despawn,
+            ..self
+        }
+    }
+
+    /// Begin playing a sample at `time`.
+    ///
+    /// This can also be used to seek within a playing
+    /// sample by providing a [`Playhead`].
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::prelude::*;
+    /// fn play_at(time: Res<Time<Audio>>, server: Res<AssetServer>, mut commands: Commands) {
+    ///     let mut events = AudioEvents::new(&time);
+    ///     let settings = PlaybackSettings::default().with_playback(PlaybackState::Pause);
+    ///
+    ///     // Start playing exactly one second from now.
+    ///     settings.play_at(None, time.delay(DurationSeconds(1.0)), &mut events);
+    ///
+    ///     commands.spawn((
+    ///         events,
+    ///         settings,
+    ///         SamplePlayer::new(server.load("my_sample.wav")),
+    ///     ));
+    /// }
+    /// ```
+    pub fn play_at(
+        &self,
+        playhead: Option<Playhead>,
+        time: InstantSeconds,
+        events: &mut AudioEvents,
+    ) {
+        events.schedule(time, self, |settings| {
+            *settings.playback = PlaybackState::Play { playhead };
+        });
+    }
+
+    /// Pause a sample at `time`.
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::prelude::*;
+    /// fn pause(time: Res<Time<Audio>>, server: Res<AssetServer>, mut commands: Commands) {
+    ///     let mut events = AudioEvents::new(&time);
+    ///     let settings = PlaybackSettings::default();
+    ///
+    ///     // Allow the sample to start playing, but pause at exactly
+    ///     // one second from now.
+    ///     settings.pause_at(time.delay(DurationSeconds(1.0)), &mut events);
+    ///
+    ///     commands.spawn((
+    ///         events,
+    ///         settings,
+    ///         SamplePlayer::new(server.load("my_sample.wav")),
+    ///     ));
+    /// }
+    /// ```
+    pub fn pause_at(&self, time: InstantSeconds, events: &mut AudioEvents) {
+        events.schedule(time, self, |settings| {
+            *settings.playback = PlaybackState::Pause;
+        });
+    }
+
+    /// Stop a sample at `time`.
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::prelude::*;
+    /// fn stop_at(time: Res<Time<Audio>>, server: Res<AssetServer>, mut commands: Commands) {
+    ///     let mut events = AudioEvents::new(&time);
+    ///     let settings = PlaybackSettings::default();
+    ///
+    ///     // Allow the sample to start playing, but stop at exactly
+    ///     // one second from now.
+    ///     settings.stop_at(time.delay(DurationSeconds(1.0)), &mut events);
+    ///
+    ///     commands.spawn((
+    ///         events,
+    ///         settings,
+    ///         SamplePlayer::new(server.load("my_sample.wav")),
+    ///     ));
+    /// }
+    /// ```
+    pub fn stop_at(&self, time: InstantSeconds, events: &mut AudioEvents) {
+        events.schedule(time, self, |settings| {
+            *settings.playback = PlaybackState::Stop;
+        });
+    }
+
+    /// Linearly interpolate a sample's speed from its current value to `speed`.
+    ///
+    /// The interpolation uses an approximation of the average just noticeable
+    /// different (JND) for pitch to calculate how many events are required to
+    /// sound perfectly smooth. Since we are sensitive to changes in pitch,
+    /// this will usually generate many more events than volume animation.
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::prelude::*;
+    /// fn speed_to(time: Res<Time<Audio>>, server: Res<AssetServer>, mut commands: Commands) {
+    ///     let mut events = AudioEvents::new(&time);
+    ///     let settings = PlaybackSettings::default();
+    ///
+    ///     // As soon as the sample starts playing, slow it down to half its
+    ///     // speed over one second.
+    ///     settings.speed_to(0.5, DurationSeconds(1.0), &mut events);
+    ///
+    ///     commands.spawn((
+    ///         events,
+    ///         settings,
+    ///         SamplePlayer::new(server.load("my_sample.wav")),
+    ///     ));
+    /// }
+    /// ```
+    pub fn speed_to(&self, speed: f64, duration: DurationSeconds, events: &mut AudioEvents) {
+        self.speed_at(speed, events.now(), events.now() + duration, events)
+    }
+
+    /// Linearly interpolate a sample's speed from its value at `start` to `speed`.
+    ///
+    /// The interpolation uses an approximation of the average just noticeable
+    /// different (JND) for pitch to calculate how many events are required to
+    /// sound perfectly smooth. Since we are sensitive to changes in pitch,
+    /// this will usually generate many more events than volume animation.
+    ///
+    /// ```
+    /// # use bevy::prelude::*;
+    /// # use bevy_seedling::prelude::*;
+    /// fn speed_at(time: Res<Time<Audio>>, server: Res<AssetServer>, mut commands: Commands) {
+    ///     let mut events = AudioEvents::new(&time);
+    ///     let settings = PlaybackSettings::default();
+    ///
+    ///     // A second after the sample starts playing, slow it down to half its
+    ///     // speed over another second.
+    ///     settings.speed_at(
+    ///         0.5,
+    ///         time.now() + DurationSeconds(1.0),
+    ///         time.now() + DurationSeconds(2.0),
+    ///         &mut events,
+    ///     );
+    ///
+    ///     commands.spawn((
+    ///         events,
+    ///         settings,
+    ///         SamplePlayer::new(server.load("my_sample.wav")),
+    ///     ));
+    /// }
+    /// ```
+    pub fn speed_at(
+        &self,
+        speed: f64,
+        start: InstantSeconds,
+        end: InstantSeconds,
+        events: &mut AudioEvents,
+    ) {
+        let start_value = events.get_value_at(start, self);
+        let mut end_value = start_value.clone();
+        end_value.speed = speed;
+
+        // This, too, is a very rough JND estimate.
+        let pitch_span = (end_value.speed - start_value.speed).abs();
+        let total_events = (pitch_span / 0.001).max(1.0) as usize;
+        let total_events =
+            crate::node::events::max_event_rate(end.0 - start.0, 0.001).min(total_events);
+
+        events.schedule_tween(
+            start,
+            end,
+            start_value,
+            end_value,
+            total_events,
+            |a, b, t| {
+                let mut output = a.clone();
+                output.speed = a.speed.lerp(b.speed, t as f64);
+                output
+            },
+        );
+    }
+
     /// Start or resume playback.
     ///
     /// ```
@@ -427,6 +672,41 @@ impl Default for PlaybackSettings {
             }),
             speed: 1.0,
             on_complete: OnComplete::Despawn,
+        }
+    }
+}
+
+// NOTE: this is specifically designed to produce Firewheel's
+// `SamplerNodePatch` value. This is so we can leverage the event
+// scheduling system as if this were a real node.
+impl firewheel::diff::Diff for PlaybackSettings {
+    fn diff<E: firewheel::diff::EventQueue>(
+        &self,
+        baseline: &Self,
+        path: firewheel::diff::PathBuilder,
+        event_queue: &mut E,
+    ) {
+        self.playback
+            .diff(&baseline.playback, path.with(2), event_queue);
+        self.speed.diff(&baseline.speed, path.with(4), event_queue);
+    }
+}
+
+impl firewheel::diff::Patch for PlaybackSettings {
+    type Patch = firewheel::nodes::sampler::SamplerNodePatch;
+
+    fn patch(
+        data: &firewheel::event::ParamData,
+        path: &[u32],
+    ) -> std::result::Result<Self::Patch, firewheel::diff::PatchError> {
+        firewheel::nodes::sampler::SamplerNode::patch(data, path)
+    }
+
+    fn apply(&mut self, patch: Self::Patch) {
+        match patch {
+            firewheel::nodes::sampler::SamplerNodePatch::Playback(p) => self.playback = p,
+            firewheel::nodes::sampler::SamplerNodePatch::Speed(s) => self.speed = s,
+            _ => {}
         }
     }
 }

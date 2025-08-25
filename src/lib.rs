@@ -93,7 +93,7 @@
 //! arranged to ease you into `bevy_seedling`'s features.
 //!
 //! ### Playing samples
-//! - [The `SamplePlayer` type][prelude::SamplePlayer]
+//! - [The `SamplePlayer` component][prelude::SamplePlayer]
 //! - [Controlling playback][prelude::PlaybackSettings]
 //! - [The sample lifecycle][prelude::SamplePlayer#lifecycle]
 //! - [Applying effects][prelude::SamplePlayer#applying-effects]
@@ -106,11 +106,18 @@
 //!   - [Pool architecture][prelude::SamplerPool#architecture]
 //! - [The default pool][prelude::DefaultPool]
 //!
-//! ### Routing audio
-//! - [Connecting nodes][crate::edge::Connect]
-//! - [Disconnecting nodes][crate::edge::Disconnect]
-//! - [Sends][prelude::SendNode]
-//! - [The main bus][prelude::MainBus]
+//! ### The audio graph
+//! - Routing audio
+//!   - [Connecting nodes][crate::edge::Connect]
+//!   - [Disconnecting nodes][crate::edge::Disconnect]
+//!   - [Sends][prelude::SendNode]
+//!   - [The main bus][prelude::MainBus]
+//! - [Stream configuration][crate::configuration]
+//! - [Graph configuration][crate::configuration::GraphConfiguration]
+//!
+//! ### Event scheduling
+//! - [The `AudioEvents` component][crate::prelude::AudioEvents]
+//! - [The audio clock][crate::time]
 //!
 //! ### Custom nodes
 //! - [Creating and registering nodes][prelude::RegisterNode#creating-and-registering-nodes]
@@ -118,16 +125,23 @@
 //!
 //! ## Feature flags
 //!
-//! | Flag | Description | Default feature |
-//! | ---  | ----------- | --------------- |
-//! | `rand` | Enable the [`RandomPitch`][crate::prelude::RandomPitch] component. | Yes |
-//! | `wav` | Enable WAV format and PCM encoding. | Yes |
-//! | `ogg` | Enable Ogg format and Vorbis encoding. | Yes |
-//! | `mp3` | Enable mp3 format and encoding. | No |
-//! | `mkv` | Enable mkv format. | No |
-//! | `adpcm` | Enable adpcm encoding. | No |
-//! | `flac` | Enable FLAC format and encoding. | No |
-//! | `stream` | Enable CPAL input and output stream nodes. | Yes |
+//! | Flag            | Description                                | Default |
+//! | --------------- | ------------------------------------------ | ------- |
+//! | `reflect`       | Enable [`bevy_reflect`] derive macros.     | Yes     |
+//! | `rand`          | Enable the [`RandomPitch`] component.      | Yes     |
+//! | `wav`           | Enable WAV format and PCM encoding.        | Yes     |
+//! | `ogg`           | Enable Ogg format and Vorbis encoding.     | Yes     |
+//! | `mp3`           | Enable mp3 format and encoding.            | No      |
+//! | `mkv`           | Enable mkv format.                         | No      |
+//! | `adpcm`         | Enable adpcm encoding.                     | No      |
+//! | `flac`          | Enable FLAC format and encoding.           | No      |
+//! | `web_audio`     | Enable the multi-threading web backend.    | No      |
+//! | `hrtf`          | Enable HRTF Spatialization.                | No      |
+//! | `hrtf_subjects` | Enable all HRTF embedded data.             | No      |
+//! | `loudness`      | Enable LUFS analyzer node.                 | Yes     |
+//! | `stream`        | Enable CPAL input and output stream nodes. | Yes     |
+//!
+//! [`RandomPitch`]: crate::prelude::RandomPitch
 //!
 //! ## Frequently asked questions
 //!
@@ -270,8 +284,51 @@
 //! [tracks](https://docs.rs/bevy_kira_audio/latest/bevy_kira_audio/type.Audio.html),
 //! where both allow you to play sounds in the same "place" in the audio graph.
 //!
-//! [`SamplerNode`]: prelude::firewheel::nodes::sampler::SamplerNode
+//! [`SamplerNode`]: prelude::SamplerNode
+//!
+//! ### Routing
+//!
+//! Digital audio is a relentless stream of discrete values. _Routing_ allows us to
+//! direct this stream though various stages (or nodes, in Firewheel's case). Each
+//! node has some number of input and output channels, to and from which we can arbitrarily route
+//! audio.
+//!
+//! In the simplest case, we'd route the output of a source like [`SamplerNode`] directly
+//! to the graph's output. If we want to change the volume, we could insert a [`VolumeNode`]
+//! in between the sampler and the output. If we wanted to add reverb, we could also route
+//! the [`SamplerNode`] to a [`FreeverbNode`].
+//!
+//!```text
+//! ┌─────────────┐
+//! │SamplerNode  │
+//! └┬───────────┬┘
+//! ┌▽─────────┐┌▽───────────┐
+//! │VolumeNode││FreeverbNode│
+//! └┬─────────┘└┬───────────┘
+//! ┌▽───────────▽┐
+//! │GraphOutput  │
+//! └─────────────┘
+//! ```
+//!
+//! As you can see, this routing is very powerful!
+//!
+//! [`VolumeNode`]: prelude::VolumeNode
+//! [`FreeverbNode`]: prelude::FreeverbNode
+//!
+//! ### Sample
+//!
+//! In `bevy_seedling`, _sample_ primarily refers to a piece of recorded sound,
+//! like an audio file. Samples aren't limited to audio files, however; anything
+//! implementing [`SampleResource`] can work with [`AudioSample`].
+//!
+//! Note that "sample" can also refer to the individual amplitude measurements
+//! that make up a sound. "Sample rate," often 44.1kHz or 48kHz, refers to these
+//! measurements.
+//!
+//! [`SampleResource`]: firewheel::core::sample_resource::SampleResource
+//! [`AudioSample`]: prelude::AudioSample
 
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![allow(clippy::type_complexity)]
 #![expect(clippy::needless_doctest_main)]
 #![warn(missing_debug_implementations)]
@@ -286,27 +343,24 @@ use bevy_ecs::prelude::*;
 use context::AudioStreamConfig;
 use firewheel::{CpalBackend, backend::AudioBackend, dsp::pan_law::PanLaw};
 
+// We re-export Firewheel here for convenience.
+pub use firewheel;
+
 pub mod configuration;
 pub mod context;
 pub mod edge;
-mod entity_set;
 pub mod error;
-pub mod fixed_vec;
 pub mod node;
 pub mod nodes;
-pub mod perceptual_volume;
 pub mod pool;
 pub mod sample;
 pub mod spatial;
-pub mod timeline;
-
-#[cfg(any(feature = "profiling", test))]
-pub mod profiling;
+pub mod time;
+pub mod utils;
 
 pub mod prelude {
     //! All `bevy_seedlings`'s important types and traits.
 
-    pub use crate::SeedlingPlugin;
     pub use crate::configuration::{
         GraphConfiguration, InputDeviceInfo, MusicPool, OutputDeviceInfo, SeedlingStartupSystems,
         SfxBus, SpatialPool,
@@ -315,6 +369,7 @@ pub mod prelude {
     pub use crate::edge::{AudioGraphInput, AudioGraphOutput, Connect, Disconnect, EdgeTarget};
     pub use crate::node::{
         FirewheelNode, RegisterNode,
+        events::{AudioEvents, VolumeFade},
         label::{MainBus, NodeLabel},
     };
     #[cfg(feature = "loudness")]
@@ -327,7 +382,6 @@ pub mod prelude {
         lpf::{LowPassConfig, LowPassNode},
         send::{SendConfig, SendNode},
     };
-    pub use crate::perceptual_volume::PerceptualVolume;
     pub use crate::pool::{
         DefaultPoolSize, PlaybackCompletionEvent, PoolCommands, PoolDespawn, PoolSize, SamplerPool,
         dynamic::DynamicBus,
@@ -341,9 +395,12 @@ pub mod prelude {
     pub use crate::spatial::{
         DefaultSpatialScale, SpatialListener2D, SpatialListener3D, SpatialScale,
     };
+    pub use crate::time::{Audio, AudioTime};
+    pub use crate::utils::perceptual_volume::PerceptualVolume;
+    pub use crate::{SeedlingPlugin, SeedlingSystems};
 
     pub use firewheel::{
-        self, CpalBackend, FirewheelConfig, Volume,
+        CpalBackend, FirewheelConfig, Volume,
         channel_config::{ChannelCount, NonZeroChannelCount},
         clock::{
             DurationMusical, DurationSamples, DurationSeconds, InstantMusical, InstantSamples,
@@ -505,6 +562,8 @@ where
         app.insert_resource(context::AudioStreamConfig::<B>(self.stream_config.clone()))
             .insert_resource(configuration::ConfigResource(self.graph_config))
             .init_resource::<edge::NodeMap>()
+            .init_resource::<node::ScheduleDiffing>()
+            .init_resource::<node::AudioScheduleLookahead>()
             .init_resource::<node::PendingRemovals>()
             .init_resource::<pool::DefaultPoolSize>()
             .init_asset::<sample::AudioSample>()
@@ -541,13 +600,16 @@ where
                 .run_if(resource_changed_without_insert::<AudioStreamConfig<B>>),
         )
         .add_observer(node::label::NodeLabels::on_add_observer)
-        .add_observer(node::label::NodeLabels::on_replace_observer);
+        .add_observer(node::label::NodeLabels::on_replace_observer)
+        .add_observer(sample::observe_player_insert);
 
         app.add_plugins((
             configuration::SeedlingStartup::<B>::new(self.config),
             pool::SamplePoolPlugin,
             nodes::SeedlingNodesPlugin,
+            node::events::EventsPlugin,
             spatial::SpatialPlugin,
+            time::TimePlugin,
             #[cfg(feature = "rand")]
             sample::RandomPlugin,
         ));
@@ -612,6 +674,8 @@ where
             .register_type::<SamplerPool<configuration::MusicPool>>()
             .register_type::<configuration::SpatialPool>()
             .register_type::<SamplerPool<configuration::SpatialPool>>()
+            .register_type::<node::ScheduleDiffing>()
+            .register_type::<node::AudioScheduleLookahead>()
             .register_type::<NonZeroChannelCount>()
             .register_type::<SamplerConfig>()
             .register_type::<PlaybackState>()
@@ -643,9 +707,9 @@ mod test {
         app.add_plugins((
             MinimalPlugins,
             AssetPlugin::default(),
-            SeedlingPlugin::<crate::profiling::ProfilingBackend> {
+            SeedlingPlugin::<crate::utils::profiling::ProfilingBackend> {
                 graph_config: crate::configuration::GraphConfiguration::Empty,
-                ..SeedlingPlugin::<crate::profiling::ProfilingBackend>::new()
+                ..SeedlingPlugin::<crate::utils::profiling::ProfilingBackend>::new()
             },
             TransformPlugin,
         ))

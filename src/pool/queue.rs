@@ -1,10 +1,9 @@
 use super::{
     PlaybackCompletionEvent, PoolSamplerOf, PoolSamplers, PoolShape, PoolSize, SamplerOf,
-    SamplerStateWrapper,
     sample_effects::{EffectOf, SampleEffects},
 };
 use crate::{
-    node::{EffectId, follower::FollowerOf},
+    node::{AudioState, EffectId, follower::FollowerOf},
     pool::label::PoolLabelContainer,
     prelude::DefaultPool,
     sample::{AudioSample, QueuedSample, SamplePlayer, SamplePriority, SampleQueueLifetime},
@@ -14,7 +13,7 @@ use bevy_ecs::{entity::EntityCloner, prelude::*, relationship::Relationship};
 use bevy_log::prelude::*;
 use bevy_platform::collections::HashMap;
 use bevy_time::{Stopwatch, Time};
-use firewheel::nodes::sampler::{RepeatMode, SamplerConfig, SamplerNode};
+use firewheel::nodes::sampler::{RepeatMode, SamplerConfig, SamplerNode, SamplerState};
 use std::ops::Deref;
 
 #[derive(PartialEq, Debug, Eq, PartialOrd, Ord, Copy, Clone)]
@@ -142,7 +141,7 @@ pub(super) fn assign_work(
         (
             Entity,
             &mut SamplerNode,
-            &SamplerStateWrapper,
+            &AudioState<SamplerState>,
             Option<&SamplerOf>,
         ),
         With<PoolSamplerOf>,
@@ -217,11 +216,6 @@ pub(super) fn assign_work(
                 params.sample = Some(asset.get());
                 params.volume = player.volume;
                 params.repeat_mode = player.repeat_mode;
-                // params.playback = sett
-
-                // commands
-                //     .entity(sample_entity)
-                //     .insert(crate::prelude::SampleState(state.0.clone()));
                 state.0.clear_finished();
 
                 // normalize sample effects
@@ -390,9 +384,6 @@ pub(super) fn assign_work(
             params.sample = Some(asset.get());
             params.volume = player.volume;
             params.repeat_mode = player.repeat_mode;
-            // commands
-            //     .entity(sample_entity)
-            //     .insert(crate::prelude::SampleState(state.0.clone()));
             state.0.clear_finished();
 
             // normalize sample effects

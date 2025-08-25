@@ -1,12 +1,12 @@
 //! Audio node registration and management.
 
-use std::any::TypeId;
-
 use crate::edge::NodeMap;
 use crate::error::SeedlingError;
 use crate::pool::sample_effects::EffectOf;
+use crate::time::{Audio, AudioTime};
 use crate::{SeedlingSystems, prelude::AudioContext};
 use bevy_app::prelude::*;
+use bevy_ecs::component::Components;
 use bevy_ecs::{
     component::{ComponentId, HookContext, Mutable},
     prelude::*,
@@ -14,16 +14,22 @@ use bevy_ecs::{
 };
 use bevy_log::prelude::*;
 use bevy_platform::collections::HashSet;
+use bevy_time::Time;
+use firewheel::clock::{DurationSeconds, EventInstant, InstantSeconds};
 use firewheel::error::UpdateError;
 use firewheel::{
     diff::{Diff, Patch},
     event::{NodeEvent, NodeEventType},
     node::{AudioNode, NodeID},
 };
+use std::any::TypeId;
+use std::ops::DerefMut;
 
+pub mod events;
 pub mod follower;
 pub mod label;
 
+use events::AudioEvents;
 use label::NodeLabels;
 
 /// A node's baseline instance.
@@ -32,42 +38,70 @@ use label::NodeLabels;
 #[derive(Component)]
 pub(crate) struct Baseline<T>(pub(crate) T);
 
+/// A timestamp to apply to automatically generated events.
+///
+/// This can help correctly correlate manually scheduled events with
+/// generated events when the diffing may be deferred, such as when loading
+/// sample assets.
+#[derive(Debug, Component, Clone)]
+pub struct DiffTimestamp(pub(crate) InstantSeconds);
+
+impl DiffTimestamp {
+    /// Create a new timestamp at the current instant.
+    pub fn new(time: &bevy_time::Time<Audio>) -> Self {
+        Self(time.context().instant())
+    }
+}
+
+/// A resource that enables scheduling for automatic, diff-based events.
+///
+/// Always scheduling these events can improve the correctness and
+/// stability of generated events with respect to manually scheduled ones.
+/// This can also increase the pressure on the audio thread, which may
+/// lead to worse performance.
+///
+/// This defaults to `true`.
+#[derive(Resource, Debug)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+pub struct ScheduleDiffing(pub bool);
+
+impl Default for ScheduleDiffing {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
+/// A resource that determines how soon scheduled events are sent to the
+/// audio thread.
+///
+/// `bevy_seedling` does not eagerly send all scheduled events to the audio thread.
+/// This could easily overwhelm the audio thread's event queue, especially when
+/// frequently scheduling animations.
+///
+/// Instead, scheduled events are sent when the audio clock is "close enough"
+/// to the target time. To account for potential hitches or framerate-to-audio-processing-rate
+/// mismatches, "close enough" should generally be at least a few frames in advance.
+///
+/// [`AudioScheduleLookahead`] determines this buffer period. That is for each frame, any remaining
+/// events scheduled between the start of the app and `now` + [`AudioScheduleLookahead`]
+/// are sent.
+///
+/// Defaults to `DurationSeconds(0.1)` (100ms).
+#[derive(Resource, Debug)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+pub struct AudioScheduleLookahead(pub DurationSeconds);
+
+impl Default for AudioScheduleLookahead {
+    fn default() -> Self {
+        Self(DurationSeconds(0.1))
+    }
+}
+
 /// A component that communicates an effect is present on an entity.
 ///
 /// This is used for sample pool bookkeeping.
 #[derive(Component, Clone, Copy)]
 pub(crate) struct EffectId(pub(crate) ComponentId);
-
-/// An event queue.
-///
-/// When inserted into an entity that contains a [FirewheelNode],
-/// these events will automatically be drained and sent
-/// to the audio context in the [SeedlingSystems::Flush] set.
-#[derive(Component, Default)]
-pub struct Events(Vec<NodeEventType>);
-
-// Not ideal, but we're waiting for Firewheel to implement debug.
-impl core::fmt::Debug for Events {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list()
-            .entries((0..self.0.len()).map(|_| ()))
-            .finish()
-    }
-}
-
-impl Events {
-    /// Push a new event.
-    pub fn push(&mut self, event: NodeEventType) {
-        self.0.push(event);
-    }
-
-    /// Push a custom event.
-    ///
-    /// `value` is boxed and wrapped in [NodeEventType::Custom].
-    pub fn push_custom<T: Send + Sync + 'static>(&mut self, value: T) {
-        self.0.push(NodeEventType::custom(value));
-    }
-}
 
 fn apply_patch<T: Patch>(value: &mut T, event: &NodeEventType) -> Result {
     let NodeEventType::Param { data, path } = event else {
@@ -84,19 +118,35 @@ fn apply_patch<T: Patch>(value: &mut T, event: &NodeEventType) -> Result {
     Ok(())
 }
 
-fn generate_param_events<T: Diff + Patch + Component + Clone>(
-    mut nodes: Query<(&T, &mut Baseline<T>, &mut Events), (Changed<T>, Without<EffectOf>)>,
+fn generate_param_events<T: Diff + Patch + Component<Mutability = Mutable> + Clone>(
+    mut nodes: Query<(Mut<T>, &mut Baseline<T>, &mut AudioEvents, Has<EffectOf>)>,
+    time: Res<bevy_time::Time<Audio>>,
 ) -> Result {
-    for (params, mut baseline, mut events) in nodes.iter_mut() {
-        // This ensures we only apply patches that were generated here.
-        // I'm not sure this is correct in all cases, though.
-        let starting_len = events.0.len();
+    let render_range = time.render_range();
 
-        params.diff(&baseline.0, Default::default(), &mut events.0);
+    for (mut params, mut baseline, mut events, effect) in nodes.iter_mut() {
+        if params.is_changed() && !effect {
+            // This ensures we only apply patches that were generated here.
+            // I'm not sure this is correct in all cases, though.
+            let starting_len = events.queue.len();
 
-        // Patch the baseline.
-        for event in &events.0[starting_len..] {
-            apply_patch(&mut baseline.0, event)?;
+            params.diff(&baseline.0, Default::default(), events.deref_mut());
+
+            // Patch the baseline.
+            for event in &events.queue[starting_len..] {
+                apply_patch(&mut baseline.0, event)?;
+            }
+        }
+
+        // Finally, render any scheduled change, removing any
+        // expired events.
+        events.clear_elapsed_events(render_range.start);
+        // TODO: this change-detection guarding is still more coarse than it needs to be.
+        // Often, no events within an active range will occur on a given frame.
+        if events.active_within(render_range.start, render_range.end) {
+            // TODO: consider collecting these errors
+            events.value_at(render_range.start, render_range.end, params.as_mut())?;
+            events.value_at(render_range.start, render_range.end, &mut baseline.0)?;
         }
     }
 
@@ -208,6 +258,43 @@ fn insert_baseline<T: Component + Clone>(
     Ok(())
 }
 
+/// A container for an audio node's state type.
+#[derive(Debug, Component)]
+// TODO: manage reflect
+// #[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+pub struct AudioState<T>(pub T);
+
+fn fetch_state<T, S>(
+    q: Query<(Entity, &FirewheelNode), (Changed<FirewheelNode>, With<T>)>,
+    mut context: ResMut<AudioContext>,
+    mut commands: Commands,
+) where
+    T: AudioNode + Component,
+    S: Clone + Send + Sync + 'static,
+{
+    // likely not expensive enough to matter, relative to context switching
+    if q.iter().count() == 0 {
+        return;
+    }
+
+    context.with(|context| {
+        for (entity, node) in q.iter() {
+            match context.node_state::<S>(node.0) {
+                Some(state) => {
+                    commands.entity(entity).insert(AudioState(state.clone()));
+                }
+                None => {
+                    bevy_log::error!(
+                        "Failed to fetch state `{}` for node `{}`",
+                        core::any::type_name::<S>(),
+                        core::any::type_name::<T>(),
+                    );
+                }
+            }
+        }
+    });
+}
+
 #[derive(Resource, Default)]
 struct RegisteredNodes(HashSet<TypeId>);
 
@@ -229,6 +316,18 @@ impl RegisteredConfigs {
     /// Returns `true` if the ID wasn't already present.
     fn insert<T: core::any::Any>(&mut self) -> bool {
         self.0.insert(TypeId::of::<T>())
+    }
+}
+
+#[derive(Resource, Default)]
+struct RegisteredState(HashSet<(TypeId, TypeId)>);
+
+impl RegisteredState {
+    /// Insert the `TypeId` of `T` and `U`.
+    ///
+    /// Returns `true` if the tuple wasn't already present.
+    fn insert<T: core::any::Any, U: core::any::Any>(&mut self) -> bool {
+        self.0.insert((TypeId::of::<T>(), TypeId::of::<U>()))
     }
 }
 
@@ -328,6 +427,23 @@ pub trait RegisterNode {
     fn register_simple_node<T>(&mut self) -> &mut Self
     where
         T: AudioNode<Configuration: Component + Clone + PartialEq> + Component + Clone;
+
+    /// Register a state type for an audio node.
+    ///
+    /// After a node is inserted into the audio graph, its state is fetched and
+    /// inserted on the node component in a [`AudioState`] wrapper.
+    ///
+    /// A node's state is constructed in Firewheel's [AudioNode::construct_processor]
+    /// trait method, and subsequently inserted into the audio context. Nodes like
+    /// [`SamplerNode`] and [`LoudnessNode`] use their state as a container for
+    /// atomics that communicate their current state in the audio graph.
+    ///
+    /// [`SamplerNode`]: crate::prelude::SamplerNode
+    /// [`LoudnessNode`]: crate::prelude::LoudnessNode
+    fn register_node_state<T, S>(&mut self) -> &mut Self
+    where
+        T: AudioNode + Component,
+        S: Clone + Send + Sync + 'static;
 }
 
 impl RegisterNode for App {
@@ -344,18 +460,11 @@ impl RegisterNode for App {
         let mut nodes = world.get_resource_or_init::<RegisteredNodes>();
 
         if nodes.insert::<T>() {
-            world.register_component_hooks::<T>().on_insert(
-                |mut world: DeferredWorld, context: HookContext| {
-                    let value = world.get::<T>(context.entity).unwrap().clone();
-                    world
-                        .commands()
-                        .entity(context.entity)
-                        .insert((Baseline(value), EffectId(context.component_id)));
-                },
-            );
-            world.register_required_components::<T, Events>();
+            world.add_observer(observe_node_insertion::<T>);
             world.register_required_components::<T, T::Configuration>();
         } else {
+            // TODO: we'll need to be more careful about getting type names
+            // for upstreaming.
             #[cfg(debug_assertions)]
             {
                 bevy_log::warn!(
@@ -370,6 +479,8 @@ impl RegisterNode for App {
                 "Audio node `{}` was registered more than once",
                 core::any::type_name::<T>(),
             );
+
+            return self;
         }
 
         // Different nodes may share configuration structs, so we need
@@ -401,7 +512,6 @@ impl RegisterNode for App {
         let mut nodes = world.get_resource_or_init::<RegisteredNodes>();
 
         if nodes.insert::<T>() {
-            world.register_required_components::<T, Events>();
             world.register_required_components::<T, T::Configuration>();
         } else {
             #[cfg(debug_assertions)]
@@ -418,6 +528,8 @@ impl RegisterNode for App {
                 "Audio node `{}` was registered more than once",
                 core::any::type_name::<T>(),
             );
+
+            return self;
         }
 
         // Different nodes may share configuration structs, so we need
@@ -434,6 +546,68 @@ impl RegisterNode for App {
                 .in_set(SeedlingSystems::Acquire),
         )
     }
+
+    #[cfg_attr(debug_assertions, track_caller)]
+    fn register_node_state<T, S>(&mut self) -> &mut Self
+    where
+        T: AudioNode + Component,
+        S: Clone + Send + Sync + 'static,
+    {
+        let world = self.world_mut();
+        let mut nodes = world.get_resource_or_init::<RegisteredState>();
+
+        if !nodes.insert::<T, S>() {
+            #[cfg(debug_assertions)]
+            {
+                bevy_log::warn!(
+                    "State `{}` was registered for node `{}` at {}",
+                    core::any::type_name::<S>(),
+                    core::any::type_name::<T>(),
+                    std::panic::Location::caller(),
+                );
+            }
+
+            #[cfg(not(debug_assertions))]
+            bevy_log::warn!(
+                "State `{}` registered more than once for node `{}`",
+                core::any::type_name::<S>(),
+                core::any::type_name::<T>(),
+            );
+
+            return self;
+        }
+
+        self.add_systems(
+            Last,
+            fetch_state::<T, S>
+                .after(SeedlingSystems::Acquire)
+                .before(SeedlingSystems::Connect),
+        )
+    }
+}
+
+fn observe_node_insertion<T: Component + Clone>(
+    trigger: Trigger<OnInsert, T>,
+    node: Query<&T>,
+    components: &Components,
+    time: Res<Time<Audio>>,
+    mut commands: Commands,
+) -> Result {
+    let value = node.get(trigger.target())?.clone();
+    commands
+        .entity(trigger.target())
+        .insert(EffectId(
+            components
+                .component_id::<T>()
+                .expect("`ComponentId` must be available"),
+        ))
+        .insert_if_new((
+            // Replacing the baseline could lose information.
+            Baseline(value),
+            AudioEvents::new(&time),
+        ));
+
+    Ok(())
 }
 
 /// An ECS handle for an audio node.
@@ -474,9 +648,17 @@ impl PendingRemovals {
 }
 
 pub(crate) fn flush_events(
-    mut nodes: Query<(&FirewheelNode, &mut Events)>,
+    mut nodes: Query<(
+        Entity,
+        &FirewheelNode,
+        &mut AudioEvents,
+        Option<&DiffTimestamp>,
+    )>,
     mut removals: ResMut<PendingRemovals>,
     mut context: ResMut<AudioContext>,
+    time: Res<bevy_time::Time<Audio>>,
+    should_schedule: Res<ScheduleDiffing>,
+    lookahead: Res<AudioScheduleLookahead>,
     mut commands: Commands,
 ) {
     context.with(|context| {
@@ -486,15 +668,41 @@ pub(crate) fn flush_events(
             }
         }
 
-        let now = context.audio_clock_corrected().seconds;
+        // We use the start-of-frame time here to ensure these events
+        // line up with the overall frame, even if it has already fallen
+        // behind the audio thread at this point in the frame.
+        let now = time.now();
+        let range_to_render = InstantSeconds(0.0)..now + lookahead.0;
+        for (node_entity, node, mut events, timestamp) in nodes.iter_mut() {
+            for event in events.queue.drain(..) {
+                let time = should_schedule.0.then(|| match timestamp {
+                    Some(t) => {
+                        commands.entity(node_entity).remove::<DiffTimestamp>();
+                        EventInstant::Seconds(t.0)
+                    }
+                    None => EventInstant::Seconds(now),
+                });
 
-        for (node, mut events) in nodes.iter_mut() {
-            for event in events.0.drain(..) {
                 context.queue_event(NodeEvent {
                     node_id: node.0,
                     event,
-                    time: Some(firewheel::clock::EventInstant::Seconds(now)),
+                    time,
                 });
+            }
+
+            for event in &mut events.timeline {
+                if let Err(e) =
+                    event.render(range_to_render.start, range_to_render.end, |event, time| {
+                        context.queue_event(NodeEvent {
+                            node_id: node.0,
+                            event,
+                            time: Some(EventInstant::Seconds(time)),
+                        })
+                    })
+                {
+                    // TODO: improve this
+                    bevy_log::error!("failed to apply animation patch: {e:?}");
+                }
             }
         }
 
