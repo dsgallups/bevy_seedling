@@ -730,7 +730,7 @@ mod random {
     use super::PlaybackSettings;
     use bevy_app::prelude::*;
     use bevy_ecs::prelude::*;
-    use rand::{SeedableRng, rngs::SmallRng};
+    use rand::{rngs::SmallRng, SeedableRng};
 
     pub struct RandomPlugin;
 

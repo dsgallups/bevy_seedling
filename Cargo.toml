@@ -40,15 +40,15 @@ adpcm = ["symphonium/adpcm"]
 profiling = []
 
 [dependencies]
-bevy_ecs = "0.16"
-bevy_app = "0.16"
-bevy_math = { version = "0.16", default-features = false, features = ["curve"] }
-bevy_asset = "0.16"
-bevy_transform = "0.16"
-bevy_log = "0.16"
-bevy_platform = "0.16"
-bevy_time = "0.16"
-bevy_reflect = { version = "0.16", default-features = false, features = [
+bevy_ecs = "0.17.0-rc.1"
+bevy_app = "0.17.0-rc.1"
+bevy_math = { version = "0.17.0-rc.1", default-features = false, features = ["curve"] }
+bevy_asset = "0.17.0-rc.1"
+bevy_transform = "0.17.0-rc.1"
+bevy_log = "0.17.0-rc.1"
+bevy_platform = "0.17.0-rc.1"
+bevy_time = "0.17.0-rc.1"
+bevy_reflect = { version = "0.17.0-rc.1", default-features = false, features = [
   "glam",
 ] }
 
@@ -82,7 +82,7 @@ firewheel = { version = "0.7.1", features = ["wasm-bindgen"] }
 
 [dev-dependencies]
 bevy_seedling = { path = ".", features = ["hrtf"] }
-bevy = { version = "0.16", default-features = false, features = [
+bevy = { version = "0.17.0-rc.1", default-features = false, features = [
   "bevy_debug_stepping",
   "bevy_asset",
   "bevy_state",
@@ -113,3 +113,6 @@ required-features = ["profiling"]
 
 [package.metadata.docs.rs]
 all-features = true
+
+[patch.crates-io]
+firewheel = { git = "https://github.com/dsgallups/Firewheel.git", branch = "0.17-rc1"}
