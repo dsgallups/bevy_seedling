@@ -90,6 +90,7 @@ bevy = { version = "0.17.0-rc.1", default-features = false, features = [
   "sysinfo_plugin",
   "std",
   "bevy_log",
+  "bevy_core_pipeline",
   # for examples with ui
   "bevy_text",
   "default_font",
