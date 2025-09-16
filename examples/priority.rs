@@ -50,7 +50,7 @@ fn priority(server: Res<AssetServer>, mut commands: Commands) {
 
     // We'll play the next batch after this one's done.
     last_sample.observe(
-        move |_trigger: Trigger<PlaybackCompletionEvent>,
+        move |_trigger: On<PlaybackCompletionEvent>,
               server: Res<AssetServer>,
               mut commands: Commands| {
             // In the smaller pool, with only three samplers, only the

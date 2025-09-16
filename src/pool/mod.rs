@@ -14,11 +14,8 @@ use crate::{
 use bevy_app::prelude::*;
 use bevy_asset::prelude::*;
 use bevy_ecs::{
-    component::{ComponentId, HookContext},
-    entity::EntityCloner,
-    prelude::*,
-    system::QueryLens,
-    world::DeferredWorld,
+    component::ComponentId, entity::EntityCloner, lifecycle::HookContext, prelude::*,
+    system::QueryLens, world::DeferredWorld,
 };
 use core::ops::{Deref, RangeInclusive};
 use firewheel::{
@@ -415,7 +412,7 @@ struct SamplerSnapshot {
 }
 
 fn generate_snapshots(
-    _: Trigger<PreStreamRestartEvent>,
+    _: On<PreStreamRestartEvent>,
     sample_players: Query<(Entity, Option<&Sampler>), With<SamplePlayer>>,
     mut commands: Commands,
 ) {
@@ -431,7 +428,7 @@ fn generate_snapshots(
 }
 
 fn apply_snapshots(
-    trigger: Trigger<StreamRestartEvent>,
+    trigger: On<StreamRestartEvent>,
     mut sample_players: Query<(
         Entity,
         &SamplerSnapshot,
@@ -558,7 +555,7 @@ fn spawn_chain(
 
     let effects = effects.to_vec();
     commands.queue(move |world: &mut World| -> Result {
-        let mut cloner = EntityCloner::build(world);
+        let mut cloner = EntityCloner::build_opt_out(world);
         cloner.deny::<EffectOf>();
         let mut cloner = cloner.finish();
 
@@ -692,17 +689,17 @@ fn populate_pool(
 /// played, including when its playback is set to
 /// [`PlaybackState::Stop`][crate::prelude::PlaybackState] or
 /// when it can't find space in a sampler pool.
-#[derive(Debug, Event)]
+#[derive(Debug, EntityEvent)]
 #[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
-pub struct PlaybackCompletionEvent;
+pub struct PlaybackCompletionEvent(pub Entity);
 
 /// Clean up sample resources according to their playback settings.
 fn remove_finished(
-    trigger: Trigger<PlaybackCompletionEvent>,
+    trigger: On<PlaybackCompletionEvent>,
     samples: Query<(&PlaybackSettings, &PoolLabelContainer)>,
     mut commands: Commands,
 ) -> Result {
-    let sample_entity = trigger.target();
+    let sample_entity = trigger.event_target();
     let (settings, container) = samples.get(sample_entity)?;
 
     match settings.on_complete {
@@ -743,7 +740,8 @@ fn poll_finished(
         let finished = state.0.finished() == node.playback.id();
 
         if finished {
-            commands.entity(active.0).trigger(PlaybackCompletionEvent);
+            commands.trigger(PlaybackCompletionEvent(active.0));
+            //commands.entity(active.0).trigger(PlaybackCompletionEvent);
         }
     }
 }
@@ -942,7 +940,7 @@ mod test {
 
         let archetype = entity.archetype();
 
-        assert_eq!(archetype.components().count(), 1);
+        assert_eq!(archetype.components().len(), 1);
         assert!(entity.contains::<EmptyComponent>());
     }
 
@@ -986,7 +984,7 @@ mod test {
 
         let archetype = entity.archetype();
 
-        assert_eq!(archetype.components().count(), 1);
+        assert_eq!(archetype.components().len(), 1);
         assert!(entity.contains::<EmptyComponent>());
     }
 }

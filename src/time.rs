@@ -29,7 +29,7 @@
 
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use bevy_time::{Time, TimeSystem};
+use bevy_time::{Time, TimeSystems};
 use firewheel::clock::{DurationSeconds, InstantSeconds};
 use std::time::Duration;
 
@@ -40,7 +40,7 @@ pub(crate) struct TimePlugin;
 impl Plugin for TimePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Time<Audio>>()
-            .add_systems(First, update_time.in_set(TimeSystem));
+            .add_systems(First, update_time.in_set(TimeSystems));
     }
 }
 

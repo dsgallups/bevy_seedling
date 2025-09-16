@@ -127,7 +127,7 @@ fn update_dynamic_pools(
 
                 let effects: Vec<_> = sample_effects.iter().collect();
                 commands.queue(move |world: &mut World| {
-                    let mut cloner = EntityCloner::build(world);
+                    let mut cloner = EntityCloner::build_opt_out(world);
                     cloner.deny::<EffectOf>();
                     let mut cloner = cloner.finish();
 

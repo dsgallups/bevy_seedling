@@ -60,7 +60,7 @@ fn setup(mut master: Single<&mut VolumeNode, With<MainBus>>, mut commands: Comma
             border: UiRect::axes(Val::Px(2.0), Val::Px(2.0)),
             ..default()
         },
-        BorderColor(Color::srgb(0.9, 0.9, 0.9)),
+        BorderColor::all(Color::srgb(0.9, 0.9, 0.9)),
         BorderRadius::all(Val::Px(25.0)),
         children![
             text((
@@ -77,7 +77,7 @@ fn setup(mut master: Single<&mut VolumeNode, With<MainBus>>, mut commands: Comma
 }
 
 fn play_music(
-    _: Trigger<Pointer<Click>>,
+    _: On<Pointer<Click>>,
     playing: Query<(), (With<MusicPool>, With<SamplePlayer>)>,
     mut commands: Commands,
     server: Res<AssetServer>,
@@ -95,7 +95,7 @@ fn play_music(
     ));
 }
 
-fn play_sfx(_: Trigger<Pointer<Click>>, mut commands: Commands, server: Res<AssetServer>) {
+fn play_sfx(_: On<Pointer<Click>>, mut commands: Commands, server: Res<AssetServer>) {
     let source = server.load("caw.ogg");
 
     // The default pool is routed to the `SfxBus`, so we don't
@@ -124,11 +124,11 @@ fn decrement_volume(volume: Volume) -> Volume {
 }
 
 // Master
-fn lower_master(_: Trigger<Pointer<Click>>, mut master: Single<&mut VolumeNode, With<MainBus>>) {
+fn lower_master(_: On<Pointer<Click>>, mut master: Single<&mut VolumeNode, With<MainBus>>) {
     master.volume = decrement_volume(master.volume);
 }
 
-fn raise_master(_: Trigger<Pointer<Click>>, mut master: Single<&mut VolumeNode, With<MainBus>>) {
+fn raise_master(_: On<Pointer<Click>>, mut master: Single<&mut VolumeNode, With<MainBus>>) {
     master.volume = increment_volume(master.volume);
 }
 
@@ -143,14 +143,14 @@ fn update_master_volume_label(
 
 // Music
 fn lower_music(
-    _: Trigger<Pointer<Click>>,
+    _: On<Pointer<Click>>,
     mut music: Single<&mut VolumeNode, With<SamplerPool<MusicPool>>>,
 ) {
     music.volume = decrement_volume(music.volume);
 }
 
 fn raise_music(
-    _: Trigger<Pointer<Click>>,
+    _: On<Pointer<Click>>,
     mut music: Single<&mut VolumeNode, With<SamplerPool<MusicPool>>>,
 ) {
     music.volume = increment_volume(music.volume);
@@ -166,11 +166,11 @@ fn update_music_volume_label(
 }
 
 // SFX
-fn lower_sfx(_: Trigger<Pointer<Click>>, mut sfx: Single<&mut VolumeNode, With<SfxBus>>) {
+fn lower_sfx(_: On<Pointer<Click>>, mut sfx: Single<&mut VolumeNode, With<SfxBus>>) {
     sfx.volume = decrement_volume(sfx.volume);
 }
 
-fn raise_sfx(_: Trigger<Pointer<Click>>, mut sfx: Single<&mut VolumeNode, With<SfxBus>>) {
+fn raise_sfx(_: On<Pointer<Click>>, mut sfx: Single<&mut VolumeNode, With<SfxBus>>) {
     sfx.volume = increment_volume(sfx.volume);
 }
 
@@ -265,7 +265,7 @@ struct SfxVolumeLabel;
 
 pub fn btn<E, B, M, I>(t: impl Into<String>, action: I) -> impl Bundle
 where
-    E: Event,
+    E: EntityEvent,
     B: Bundle,
     I: IntoObserverSystem<E, B, M>,
 {
@@ -279,7 +279,7 @@ where
             parent
                 .spawn((
                     Button,
-                    BorderColor(Color::WHITE),
+                    BorderColor::all(Color::WHITE),
                     children![Name::new("Button text"), text(Text(t))],
                 ))
                 .observe(action);
@@ -324,7 +324,7 @@ fn knob_label(label: impl Component) -> impl Bundle {
                 ..Default::default()
             },
             TextLayout {
-                justify: JustifyText::Center,
+                justify: Justify::Center,
                 ..Default::default()
             },
             label

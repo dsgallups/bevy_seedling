@@ -144,15 +144,15 @@ pub struct NodeLabels(SmallVec<[InternedNodeLabel; 1]>);
 
 impl NodeLabels {
     pub(crate) fn on_add_observer(
-        trigger: Trigger<OnInsert, NodeLabels>,
+        trigger: On<Insert, NodeLabels>,
         labels: Query<&NodeLabels>,
         mut map: ResMut<NodeMap>,
     ) -> Result {
-        let labels = labels.get(trigger.target())?;
+        let labels = labels.get(trigger.event_target())?;
 
         for label in labels.iter() {
-            if let Some(existing) = map.insert(*label, trigger.target()) {
-                if existing != trigger.target() {
+            if let Some(existing) = map.insert(*label, trigger.event_target()) {
+                if existing != trigger.event_target() {
                     warn!("node label `{label:?}` has been applied to multiple entities");
                 }
             }
@@ -162,11 +162,11 @@ impl NodeLabels {
     }
 
     pub(crate) fn on_replace_observer(
-        trigger: Trigger<OnReplace, NodeLabels>,
+        trigger: On<Replace, NodeLabels>,
         labels: Query<&NodeLabels>,
         mut map: ResMut<NodeMap>,
     ) -> Result {
-        let labels = labels.get(trigger.target())?;
+        let labels = labels.get(trigger.event_target())?;
 
         for label in labels.iter() {
             map.remove(label);

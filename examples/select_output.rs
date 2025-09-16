@@ -73,12 +73,12 @@ fn select_output(
 }
 
 fn observe_selection(
-    trigger: Trigger<OnAdd, SelectedOutput>,
+    trigger: On<Add, SelectedOutput>,
     outputs: Query<&OutputDeviceInfo>,
     mut text: Query<&mut Text, With<SelectedTextNode>>,
     mut stream: ResMut<AudioStreamConfig>,
 ) -> Result {
-    let output = outputs.get(trigger.target())?;
+    let output = outputs.get(trigger.event_target())?;
 
     stream.0.output.device_name = Some(output.name.clone());
 
@@ -93,7 +93,7 @@ fn observe_selection(
 }
 
 fn observe_init(
-    trigger: Trigger<StreamStartEvent>,
+    trigger: On<StreamStartEvent>,
     mut text: Query<&mut Text, With<SampleRateNode>>,
 ) -> Result {
     let new_text = format!("Sample rate: {}", trigger.sample_rate.get());
@@ -103,7 +103,7 @@ fn observe_init(
 }
 
 fn observe_restart(
-    trigger: Trigger<StreamRestartEvent>,
+    trigger: On<StreamRestartEvent>,
     mut text: Query<&mut Text, With<SampleRateNode>>,
 ) -> Result {
     let new_text = format!("Sample rate: {}", trigger.current_rate.get());
@@ -137,7 +137,7 @@ fn set_up_ui(mut commands: Commands) {
             border: UiRect::axes(Val::Px(2.0), Val::Px(2.0)),
             ..default()
         },
-        BorderColor(Color::srgb(0.9, 0.9, 0.9)),
+        BorderColor::all(Color::srgb(0.9, 0.9, 0.9)),
         BorderRadius::all(Val::Px(25.0)),
         children![
             (
@@ -152,7 +152,7 @@ fn set_up_ui(mut commands: Commands) {
                     "Use the arrow keys to swap output devices.\nUse the spacebar to play sounds."
                 ),
                 TextLayout {
-                    justify: JustifyText::Center,
+                    justify: Justify::Center,
                     ..Default::default()
                 }
             ),

@@ -7,8 +7,9 @@ use crate::time::{Audio, AudioTime};
 use crate::{SeedlingSystems, prelude::AudioContext};
 use bevy_app::prelude::*;
 use bevy_ecs::component::Components;
+use bevy_ecs::lifecycle::HookContext;
 use bevy_ecs::{
-    component::{ComponentId, HookContext, Mutable},
+    component::{ComponentId, Mutable},
     prelude::*,
     world::DeferredWorld,
 };
@@ -246,13 +247,13 @@ fn acquire_id<T>(
 }
 
 fn insert_baseline<T: Component + Clone>(
-    trigger: Trigger<OnInsert, T>,
+    trigger: On<Insert, T>,
     q: Query<&T>,
     mut commands: Commands,
 ) -> Result {
-    let value = q.get(trigger.target())?;
+    let value = q.get(trigger.event_target())?;
     commands
-        .entity(trigger.target())
+        .entity(trigger.event_target())
         .insert(Baseline(value.clone()));
 
     Ok(())
@@ -587,15 +588,15 @@ impl RegisterNode for App {
 }
 
 fn observe_node_insertion<T: Component + Clone>(
-    trigger: Trigger<OnInsert, T>,
+    trigger: On<Insert, T>,
     node: Query<&T>,
     components: &Components,
     time: Res<Time<Audio>>,
     mut commands: Commands,
 ) -> Result {
-    let value = node.get(trigger.target())?.clone();
+    let value = node.get(trigger.event_target())?.clone();
     commands
-        .entity(trigger.target())
+        .entity(trigger.event_target())
         .insert(EffectId(
             components
                 .component_id::<T>()

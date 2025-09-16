@@ -282,7 +282,7 @@ pub(super) fn assign_work(
                                     .add_related::<EffectOf>(&new_effects);
 
                                 commands.queue(move |world: &mut World| {
-                                    let mut cloner = EntityCloner::build(world);
+                                    let mut cloner = EntityCloner::build_opt_out(world);
                                     cloner.deny::<EffectOf>();
                                     let mut cloner = cloner.finish();
 
@@ -295,7 +295,7 @@ pub(super) fn assign_work(
                         None => {
                             let pool_effects: Vec<_> = pool_effects.iter().collect();
                             commands.queue(move |world: &mut World| {
-                                let mut cloner = EntityCloner::build(world);
+                                let mut cloner = EntityCloner::build_opt_out(world);
                                 cloner.deny::<EffectOf>();
                                 let mut cloner = cloner.finish();
 
@@ -450,7 +450,7 @@ pub(super) fn assign_work(
                                 .add_related::<EffectOf>(&new_effects);
 
                             commands.queue(move |world: &mut World| {
-                                let mut cloner = EntityCloner::build(world);
+                                let mut cloner = EntityCloner::build_opt_out(world);
                                 cloner.deny::<EffectOf>();
                                 let mut cloner = cloner.finish();
 
@@ -463,7 +463,7 @@ pub(super) fn assign_work(
                     None => {
                         let pool_effects: Vec<_> = pool_effects.iter().collect();
                         commands.queue(move |world: &mut World| {
-                            let mut cloner = EntityCloner::build(world);
+                            let mut cloner = EntityCloner::build_opt_out(world);
                             cloner.deny::<EffectOf>();
                             let mut cloner = cloner.finish();
 
@@ -537,9 +537,7 @@ pub(super) fn tick_skipped(
         if timer.0.tick(delta).elapsed() >= lifetime.0 {
             debug!("skipping sample {:?} after {:?}", sample_entity, lifetime.0,);
 
-            commands
-                .entity(sample_entity)
-                .trigger(PlaybackCompletionEvent);
+            commands.trigger(PlaybackCompletionEvent(sample_entity));
         }
     }
 }

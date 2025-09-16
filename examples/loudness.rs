@@ -54,7 +54,7 @@ fn monitor(loudness: Single<&AudioState<LoudnessState>>) {
 
 /// We'll replay the sound and reset the analyzer on completion.
 fn on_complete(
-    _: Trigger<PlaybackCompletionEvent>,
+    _: On<PlaybackCompletionEvent>,
     mut loudness: Single<&mut LoudnessNode>,
     mut commands: Commands,
     server: Res<AssetServer>,

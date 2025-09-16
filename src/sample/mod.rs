@@ -271,12 +271,12 @@ impl SamplePlayer {
 /// consider preloading your sound assets, or simply disable all
 /// automatic scheduling with [`ScheduleDiffing`][crate::node::ScheduleDiffing].
 pub(super) fn observe_player_insert(
-    player: Trigger<OnInsert, SamplePlayer>,
+    player: On<Insert, SamplePlayer>,
     time: Res<bevy_time::Time<Audio>>,
     mut commands: Commands,
 ) {
     commands
-        .entity(player.target())
+        .entity(player.event_target())
         .insert(DiffTimestamp::new(&time))
         .insert_if_new(AudioEvents::new(&time));
 }
@@ -730,7 +730,7 @@ mod random {
     use super::PlaybackSettings;
     use bevy_app::prelude::*;
     use bevy_ecs::prelude::*;
-    use rand::{rngs::SmallRng, SeedableRng};
+    use rand::{SeedableRng, rngs::SmallRng};
 
     pub struct RandomPlugin;
 

@@ -94,6 +94,6 @@ fn fade_out(
     Ok(())
 }
 
-fn on_complete(_: Trigger<PlaybackCompletionEvent>) {
+fn on_complete(_: On<PlaybackCompletionEvent>) {
     info!("Playback complete!");
 }

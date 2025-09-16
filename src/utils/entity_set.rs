@@ -82,6 +82,10 @@ impl RelationshipSourceCollection for EntitySet {
         }
     }
 
+    fn extend_from_iter(&mut self, entities: impl IntoIterator<Item = Entity>) {
+        self.0.extend(entities);
+    }
+
     fn len(&self) -> usize {
         self.0.len()
     }

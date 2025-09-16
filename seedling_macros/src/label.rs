@@ -17,7 +17,7 @@ pub fn derive_node_label_inner(input: TokenStream) -> syn::Result<TokenStream2> 
 
             #[allow(unused_variables)]
             fn on_insert() -> Option<#bevy_ecs::lifecycle::ComponentHook> {
-                Some(|mut world: #bevy_ecs::world::DeferredWorld, context: #bevy_ecs::component::HookContext| {
+                Some(|mut world: #bevy_ecs::world::DeferredWorld, context: #bevy_ecs::lifecycle::HookContext| {
                     let value = world.get::<Self>(context.entity).unwrap();
                     let interned = <Self as #label_path>::intern(value);
 
@@ -59,7 +59,7 @@ pub fn derive_pool_label_inner(input: TokenStream) -> syn::Result<TokenStream2> 
 
             #[allow(unused_variables)]
             fn on_insert() -> Option<#bevy_ecs::lifecycle::ComponentHook> {
-                Some(|mut world: #bevy_ecs::world::DeferredWorld, context: #bevy_ecs::component::HookContext| {
+                Some(|mut world: #bevy_ecs::world::DeferredWorld, context: #bevy_ecs::lifecycle::HookContext| {
                     let value = world.get::<Self>(context.entity).unwrap();
                     let container = ::bevy_seedling::pool::label::PoolLabelContainer::new(value, context.component_id);
 

@@ -227,7 +227,10 @@ where
     /// }
     /// # }
     /// ```
-    fn get_effect(&self, effects: &SampleEffects) -> Result<ROQueryItem<'_, D>, EffectsQueryError>;
+    fn get_effect(
+        &self,
+        effects: &SampleEffects,
+    ) -> Result<ROQueryItem<'_, '_, D>, EffectsQueryError>;
 
     /// Get a mutable reference to a single effect.
     ///
@@ -252,8 +255,10 @@ where
     /// }
     /// # }
     /// ```
-    fn get_effect_mut(&mut self, effects: &SampleEffects)
-    -> Result<D::Item<'_>, EffectsQueryError>;
+    fn get_effect_mut(
+        &mut self,
+        effects: &SampleEffects,
+    ) -> Result<D::Item<'_, '_>, EffectsQueryError>;
 
     /// Iterate over all effects entities that match the query.
     ///
@@ -307,7 +312,10 @@ where
     D: QueryData,
     F: QueryFilter,
 {
-    fn get_effect(&self, effects: &SampleEffects) -> Result<ROQueryItem<'_, D>, EffectsQueryError> {
+    fn get_effect(
+        &self,
+        effects: &SampleEffects,
+    ) -> Result<ROQueryItem<'_, '_, D>, EffectsQueryError> {
         if self.iter_many_unique(effects.iter()).count() > 1 {
             return Err(EffectsQueryError::MatchedMultiple);
         }
@@ -320,7 +328,7 @@ where
     fn get_effect_mut(
         &mut self,
         effects: &SampleEffects,
-    ) -> Result<D::Item<'_>, EffectsQueryError> {
+    ) -> Result<D::Item<'_, '_>, EffectsQueryError> {
         if self.iter_many_unique(effects.iter()).count() > 1 {
             return Err(EffectsQueryError::MatchedMultiple);
         }

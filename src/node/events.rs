@@ -3,7 +3,7 @@
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_math::FloatExt;
-use bevy_time::{Time, TimeSystem};
+use bevy_time::{Time, TimeSystems};
 use core::sync::atomic::AtomicU64;
 use firewheel::{
     Volume,
@@ -19,7 +19,7 @@ pub(crate) struct EventsPlugin;
 
 impl Plugin for EventsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(First, update_events_instant.after(TimeSystem));
+        app.add_systems(First, update_events_instant.after(TimeSystems));
     }
 }
 
