@@ -116,3 +116,4 @@ all-features = true
 
 [patch.crates-io]
 firewheel = { git = "https://github.com/dsgallups/Firewheel.git", branch = "0.17-rc1"}
+firewheel-ircam-hrtf = { git = "https://github.com/dsgallups/firewheel-ircam-hrtf.git", branch = "0.17-rc1"}
