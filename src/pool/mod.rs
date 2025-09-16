@@ -741,7 +741,6 @@ fn poll_finished(
 
         if finished {
             commands.trigger(PlaybackCompletionEvent(active.0));
-            //commands.entity(active.0).trigger(PlaybackCompletionEvent);
         }
     }
 }
