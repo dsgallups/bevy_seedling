@@ -282,7 +282,7 @@ pub(super) fn assign_work(
                                     .add_related::<EffectOf>(&new_effects);
 
                                 commands.queue(move |world: &mut World| {
-                                    let mut cloner = EntityCloner::build(world);
+                                    let mut cloner = EntityCloner::build_opt_out(world);
                                     cloner.deny::<EffectOf>();
                                     let mut cloner = cloner.finish();
 
@@ -295,7 +295,7 @@ pub(super) fn assign_work(
                         None => {
                             let pool_effects: Vec<_> = pool_effects.iter().collect();
                             commands.queue(move |world: &mut World| {
-                                let mut cloner = EntityCloner::build(world);
+                                let mut cloner = EntityCloner::build_opt_out(world);
                                 cloner.deny::<EffectOf>();
                                 let mut cloner = cloner.finish();
 
@@ -343,6 +343,7 @@ pub(super) fn assign_work(
 
             sampler_scores.push((
                 sampler_entity,
+                assignment.map(|s| s.0),
                 SamplerScore {
                     priority,
                     raw_score,
@@ -352,7 +353,7 @@ pub(super) fn assign_work(
             ));
         }
 
-        sampler_scores.sort_by_key(|pair| pair.1);
+        sampler_scores.sort_by_key(|pair| pair.2);
 
         // then sort the queued samples
         queued_samples.sort_by_key(|s| {
@@ -362,7 +363,7 @@ pub(super) fn assign_work(
             )
         });
 
-        for ((sampler_entity, sampler_score), queued) in
+        for ((sampler_entity, current_assignment, sampler_score), queued) in
             sampler_scores.into_iter().zip(queued_samples.into_iter())
         {
             let (sample_entity, player, asset, sample_effects, priority) = queued;
@@ -450,7 +451,7 @@ pub(super) fn assign_work(
                                 .add_related::<EffectOf>(&new_effects);
 
                             commands.queue(move |world: &mut World| {
-                                let mut cloner = EntityCloner::build(world);
+                                let mut cloner = EntityCloner::build_opt_out(world);
                                 cloner.deny::<EffectOf>();
                                 let mut cloner = cloner.finish();
 
@@ -463,7 +464,7 @@ pub(super) fn assign_work(
                     None => {
                         let pool_effects: Vec<_> = pool_effects.iter().collect();
                         commands.queue(move |world: &mut World| {
-                            let mut cloner = EntityCloner::build(world);
+                            let mut cloner = EntityCloner::build_opt_out(world);
                             cloner.deny::<EffectOf>();
                             let mut cloner = cloner.finish();
 
@@ -486,6 +487,10 @@ pub(super) fn assign_work(
                 .entity(sample_entity)
                 .remove::<QueuedSample>()
                 .add_one_related::<SamplerOf>(sampler_entity);
+
+            if let Some(assignment) = current_assignment {
+                commands.trigger(PlaybackCompletionEvent(assignment));
+            }
         }
     }
 
@@ -537,9 +542,7 @@ pub(super) fn tick_skipped(
         if timer.0.tick(delta).elapsed() >= lifetime.0 {
             debug!("skipping sample {:?} after {:?}", sample_entity, lifetime.0,);
 
-            commands
-                .entity(sample_entity)
-                .trigger(PlaybackCompletionEvent);
+            commands.trigger(PlaybackCompletionEvent(sample_entity));
         }
     }
 }

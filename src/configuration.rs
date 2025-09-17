@@ -112,7 +112,7 @@ pub enum SeedlingStartupSystems {
 pub struct FetchAudioIoEvent;
 
 fn fetch_io<B: AudioBackend>(
-    _: Trigger<FetchAudioIoEvent>,
+    _: On<FetchAudioIoEvent>,
     existing_inputs: Query<(Entity, &InputDeviceInfo)>,
     existing_outputs: Query<(Entity, &OutputDeviceInfo)>,
     mut commands: Commands,
@@ -198,7 +198,7 @@ fn fetch_io<B: AudioBackend>(
 pub struct RestartAudioEvent;
 
 fn restart_audio(
-    _: Trigger<RestartAudioEvent>,
+    _: On<RestartAudioEvent>,
     inputs: Query<&InputDeviceInfo>,
     outputs: Query<&OutputDeviceInfo>,
     mut config: ResMut<AudioStreamConfig>,

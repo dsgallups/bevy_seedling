@@ -82,6 +82,20 @@ impl RelationshipSourceCollection for EntitySet {
         }
     }
 
+    fn extend_from_iter(&mut self, entities: impl IntoIterator<Item = Entity>) {
+        let entities = entities.into_iter();
+        if let Some(size) = entities.size_hint().1 {
+            self.0.reserve(size);
+        }
+
+        // This has O(n * m) time complexity.
+        // For a large n or m, it may be better
+        // to create a temporary hash set.
+        for entity in entities {
+            self.add(entity);
+        }
+    }
+
     fn len(&self) -> usize {
         self.0.len()
     }

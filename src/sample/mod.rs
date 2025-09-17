@@ -271,12 +271,12 @@ impl SamplePlayer {
 /// consider preloading your sound assets, or simply disable all
 /// automatic scheduling with [`ScheduleDiffing`][crate::node::ScheduleDiffing].
 pub(super) fn observe_player_insert(
-    player: Trigger<OnInsert, SamplePlayer>,
+    player: On<Insert, SamplePlayer>,
     time: Res<bevy_time::Time<Audio>>,
     mut commands: Commands,
 ) {
     commands
-        .entity(player.target())
+        .entity(player.event_target())
         .insert(DiffTimestamp::new(&time))
         .insert_if_new(AudioEvents::new(&time));
 }
@@ -628,9 +628,7 @@ impl PlaybackSettings {
     /// }
     /// ```
     pub fn play(&mut self) {
-        *self.playback = PlaybackState::Play {
-            playhead: Some(Playhead::Seconds(0.0)),
-        };
+        *self.playback = PlaybackState::Play { playhead: None };
     }
 
     /// Pause playback.
@@ -736,7 +734,7 @@ mod random {
 
     impl Plugin for RandomPlugin {
         fn build(&self, app: &mut App) {
-            app.insert_resource(PitchRngSource::new(SmallRng::from_entropy()))
+            app.insert_resource(PitchRngSource::new(SmallRng::from_os_rng()))
                 .add_systems(Last, RandomPitch::apply.before(SeedlingSystems::Acquire));
         }
     }
@@ -749,7 +747,7 @@ mod random {
 
     impl<T: rand::Rng> PitchRng for RandRng<T> {
         fn gen_pitch(&mut self, range: std::ops::Range<f64>) -> f64 {
-            self.0.gen_range(range)
+            self.0.random_range(range)
         }
     }
 
