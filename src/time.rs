@@ -35,7 +35,9 @@ use std::time::Duration;
 
 use crate::context::AudioContext;
 
-pub(crate) struct TimePlugin;
+/// Plugin that configures the [`Time<Audio>`] resource.
+#[derive(Debug)]
+pub struct TimePlugin;
 
 impl Plugin for TimePlugin {
     fn build(&self, app: &mut App) {
